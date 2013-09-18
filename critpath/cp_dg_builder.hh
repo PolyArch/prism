@@ -1,0 +1,1439 @@
+#ifndef CP_DG_BUILDER_HH
+#define CP_DG_BUILDER_HH
+
+extern int FETCH_TO_DISPATCH_STAGES;
+extern int FETCH_WIDTH;
+extern int D_WIDTH;
+extern int ISSUE_WIDTH;
+extern int EXECUTE_WIDTH;
+extern int WRITEBACK_WIDTH;
+extern int COMMIT_WIDTH;
+extern int SQUASH_WIDTH;
+extern int IQ_WIDTH;
+extern int ROB_SIZE;
+
+extern int BR_MISS_PENALTY;
+extern int IN_ORDER_BR_MISS_PENALTY;
+extern int LQ_SIZE;
+extern int SQ_SIZE;
+
+#include "cp_dep_graph.hh"
+#include "critpath.hh"
+#include <memory>
+#include "op.hh"
+
+#include "edge_table.hh"
+#include "prof.hh"
+#define MAX_FU_POOLS 10
+
+//Fake MSHRs as a functional unit
+#define MSHR_FU (MAX_FU_POOLS-1)
+#define MSHR_OPCLASS 100
+
+#include "pugixml/pugixml.hpp"
+
+extern int TraceOutputs;
+template<typename T, typename E>
+class CP_DG_Builder : public CriticalPath {
+
+public:
+  typedef dg_inst<T, E> Inst_t;
+
+  CP_DG_Builder() : CriticalPath() {
+     fuUsage.resize(MAX_FU_POOLS);
+     nodeResp.resize(MAX_FU_POOLS);
+     for(int i = 0; i < MAX_FU_POOLS; ++i) {
+       fuUsage[i][0]=0; //begining usage is 0
+       fuUsage[i][(uint64_t)-1000]=0; //end usage is 0 too (1000 to prevent overflow)
+     }
+     LQ.resize(LQ_SIZE);
+     SQ.resize(SQ_SIZE);
+     rob_head_at_dispatch=0;
+     lq_head_at_dispatch=0;
+     sq_head_at_dispatch=0;
+
+     rob_growth_rate=0;
+     avg_rob_head=20;
+  }
+
+  virtual ~CP_DG_Builder() {
+  }
+
+  void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
+    Inst_t* inst = new Inst_t(img,index);
+    std::shared_ptr<Inst_t> sh_inst(inst);
+    getCPDG()->addInst(sh_inst,index);
+    addDeps(*inst,op);
+    pushPipe(sh_inst); 
+    inserted(sh_inst,img);
+  }
+
+  virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
+    getCPDG()->pushPipe(sh_inst);
+    rob_head_at_dispatch++;
+  }
+
+  virtual dep_graph_t<Inst_t,T,E> * getCPDG() =0;
+
+  uint64_t numCycles() {
+    getCPDG()->finish(maxIndex);
+    return getCPDG()->getMaxCycles();
+  }
+
+  void printEdgeDep(Inst_t& inst, int ind, unsigned default_type1, unsigned default_type2=E_NONE) {
+      E* laEdge = inst[ind].lastArrivingEdge();
+      unsigned lae;
+      if(laEdge) {
+        lae = laEdge->type();
+        if(lae!=default_type1 && lae!=default_type2) {
+          out << edge_name[lae]; 
+          out << laEdge->len(); 
+        }
+      } 
+      out << ",";
+  }
+
+  virtual void traceOut(uint64_t index, 
+                        const CP_NodeDiskImage &img,Op* op) {
+    if(TraceOutputs) {
+      Inst_t& inst = 
+           static_cast<Inst_t&>(getCPDG()->queryNodes(index));  
+  
+      out << index + Prof::get().skipInsts << ": ";
+      out << inst.cycleOfStage(0) << " ";
+      out << inst.cycleOfStage(1) << " ";
+      out << inst.cycleOfStage(2) << " ";
+      out << inst.cycleOfStage(3) << " ";
+      out << inst.cycleOfStage(4) << " ";
+      out << inst.cycleOfStage(5) << " ";
+
+      if(img._isstore) {
+        out << inst.cycleOfStage(6) << " ";
+      }
+  
+      //out << (_isInOrder ? "io":"ooo");
+
+      printEdgeDep(inst,0,E_FF);
+      printEdgeDep(inst,1,E_FD);
+      printEdgeDep(inst,2,E_DR);
+      printEdgeDep(inst,3,E_RE);
+      printEdgeDep(inst,4,E_EP);
+      printEdgeDep(inst,5,E_PC,E_CC);
+
+      if(img._isstore) {
+        printEdgeDep(inst,6,E_WB);
+      }
+
+      out << " rs:" << rob_head_at_dispatch << "-" << (int)(rob_growth_rate*100);
+      out << " iq:" << InstQueue.size();
+
+      int lqSize = (lq_head_at_dispatch<=LQind) ? (LQind-lq_head_at_dispatch): 
+                                               (LQind-lq_head_at_dispatch+32);
+      out << " lq:" << lqSize;
+ 
+      int sqSize = (sq_head_at_dispatch<=SQind) ? (SQind-sq_head_at_dispatch): 
+                                               (SQind-sq_head_at_dispatch+32);
+      out << " sq:" << sqSize;
+
+
+      //CriticalPath::traceOut(index,img,op);
+      out << "\n";
+    }
+  }
+
+protected:
+
+  //function to add dependences onto uarch event nodes -- for the pipeline
+  virtual void addDeps(Inst_t& inst, Op* op=NULL) { 
+    setFetchCycle(inst);
+    setDispatchCycle(inst,op);
+    setReadyCycle(inst);
+    setExecuteCycle(inst);
+    setCompleteCycle(inst,op);
+    setCommittedCycle(inst);
+    setWritebackCycle(inst);
+  }
+
+  //Variables to hold dynamic state not directly expressible in graph theory
+  typedef std::multimap<uint64_t,Inst_t*> ResVec;
+  ResVec InstQueue;
+
+  typedef std::vector<std::shared_ptr<Inst_t>> ResQueue;  
+  ResQueue SQ, LQ; 
+  unsigned SQind;
+  unsigned LQind;
+ 
+  typedef std::map<uint64_t,std::vector<Inst_t*>> SingleCycleRes;
+  SingleCycleRes wbBusRes;
+  SingleCycleRes issueRes;
+
+  typedef std::map<uint64_t,int> FuUsageMap;
+  typedef std::vector<FuUsageMap> FuUsage;
+
+  typedef typename std::map<uint64_t,Inst_t*> NodeRespMap;
+  typedef typename std::vector<NodeRespMap> NodeResp;
+
+  FuUsage fuUsage;
+  NodeResp nodeResp; 
+
+  int rob_head_at_dispatch;
+  int prev_rob_head_at_dispatch;
+  int prev_squash_penalty;
+  float avg_rob_head;
+  float rob_growth_rate;
+
+  int lq_head_at_dispatch;
+  int sq_head_at_dispatch;
+
+  void cleanup() {
+    getCPDG()->cleanup();
+  }
+
+  uint64_t maxIndex;
+  uint64_t _curCycle;
+
+  virtual void inserted(std::shared_ptr<Inst_t>& inst, const CP_NodeDiskImage& img) {
+    maxIndex = inst->index();
+    _curCycle = inst->cycleOfStage(Inst_t::Fetch);
+
+    //Update Queues: IQ, LQ, SQ
+    if (inst->_isload) {
+      LQ[LQind]=inst;
+      LQind=(LQind+1)%LQ_SIZE;
+    }
+    if (inst->_isstore) {
+      SQ[SQind]=inst;
+      SQind=(SQind+1)%SQ_SIZE;
+    }
+
+    //delete irrelevent 
+    typename SingleCycleRes::iterator upperbound_sc;
+    upperbound_sc = wbBusRes.upper_bound(_curCycle);
+    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
+    upperbound_sc = issueRes.upper_bound(_curCycle);
+    issueRes.erase(issueRes.begin(),upperbound_sc); 
+
+    //upperbound = LQ.upper_bound(_curCycle);
+    //LQ.erase(LQ.begin(),upperbound);
+    //upperbound = LQ.upper_bound(_curCycle);
+    //LQ.erase(LQ.begin(),upperbound);
+
+/*
+    for (typename ResVec::iterator I = InstQueue.begin(); I != InstQueue.end();) {
+      std::shared_ptr<Inst_t> previnst = *I;
+      if (previnst->cycleOfStage(Inst_t::Execute) < _curCycle) {
+        I = InstQueue.erase(I);
+      } else {
+        ++I;
+      }
+    }*/
+
+/*
+    for (typename ResVec::iterator I=LQ.begin();I!=LQ.end();) {
+      std::shared_ptr<Inst_t> i = *I;
+      if (i->cycleOfStage(Inst_t::Commit) < _curCycle) {
+        I = LQ.erase(I);
+      } else {
+        ++I;
+      }
+    }
+
+    for (typename ResVec::iterator I = SQ.begin();I!=SQ.end();) {
+      std::shared_ptr<Inst_t> i = *I;
+      if (i->cycleOfStage(Inst_t::Commit) < _curCycle) {
+        I = SQ.erase(I);
+      } else {
+        ++I;
+      }
+    }
+  */  
+    for(FuUsage::iterator I=fuUsage.begin(),EE=fuUsage.end();I!=EE;++I) {
+      FuUsageMap& fuUseMap = *I;
+      assert(fuUseMap.size()>=2);
+      for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
+        uint64_t cycle = i->first;
+        assert(cycle!=0);
+        if (cycle + 50  < _curCycle) {
+          i = fuUseMap.erase(i);
+        } else {
+          //++i;
+          break;
+        }
+      }
+      assert(fuUseMap.size()>=2);
+    }
+    
+    for(typename NodeResp::iterator I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
+      NodeRespMap& respMap = *I;
+      for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
+        uint64_t cycle = i->first;
+        if (cycle + 50  < _curCycle) {
+          i = respMap.erase(i);
+        } else {
+          //++i;
+          break;
+        }
+      }
+    }
+
+  }
+
+  //Adds a resource to the resource utilization map.
+  Inst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
+                       Inst_t* cpnode) { 
+    int fuIndex = fuPoolIdx(opclass);
+    FuUsageMap& fuUseMap = fuUsage[fuIndex];
+    NodeRespMap& nodeRespMap = nodeResp[fuIndex];
+
+    int maxUnits = getNumFUAvailable(opclass);
+  
+    uint64_t cur_cycle=min_cycle;
+    FuUsageMap::iterator cur_cycle_iter,next_cycle_iter,last_cycle_iter;
+   
+    cur_cycle_iter = --fuUseMap.upper_bound(min_cycle);
+
+    //keep going until we find a spot .. this is gauranteed
+    while(true) {
+      assert(cur_cycle_iter->second <= maxUnits);
+      if(cur_cycle_iter->second == maxUnits) {
+        ++cur_cycle_iter;
+        cur_cycle=cur_cycle_iter->first;
+        continue;
+      }
+      //we have found a spot with less than maxUnits, now we need to check
+      //if there are enough cycles inbetween
+      assert(cur_cycle_iter->second < maxUnits);
+
+      next_cycle_iter=cur_cycle_iter;
+      bool foundSpot=false;
+      
+      while(true) {
+        ++next_cycle_iter;
+        if(next_cycle_iter->first >= cur_cycle+duration) {
+          foundSpot=true;
+          last_cycle_iter=next_cycle_iter;
+          break;
+        } else if(next_cycle_iter->second == maxUnits) {
+          //we couldn't find a spot, so increment cur_iter and restart
+          ++next_cycle_iter;
+          cur_cycle_iter=next_cycle_iter;
+          cur_cycle=cur_cycle_iter->first;
+          break;
+        }
+      }
+
+      if(foundSpot) {
+        if(cur_cycle_iter->first==cur_cycle) {
+          //if we started on time point we already have
+          cur_cycle_iter->second++;
+        } else {
+          //create new entry for this cycle
+          fuUseMap[cur_cycle]=cur_cycle_iter->second+1; 
+          cur_cycle_iter = fuUseMap.find(cur_cycle); 
+        }
+ 
+        //iterate through the others
+        ++cur_cycle_iter;
+        while(cur_cycle_iter->first < cur_cycle + duration) {
+          assert(cur_cycle_iter->second < maxUnits);
+          cur_cycle_iter->second++;
+          ++cur_cycle_iter;
+        }
+
+        //final cycle iter
+        if(cur_cycle_iter->first==cur_cycle+duration) {
+          //no need to add a new marker
+        } else {
+          //need to return to original usage here
+          --cur_cycle_iter;
+          fuUseMap[cur_cycle+duration] = cur_cycle_iter->second-1;
+          assert(fuUseMap[cur_cycle+duration]>=0);
+        }
+        
+        typename NodeRespMap::iterator respIter = nodeRespMap.find(cur_cycle);
+
+        nodeRespMap[cur_cycle+duration]=cpnode;
+
+        if(respIter == nodeRespMap.end() || min_cycle == cur_cycle) {
+          return NULL;
+        } else {
+          return respIter->second;
+        }
+        
+      }
+    }
+    assert(0);
+    return NULL;
+  }
+
+  virtual void setFetchCycle(Inst_t &inst) {
+    checkFBW(inst);
+    //checkICache(inst);
+    checkPipeStalls(inst);
+    checkControlMispeculate(inst);
+    checkFF(inst);
+
+    //-----FETCH ENERGY-------
+    //Need to get ICACHE accesses somehow
+    if(inst._icache_lat>0) {
+      icache_read_accesses++;
+    }
+    if(inst._icache_lat>1) {
+      icache_read_misses++;
+    }
+
+
+
+    if(_isInOrder) {
+//      checkBranchPredict(inst,op); //just control dependence
+    } else {
+      //checkIQStalls(inst);
+      //checkLSQStalls(inst);
+    }
+  }
+
+  virtual void setDispatchCycle(Inst_t &inst, Op* op) {
+    checkFD(inst);
+    checkDD(inst);
+    checkDBW(inst);
+    checkSerializing(inst);
+
+    if(_isInOrder) {
+      //nothing
+    } else {
+      checkROBSize(inst); //Finite Rob Size
+      checkIQStalls(inst);
+      checkLSQSize(inst);
+
+      // ------ ENERGY EVENTS -------
+      if(inst._floating) {
+        iw_fwrites++;
+      } else {
+        iw_writes++;
+      }
+
+      if(op != NULL && op->numUses() > 0) {
+        if(inst._floating) {
+          rename_fwrites++;
+        } else {
+          rename_writes++;
+        }
+      }
+
+    }
+
+    //HANDLE ROB STUFF
+    uint64_t dispatch_cycle = inst.cycleOfStage(Inst_t::Dispatch);
+    do {
+      Inst_t* depInst = getCPDG()->peekPipe(-rob_head_at_dispatch);
+      if(!depInst) {
+        break;
+      }
+      if(depInst->cycleOfStage(Inst_t::Commit) < dispatch_cycle ) {
+        rob_head_at_dispatch--;
+      } else {
+        break;
+      }
+    } while(rob_head_at_dispatch>=1);
+
+    avg_rob_head = 0.01 * rob_head_at_dispatch + 
+                   0.99 * avg_rob_head;
+
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(depInst==0 || !depInst->_ctrl_miss) { 
+      rob_growth_rate = 0.92f * rob_growth_rate
+                      + 0.08f * (rob_head_at_dispatch - prev_rob_head_at_dispatch); 
+    } else {
+      rob_growth_rate=0;
+    }
+
+    prev_rob_head_at_dispatch=rob_head_at_dispatch;
+
+    //HANDLE LSQ HEADS
+    //Loads leave at complete
+    do {
+      Inst_t* depInst = LQ[lq_head_at_dispatch].get();
+      if(!depInst) {
+        break;
+      }
+      if(depInst->cycleOfStage(Inst_t::Complete) < dispatch_cycle ) {
+        lq_head_at_dispatch+=1;
+        lq_head_at_dispatch%=LQ_SIZE; 
+      } else {
+        break;
+      }
+    } while(lq_head_at_dispatch!=LQind);
+
+    do {
+      Inst_t* depInst = SQ[sq_head_at_dispatch].get();
+      if(!depInst) {
+        break;
+      }
+      if(depInst->cycleOfStage(Inst_t::Writeback) < dispatch_cycle ) {
+        sq_head_at_dispatch+=1;
+        sq_head_at_dispatch%=SQ_SIZE; 
+      } else {
+        break;
+      }
+    } while(sq_head_at_dispatch!=SQind);
+  
+  }
+  
+
+  virtual void setReadyCycle(Inst_t &inst) {
+    checkDR(inst);
+    checkNonSpeculative(inst);
+    checkDataDep(inst);
+    if(_isInOrder) {
+      checkExecutePipeStalls(inst);
+    } else {
+      //no other barriers
+    }
+  }
+
+  virtual void setExecuteCycle(Inst_t &inst) {
+    checkRE(inst);
+
+    if(_isInOrder) {
+      checkEE(inst); //issue in order
+      checkInorderIssueWidth(inst); //in order issue width
+    } else {
+      checkIssueWidth(inst);
+      checkFuncUnits(inst);
+
+      if(inst._isload) {
+        //loads acquire MSHR at execute
+        checkNumMSHRs(inst,false);
+      }
+
+      //Non memory instructions can leave the IQ now!
+      //Push onto the IQ by cycle that we leave IQ (execute cycle)
+      if(!inst.isMem()) {
+        InstQueue.insert(
+               std::make_pair(inst.cycleOfStage(Inst_t::Execute),&inst));
+      }
+    }
+    if(inst._floating) {
+      iw_freads++;
+    } else {
+      iw_reads++;
+    }
+  }
+
+  virtual void setCompleteCycle(Inst_t &inst, Op* op) {
+    checkEP(inst);
+    if (!_isInOrder) {
+      //checkPP(inst);
+      checkWriteBackWidth(inst);
+
+      //Memory instructions can leave the IQ now!
+      //Push onto the IQ by cycle that we leave IQ (complete cycle)
+      if(inst.isMem()) {
+        InstQueue.insert(
+               std::make_pair(inst.cycleOfStage(Inst_t::Complete),&inst));
+      }
+    } else {
+      //checkExecutePipeline
+    }
+
+    //Energy Events
+    if(op && op->numUses()>0) {
+      if( inst._floating) {
+        regfile_fwrites++;
+      } else {
+        regfile_writes++;
+      }
+    }
+
+
+  }
+  virtual void setCommittedCycle(Inst_t &inst) {
+    checkPC(inst);
+    if(!_isInOrder) {
+      checkSquashPenalty(inst);
+    }
+    checkCC(inst);
+    checkCBW(inst);
+ 
+    getCPDG()->commitNode(inst.index());
+
+    //Energy
+    rob_writes+=2;
+    rob_reads++;
+
+    //Calculate extra rob_reads due to the pipeline checking extra instructions
+    //before it fills up the commit width
+    Inst_t* prevInst = getCPDG()->peekPipe(-1); 
+    Inst_t* widthInst = getCPDG()->peekPipe(-COMMIT_WIDTH); 
+    if(prevInst && widthInst) {
+      uint64_t widthCycle = widthInst->cycleOfStage(Inst_t::Commit);
+      uint64_t prevCycle = prevInst->cycleOfStage(Inst_t::Commit);
+      uint64_t curCycle = inst.cycleOfStage(Inst_t::Commit);
+      if(prevCycle!=curCycle && widthCycle + 1 != curCycle) {
+        rob_reads+=curCycle-prevCycle;
+      }
+    }
+
+    committed_insts++;
+    committed_int_insts+=!inst._floating;
+    committed_fp_insts+=inst._floating;
+    committed_branch_insts+=inst._isctrl;
+    committed_load_insts+=inst._isload;
+    committed_store_insts+=inst._isstore;
+    func_calls+=inst._iscall;
+  }
+
+  virtual void setWritebackCycle(Inst_t &inst) {
+    if(!_isInOrder) {
+      if(inst._isstore) {
+        getCPDG()->insert_edge(inst, Inst_t::Commit,
+                               inst, Inst_t::Writeback, 2+inst._st_lat, E_WB);
+        checkNumMSHRs(inst,true);
+      }
+    }
+  }
+
+  //==========FETCH ==============
+  //Inorder fetch
+  virtual Inst_t &checkFF(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(!depInst) {
+      return n;
+    }
+    int lat=n._icache_lat;
+    
+    
+    if(depInst->_isctrl) {
+      //check if previous inst was a predict taken branch
+      bool predict_taken = false;
+      if(depInst->_pc == n._pc) {
+        predict_taken = depInst->_upc +1 != n._pc;
+      } else {
+        predict_taken |= n._pc < depInst->_pc;
+        predict_taken |= n._pc > depInst->_pc+8;//proxy for inst width
+      }
+      if(predict_taken && lat==0) {
+        lat+=1;
+      }
+
+/*
+      if(lat==0) { //fetch ends at a control inst
+        Inst_t* depInst2 = getCPDG()->peekPipe(-2);
+        if(depInst2 && depInst2->cycleOfStage(0)==depInst->cycleOfStage(0)) {
+          lat=1;
+        }
+      }
+*/
+    }
+        
+
+    getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
+                           n, Inst_t::Fetch,lat,E_FF);
+    return n;
+  }
+
+  virtual Inst_t &checkSerializing(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1); 
+    if(!depInst) {
+      return n;
+    } 
+
+    if(n._serialBefore || depInst->_serialAfter) {
+      getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                             n, Inst_t::Dispatch, 4,E_SER);
+    }
+    return n;
+  }
+
+
+/*
+  //Icache miss
+  //KNOWN_ISSUE:  what happens to accelerated icache miss?
+  virtual Inst_t &checkICache(Inst_t&n) {
+    if(n._icache_lat>0) {
+      getCPDG()->insert_edge(n.index()-1,Inst_t::Fetch,
+                             n,Inst_t::Fetch,n._icache_lat,E_IC);
+    }
+    return n;
+  }
+*/
+  //Finite fetch bandwidth
+  virtual Inst_t &checkFBW(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-FETCH_WIDTH);
+    if(!depInst) {
+      return n;
+    }
+
+    int length=1;
+    Inst_t* prevInst = getCPDG()->peekPipe(-1);
+    if(prevInst && !prevInst->_isctrl) {
+      length+=n._icache_lat;
+    }
+
+    getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
+                           n, Inst_t::Fetch, length, E_FBW); 
+    return n;
+  }
+
+  virtual Inst_t &checkPipeStalls(Inst_t &n) {
+    // 0   -1     -2        -3          -4 
+    // F -> De -> Rename -> Dispatch -> Rob
+    // F -> De -> Rename -> Dispatch -> Rob
+    // F -> De -> Renane -> Dispatch -> Rob
+
+    // ??? Should I add n._icache_lat?
+    Inst_t* depInst = getCPDG()->peekPipe(
+            -FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH);
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Dispatch,
+                     n, Inst_t::Fetch, 0,E_FPip);
+
+    return n;
+  }
+/*
+  //check branch predict edges -- (in order)
+  virtual Inst_t &checkBranchPredict(Inst_t &n, Op* op) {
+    //No branch prediction implemented
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(!depInst) { 
+      return n;
+    }
+    if(depInst->_isctrl) {
+      getCPDG()->insert_edge(*depInst, Inst_t::Complete,
+                             n, Inst_t::Fetch,
+                             n._icache_lat + 1,E_BP);
+    }
+    
+    return n;
+  }
+*/
+
+  
+
+  //Control Dep
+  virtual Inst_t &checkControlMispeculate(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(!depInst) {
+      return n;
+    }
+    if (depInst->_ctrl_miss) {
+        getCPDG()->insert_edge(*depInst, Inst_t::Complete,
+                               n, Inst_t::Fetch,
+                               n._icache_lat + //don't add in the icache latency?
+          prev_squash_penalty + 1); //two to commit, 1 to 
+
+        mispeculatedInstructions++;
+    }
+    return n;
+  }
+
+  //inst queue full stalls
+  virtual Inst_t &checkIQStalls(Inst_t &n) {
+
+    //First, erase all irrelevant nodes
+    typename ResVec::iterator upperbound;
+    upperbound = InstQueue.upper_bound(n.cycleOfStage(Inst_t::Dispatch));
+    InstQueue.erase(InstQueue.begin(),upperbound);
+
+    //Next, check if the IQ is full
+    if (InstQueue.size() < (unsigned)IQ_WIDTH-1) {
+      return n;
+    }
+
+    Inst_t* min_node=0;
+    for (auto I=InstQueue.begin(), EE=InstQueue.end(); I!=EE; ++I) {
+      Inst_t* i =I->second;  //I->second.get();
+      if(i->iqOpen==false) {
+        i->iqOpen=true;
+        min_node=i;
+        break;
+      } else {
+        //assert(0);
+      }
+    }
+    
+    //min_node=InstQueue.upper_bound(0)->second.get();
+    assert(min_node);
+    getCPDG()->insert_edge(*min_node, Inst_t::Execute,
+                           n, Inst_t::Dispatch, n._icache_lat + 1, E_IQ);
+    return n;
+  }
+
+
+
+ /* 
+ //Getting rid of this because i don't think lsq should stall fetch --
+ //it should work like a rob for just loads, where it stalls dispatch
+  virtual Inst_t &checkLSQStalls(Inst_t &n) {
+    //number of load/store instructions not executed exceeds the LSQ_WIDTH,
+    //stall the fetch
+    //TODO XXX This isn't really consistent with simulator code... overly
+    //conservative
+    if (LQ.size() < (unsigned)LQ_SIZE && SQ.size() < (unsigned)SQ_SIZE)
+      return n;
+
+    uint64_t min_issued_cycle = (uint64_t)-1;
+
+    Inst_t* min_node=0;
+    for (auto I = LQ.begin(), EE = LQ.end(); I!=EE; ++I) {
+      Inst_t* i = I->second.get();
+      min_node=i;           
+    }
+    for (auto I = SQ.begin(), EE = SQ.end(); I!=EE; ++I) {
+      Inst_t* i = I->second.get();
+      min_node=i;
+    }
+    getCPDG()->insert_edge(min_node, Inst_t::Commit,
+                           n, Inst_t::Fetch, n._icache_lat+1,E_LSQ);
+    return n;
+  }
+*/
+
+  //========== DISPATCH ==============
+
+  //Dispatch follows fetch
+  virtual Inst_t &checkFD(Inst_t &n) {
+    getCPDG()->insert_edge(n, Inst_t::Fetch,
+                     n, Inst_t::Dispatch, FETCH_TO_DISPATCH_STAGES, E_FD);
+    return n;
+  }
+
+  //Dispatch bandwdith
+  //This edge is possibly never required?
+  virtual Inst_t &checkDBW(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-D_WIDTH); 
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Dispatch,
+                          n, Inst_t::Dispatch, 1,E_DBW);
+    return n;
+  }
+
+  //Dispatch Inorder
+  virtual Inst_t &checkDD(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1); 
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Dispatch,
+                          n, Inst_t::Dispatch, 0,E_DD);
+    return n;
+  }
+
+
+  //Check Serializing
+  //didn't work as well at decode
+/*
+  virtual Inst_t &checkSerializing(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1); 
+    if(!depInst) {
+      return n;
+    } 
+
+    if(n._serialBefore || depInst->_serialAfter) {
+      getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                             n, Inst_t::Dispatch, 3,E_SER);
+    }
+    return n;
+  }
+*/
+
+
+  //Finite ROB (commit to dispatch)
+  virtual Inst_t &checkROBSize(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-ROB_SIZE); 
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                           n, Inst_t::Dispatch, 1,E_ROB);
+    return n;
+  }
+
+  //Finite LQ & SQ
+  virtual Inst_t &checkLSQSize(Inst_t &n) {
+/*
+    if (n._isload) {
+      if(LQ[LQind]) {
+        getCPDG()->insert_edge(*LQ[LQind], Inst_t::Commit,
+                               n, Inst_t::Dispatch, 1,E_LSQ);
+      }
+      //LQ[LQind]=inst;
+    }
+    if (n._isstore) {
+      if(SQ[SQind]) {
+        getCPDG()->insert_edge(*SQ[SQind], Inst_t::Writeback,
+                               n, Inst_t::Dispatch, 1,E_LSQ);
+      }
+    }
+*/
+
+    return n;
+  }
+
+
+  //========== READY ==============
+  //Ready Follows Dispatch
+  virtual Inst_t &checkDR(Inst_t &n)
+  {
+    getCPDG()->insert_edge(n, Inst_t::Dispatch,
+                     n, Inst_t::Ready, 0,E_DR);
+    return n;
+  }
+
+   //NonSpeculative Insts
+  virtual Inst_t &checkNonSpeculative(Inst_t &n) {
+    if (n._nonSpec) {
+      int ind=(SQind-1+SQ_SIZE)%SQ_SIZE;
+      if(SQ[ind]) {
+        getCPDG()->insert_edge(*SQ[ind], Inst_t::Writeback,
+                               n, Inst_t::Ready, 1,E_NSpc);
+      }
+    }
+    return n;
+  }
+ 
+
+  //Data dependence
+  virtual Inst_t &checkDataDep(Inst_t &n) {
+    //register dependence
+    for (int i = 0; i < 7; ++i) {
+      unsigned prod = n._prod[i];
+      if (prod <= 0 || prod >= n.index()) {
+        continue;
+      }
+
+      if(n._floating) {
+        iw_freads++;
+        regfile_freads++;
+        rename_freads++;
+      } else {
+        iw_reads++;
+        regfile_reads++;
+        rename_reads++;
+      }
+
+      dg_inst_base<T,E>& depInst =
+            getCPDG()->queryNodes(n.index()-prod);
+
+      getCPDG()->insert_edge(depInst, depInst.eventComplete(),
+                             n, Inst_t::Ready, 0,E_RDep);
+    }
+
+    //memory dependence
+    if (n._mem_prod > 0 && n._mem_prod < n.index()) {
+      
+      dg_inst_base<T,E>& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
+
+      if(dep_inst.isPipelineInst()) {
+        Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
+        if (prev_node._isstore && n._isload) {
+          //data dependence
+          getCPDG()->insert_edge(prev_node.index(), Inst_t::Complete,
+                                    n, Inst_t::Ready, 0, E_MDep);
+        } else if (prev_node._isstore && n._isstore) {
+          //anti dependence (output-dep)
+          getCPDG()->insert_edge(prev_node.index(), Inst_t::Complete,
+                                    n, Inst_t::Complete, 0, E_MDep);
+        } else if (prev_node._isload && n._isstore) {
+          //anti dependence (load-store)
+          getCPDG()->insert_edge(prev_node.index(), Inst_t::Complete,
+                                    n, Inst_t::Complete, 0, E_MDep);
+        }
+      }
+    }
+    return n;
+  }
+
+  //==========EXECUTION ==============
+  //Execution follows Ready
+
+  //get index for fuPool
+  virtual int fuPoolIdx(int opclass1) {
+    if (opclass1 > 9 && opclass1 < 30) {
+      return 0;
+    }
+
+    switch(opclass1) {
+    default: 
+      return 1;
+    case 1: //IntALU
+      return 2;
+    case 2: //IntMult
+    case 3: //IntDiv
+      return 3;
+    case 4: //FloatAdd
+    case 5: //FloatCmp
+    case 6: //FloatCvt
+      return 4;
+    case 7: //FloatMult
+    case 8: //FloatDiv
+    case 9: //FloatSqrt
+      return 5;
+    case 30: //MemRead
+    case 31: //MemWrite
+      return 6;
+    case MSHR_OPCLASS:
+      return MSHR_FU;
+    }
+    assert(0);
+  }
+
+  virtual bool isSameOpClass(int opclass1, int opclass2) {
+    if (opclass1 == opclass2)
+      return true;
+    if (opclass1 > 9 && opclass2 > 9 && opclass1 < 30 && opclass2 < 30) {
+      //all simd units are same
+      return true;
+    }
+    switch(opclass1) {
+    default: return false;
+    case 1:
+      return (opclass2 == 1);
+    case 2:
+    case 3:
+      return (opclass2 == 2 || opclass2 == 3);
+    case 4:
+    case 5:
+    case 6:
+      return (opclass2 == 4 || opclass2 == 5 || opclass2 == 6);
+    case 7:
+    case 8:
+    case 9:
+      return (opclass2 == 7 || opclass2 == 8 || opclass2 == 9);
+    case 30: //MemRead
+    case 31: //MemWrite
+      return (opclass2 == 30 || opclass2 == 31);
+    }
+    return false;
+  }
+
+  virtual unsigned getNumFUAvailable(Inst_t &n) {
+    return getNumFUAvailable(n._opclass);
+  }
+
+  virtual unsigned getNumFUAvailable(int opclass) {
+    switch(opclass) {
+    case 0: //No_OpClass
+      return ROB_SIZE+IQ_WIDTH;
+    case 1: //IntALU
+      return 6;
+
+    case 2: //IntMult
+    case 3: //IntDiv
+      return 2;
+
+    case 4: //FloatAdd
+    case 5: //FloatCmp
+    case 6: //FloatCvt
+      return 4;
+    case 7: //FloatMult
+    case 8: //FloatDiv
+    case 9: //FloatSqrt
+      return 2;
+    case 30: //MemRead
+    case 31: //MemWrite
+      return 2;
+    case MSHR_OPCLASS:
+      return 10;
+    default:
+      return 4;
+    }
+    return 4;
+  }
+
+  //KNOWN_HOLE: SSE Issue Latency Missing
+  virtual unsigned getFUIssueLatency(Inst_t &n) {
+    switch(n._opclass) {
+    case 0: //No_OpClass
+      return 1;
+    case 1: //IntALU
+      return 1;
+
+    case 2: //IntMult
+      return 1;
+    case 3: //IntDiv
+      return 19;
+
+    case 4: //FloatAdd
+    case 5: //FloatCmp
+    case 6: //FloatCvt
+      return 1;
+    case 7: //FloatMult
+      return 1;
+    case 8: //FloatDiv
+      return 12;
+    case 9: //FloatSqrt
+      return 24;
+    default:
+      return 1;
+    }
+    return 1;
+  }
+
+  //Check Functional Units to see if they are full
+  virtual Inst_t &checkFuncUnits(Inst_t &n) {
+    // no func units if load, store, or if it has no opclass
+    //if (n._isload || n._isstore || n._opclass==0)
+    if (n._opclass==0) {
+      return n;
+    }
+
+    if (n._opclass==2) {
+      mult_ops++;
+    }
+
+    Inst_t* min_node = addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
+                                   getFUIssueLatency(n), &n);
+
+    if(min_node) {
+      getCPDG()->insert_edge(min_node->index(), Inst_t::Execute,
+                        n, Inst_t::Execute, getFUIssueLatency(*min_node),E_FU);
+    }
+    return n;
+  }
+
+  //check MSHRs to see if they are full
+  virtual Inst_t &checkNumMSHRs(Inst_t &n, bool store) {
+    //
+    //
+    //turned off!
+    return n;
+    //
+    //
+    if(!store) {
+      Inst_t* min_node = addResource(MSHR_OPCLASS, n.cycleOfStage(Inst_t::Execute), 
+                                     n._ex_lat, &n);
+      if(min_node) {
+        if(min_node->_isload) {
+          getCPDG()->insert_edge(*min_node, Inst_t::Complete,
+                         n, Inst_t::Execute, 1,E_MSHR);
+        } else if(min_node->_isstore) {
+          getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
+                         n, Inst_t::Execute, 1,E_MSHR);
+        } else {
+          assert(0 && "what is this doing here");
+        }
+      }
+    } else { //if store
+       Inst_t* min_node = addResource(MSHR_OPCLASS, n.cycleOfStage(Inst_t::Commit)+2,
+                                     n._st_lat, &n);
+      if(min_node) {
+        if(min_node->_isload) {
+          getCPDG()->insert_edge(*min_node, Inst_t::Complete,
+                         n, Inst_t::Writeback, n._st_lat,E_MSHR);
+        } else if(min_node->_isstore) {
+          getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
+                         n, Inst_t::Writeback, n._st_lat,E_MSHR);
+        } else {
+          assert(0 && "what is this doing here");
+        }
+      }
+    }
+
+    return n;
+  }
+
+/*
+  virtual Inst_t &checkFuncUnits(Inst_t &n) {
+    if (n._img._isload || n._img._isstore)
+      return n;
+
+    uint64_t min_cycle_available = n.execute_cycle+50;
+    unsigned numOfFUAvailable = getNumFUAvailable(inst);
+    assert(numOfFUAvailable > 0);
+    const int e = _nodes.size();
+    Inst_t min_node;
+    for (int i = 0; i != e; ++i) {
+      Inst_t &prev_node = _nodes[-(i+1)];
+      //if (prev_node.execute_cycle +25 < n.execute_cycle)
+      //  break;
+
+      //break if we see 
+      if(prev_node.commit_cycle < n.fetch_cycle) {
+        break;
+      }
+
+      if (isSameOpClass(prev_node._img._opclass, n._img._opclass)) {
+        --numOfFUAvailable;
+
+        if (min_cycle_available > (prev_node.execute_cycle+ getFUIssueLatency(inst))) {
+          min_cycle_available = prev_node.execute_cycle + getFUIssueLatency(inst);
+          min_node = prev_node;
+        }
+      }
+      if (numOfFUAvailable == 0) {
+        break;
+      }
+    }
+    if (numOfFUAvailable != 0) {
+      return n;
+    }
+    if (min_cycle_available > n.execute_cycle) {
+
+//      int diff = min_cycle_available - n.execute_cycle;
+
+      n.execute_cycle = min_cycle_available;
+      getCPDG()->insert_edge(min_node.index, Inst_t::Execute,
+                       n.index(), Inst_t::Execute, getFUIssueLatency(inst));
+//                       n.index(), Inst_t::Execute, diff);
+
+    }
+    return n;
+  }
+*/
+
+  //Ready to Execute Stage -- no delay
+  virtual Inst_t &checkRE(Inst_t &n) {
+    getCPDG()->insert_edge(n, Inst_t::Ready,
+                           n, Inst_t::Execute, 0,E_RE);
+    return n;
+  }
+
+  //Inorder Execute
+  virtual Inst_t &checkEE(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(!depInst) {
+      return n;
+    }
+    assert(depInst);
+    getCPDG()->insert_edge(*depInst, Inst_t::Execute,
+                           n, Inst_t::Execute, 0,E_EE);
+    return n;
+  }
+
+  //Execute Bandwidth (issue width)
+  virtual Inst_t &checkInorderIssueWidth(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-ISSUE_WIDTH); 
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                          n, Inst_t::Commit, 1,E_IBW);
+    return n;
+  }
+
+  //Insert Dynamic Edge for constraining issue width, 
+  //each inst reserves slots in the issueRes map
+  virtual Inst_t &checkIssueWidth(Inst_t &n) {    
+    //find an issue slot
+    int index = n.cycleOfStage(Inst_t::Execute); //ready to execute cycle
+    int orig_index = index;
+    while(issueRes[index].size()==ISSUE_WIDTH) {
+      index++;
+    }
+
+    //slot found in index
+    issueRes[index].push_back(&n);
+
+    //don't add edge if not necessary
+    if(index == orig_index) {
+      return n;
+    }
+
+    //otherwise, add a dynamic edge to execute from last inst of previous cycle
+    Inst_t* dep_n = issueRes[index-1].back();
+    getCPDG()->insert_edge(*dep_n, Inst_t::Execute,
+                           n, Inst_t::Execute, 1,E_IBW);
+    return n;
+  }
+
+  //make sure current instructions are done executing before getting the next
+  //This is for inorder procs...
+  virtual Inst_t &checkExecutePipeStalls(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(!depInst) {
+      return n;
+    }
+    if(depInst->isMem() && depInst->_ex_lat> 8) {
+      getCPDG()->insert_edge(*depInst, Inst_t::Complete,
+                              n, Inst_t::Ready, -8,E_EPip);
+    }
+
+    return n;
+  }
+
+  //==========COMPLTE ==============
+  //Complete After Execute
+  virtual Inst_t &checkEP(Inst_t &n) {
+    getCPDG()->insert_edge(n, Inst_t::Execute,
+                           n, Inst_t::Complete, n._ex_lat,E_EP);
+
+    return n;
+  }
+
+  //issueRes map
+  virtual Inst_t &checkWriteBackWidth(Inst_t &n) {    
+    //find an issue slot
+    uint64_t index = n.cycleOfStage(Inst_t::Complete); //ready to execute cycle
+    while(wbBusRes[index].size()==WRITEBACK_WIDTH) {
+      index++;
+    }
+
+    //slot found in index
+    wbBusRes[index].push_back(&n);
+
+    //don't add edge if not necessary
+    if(index == n.cycleOfStage(Inst_t::Complete)) {
+      return n;
+    }
+
+    //otherwise, add a dynamic edge to execute from last inst of previous cycle
+    Inst_t* dep_n = wbBusRes[index-1].back();
+    getCPDG()->insert_edge(*dep_n, Inst_t::Complete,
+                           n, Inst_t::Complete, 1, E_WBBW);
+    return n;
+  }
+
+  //Cache producer?  weird... check if this ever matters
+  virtual Inst_t &checkPP(Inst_t &n) {
+    uint64_t cache_prod = n._cache_prod;
+
+    if (cache_prod > 0 && cache_prod < n.index()) {
+      getCPDG()->insert_edge(n.index()-cache_prod, Inst_t::Complete,
+                             n, Inst_t::Complete, 0,E_PP);
+    }
+    return n;
+  }
+
+  //Commit follows complete
+  virtual Inst_t &checkPC(Inst_t &n) {
+    getCPDG()->insert_edge(n, Inst_t::Complete,
+                           n, Inst_t::Commit, 2,E_PC);  
+    //simulator says: minimum two cycles between commit and complete
+    return n;
+  }
+
+  virtual Inst_t &checkSquashPenalty(Inst_t &n) {
+    //BR_MISS_PENALTY no longer used
+    //Instead we calculate based on the rob size, how long it's going to
+    //take to squash.  This is a guess, to some degree, b/c we don't
+    //know what happened after the control instruction was executed,
+    //but it might be close enough.
+    if (n._ctrl_miss) {
+
+
+        int insts_to_squash;
+        
+        insts_to_squash=rob_head_at_dispatch;
+        if(rob_growth_rate-0.05>0) {
+          insts_to_squash+=12*(rob_growth_rate-0.05);
+        }
+
+        insts_to_squash = insts_to_squash*0.6f + avg_rob_head*0.4f;
+        int squash_cycles = 1 +  insts_to_squash/SQUASH_WIDTH 
+                              + (insts_to_squash%SQUASH_WIDTH!=0);
+
+
+        //int squash_cycles = (rob_head_at_dispatch + 1- 12*rob_growth_rate)/SQUASH_WIDTH;
+
+        if(squash_cycles<5) {
+          squash_cycles=5;
+        } else if (squash_cycles > (ROB_SIZE-10)/SQUASH_WIDTH) {
+          squash_cycles = (ROB_SIZE-10)/SQUASH_WIDTH;
+        }
+
+        //add two extra cycles, because commit probably has to play catch up
+        //because it can't commit while squashing
+        getCPDG()->insert_edge(n, Inst_t::Complete,
+                               n, Inst_t::Commit,squash_cycles+2,E_SQUA);
+
+        prev_squash_penalty=squash_cycles;
+    }
+    return n;
+  }
+
+  //in order commit
+  virtual Inst_t &checkCC(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1); 
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                           n, Inst_t::Commit, 0,E_CC);
+    return n;
+  }
+
+  //Finite commit width
+  virtual Inst_t &checkCBW(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-COMMIT_WIDTH); 
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                          n, Inst_t::Commit, 1,E_CBW);
+    return n;
+  }
+
+
+  // Handle enrgy events for McPAT XML DOC
+  virtual void setEnergyEvents(pugi::xml_document& doc) {
+    //set the normal events based on the m5out/stats file
+    CriticalPath::setEnergyEvents(doc);
+ 
+    pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
+    pugi::xml_node core_node = 
+              system_node.find_child_by_attribute("name","core0");
+   
+    sa(system_node,"total_cycles",numCycles());
+    sa(system_node,"idle_cycles", 0); //TODO: how to get this?
+    sa(system_node,"busy_cycles",numCycles()-0);
+
+    //Modify relevent events to be what we predicted
+    double specFactor = 1.00f;
+
+    sa(core_node,"total_instructions",(uint64_t)(committed_insts*specFactor));
+    sa(core_node,"int_instructions",(uint64_t)(committed_int_insts*specFactor));
+    sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts*specFactor));
+    sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts*specFactor));
+    sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions*specFactor));
+    sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*specFactor));
+    sa(core_node,"store_instructions",(uint64_t)(committed_store_insts*specFactor));
+
+    sa(core_node,"committed_instructions",committed_insts);
+    sa(core_node,"committed_int_instructions",committed_int_insts);
+    sa(core_node,"committed_fp_instructions",committed_fp_insts);
+
+    sa(core_node,"total_cycles",numCycles());
+    sa(core_node,"idle_cycles", 0); //TODO: how to get this?
+    sa(core_node,"busy_cycles",numCycles()-0);
+
+    sa(core_node,"ROB_reads",(uint64_t)(rob_reads*specFactor));
+    sa(core_node,"ROB_writes",(uint64_t)(rob_writes*specFactor));
+
+    sa(core_node,"rename_reads",(uint64_t)(rename_reads*specFactor));
+    sa(core_node,"rename_writes",(uint64_t)(rename_writes*specFactor));
+    sa(core_node,"fp_rename_reads",(uint64_t)(rename_freads*specFactor));
+    sa(core_node,"fp_rename_writes",(uint64_t)(rename_fwrites*specFactor));
+
+    sa(core_node,"inst_window_reads",(uint64_t)(iw_reads*specFactor));
+    sa(core_node,"inst_window_writes",(uint64_t)(iw_writes*specFactor));
+    sa(core_node,"inst_window_wakeup_accesses",(uint64_t)(iw_writes*specFactor));
+
+    sa(core_node,"fp_inst_window_reads",(uint64_t)(iw_freads*specFactor));
+    sa(core_node,"fp_inst_window_writes",(uint64_t)(iw_fwrites*specFactor));
+    sa(core_node,"fp_inst_window_wakeup_accesses",(uint64_t)(iw_fwrites*specFactor));
+
+    sa(core_node,"int_regfile_reads",(uint64_t)(regfile_reads*specFactor));
+    sa(core_node,"int_regfile_writes",(uint64_t)(regfile_writes*specFactor));
+    sa(core_node,"float_regfile_reads",(uint64_t)(regfile_freads*specFactor));
+    sa(core_node,"float_regfile_writes",(uint64_t)(regfile_fwrites*specFactor));
+
+    sa(core_node,"function_calls",(uint64_t)(func_calls*specFactor));
+
+    sa(core_node,"ialu_accesses",(uint64_t)(committed_int_insts*specFactor));
+    sa(core_node,"fpu_accesses",(uint64_t)(committed_fp_insts*specFactor));
+    sa(core_node,"mul_accesses",(uint64_t)(mult_ops*specFactor));
+
+    sa(core_node,"cdb_alu_accesses",(uint64_t)(committed_int_insts*specFactor));
+    sa(core_node,"cdb_fpu_accesses",(uint64_t)(committed_fp_insts*specFactor));
+    sa(core_node,"cdb_mul_accesses",(uint64_t)(mult_ops*specFactor));
+     
+  }
+};
+
+
+#endif

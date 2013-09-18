@@ -1,0 +1,22 @@
+
+
+TRANSFORM ::
+        1:_ins_.Fetch -> _next_ins_.Fetch
+
+        if (_ins_.iter_start)
+           current_iter.open()
+
+        current_iter.insert(_ins_)
+
+        if (_ins_.iter_stop)
+           current_iter.close();
+           kernel.iters().add(current_iter)
+           if (kernel.iters().size() == 4)
+               kernel.TRANSFORM()
+               kernel.iters.clear()
+
+kernel.TRANSFORM ::
+        RemoveEdgesBetweenIteration()
+        LinkNodes()
+        InsertInstsForDivergence()
+        InsertEdges()

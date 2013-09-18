@@ -1,0 +1,47 @@
+CC :=  /s/gcc-4.8.1/bin/gcc 
+CXX := /s/gcc-4.8.1/bin/g++
+
+OPT ?= -O3
+SRC := critpath.cpp gzstream.cpp cp_dep_graph.cpp prof.cpp
+CFLAGS := $(EXFLAGS) $(OPT) -std=c++11 -ggdb -gdwarf-3 -g3 -g -I. -Wall -Werror -pedantic -I../loopprof/. 
+LIBS := -lz -L../loopprof/. -lloopprof -lboost_serialization 
+PWD := $(shell pwd)
+#LDFLAGS := $(EXFLAGS) -ltcmalloc_minimal -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/  -Wl,-rpath,$(shell pwd)/../loopprof
+LDFLAGS := $(EXFLAGS) -ltcmalloc -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/  -Wl,-rpath,$(shell pwd)/../loopprof
+
+OBJ := $(patsubst %.cpp, %.o, $(SRC))
+
+quiet	= quiet_
+
+quiet_cmd_cc_o_c = "	[CC]			$(notdir $<)"
+	cmd_cc_o_c	 = $(CC) $(CFLAGS) -MD -c -o $@ $<
+
+quiet_cmd_cxx_o_cxx = "	[CC]			$(notdir $<)"
+	cmd_cxx_o_cxx	 = $(CXX) $(CFLAGS) -MD -c -o $@ $<
+
+quiet_cmd_ccld_out_o = "	[CCLD]			$@"
+	cmd_ccld_out_o	 = $(CXX)  $(LDFLAGS) -o $@ $(OBJ) $(LIBS) -g
+
+
+critpath: $(OBJ)  *.hh
+	@echo $($(quiet)cmd_ccld_out_o)
+	@$(cmd_ccld_out_o)
+
+static-cp: static-critpath.o gzstream.o
+	@echo $($(quiet)cmd_ccld_out_o)
+	@g++ -o $@ $^ -lz -I.
+
+
+%.o : %.cpp
+	@echo $($(quiet)cmd_cxx_o_cxx)
+	@$(cmd_cxx_o_cxx)
+
+%.o : %.c
+	@echo $($(quiet)cmd_cc_o_c)
+	@$(cmd_cc_o_c)
+
+.phony: clean
+clean:
+	-rm -f critpath *.o *.d
+
+-include $(OBJ:.o=.d)
