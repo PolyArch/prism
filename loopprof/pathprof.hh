@@ -18,7 +18,7 @@
 #include <bitset>
 #include <string>
 #include <assert.h>
-#include "../../src/cpu/crtpath/crtpathnode.hh"
+#include "cpu/crtpath/crtpathnode.hh"
 #define MAX_OPS 1000
 
 #include "op.hh"

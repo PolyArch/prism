@@ -9,7 +9,7 @@
 #include "gzstream.hh"
 
 #define STANDALONE_CRITPATH 1
-#include "../../src/cpu/crtpath/crtpathnode.hh"
+#include "cpu/crtpath/crtpathnode.hh"
 #include "pathprof.hh"
 
 #include "stdlib.h"

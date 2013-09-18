@@ -6,7 +6,7 @@
 #include <cassert>
 
 #define STANDALONE_CRITPATH 1
-#include "../../src/cpu/crtpath/crtpathnode.hh"
+#include "cpu/crtpath/crtpathnode.hh"
 
 class CP_Node {
 
