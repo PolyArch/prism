@@ -29,9 +29,11 @@ protected:
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
   uint64_t committed_branch_insts=0, mispeculatedInstructions=0;
   uint64_t committed_load_insts=0, committed_store_insts=0;
-  uint64_t mult_ops=0;
+  uint64_t squashed_insts=0;
 
+  uint64_t mult_ops=0;
   uint64_t func_calls=0;
+  uint64_t idleCycles=0;
 
   //icache
   uint64_t icache_read_accesses=0, icache_read_misses=0, icache_conflicts=0;
@@ -58,8 +60,8 @@ protected:
       }*/
 
       out << (img._isctrl ? "C" : "");
-      out << (img._isreturn ? "R" : "");
-      out << (img._iscall ? "F" : "");
+      out << (img._isreturn ? "Ret" : "");
+      out << (img._iscall ? "Func" : "");
       out << (img._isload ? "L" : "");
       out << (img._isstore ? "S" : "");
       out << (img._ctrl_miss ? "ms" : "");
@@ -73,6 +75,8 @@ protected:
       out << (img._writeBar ? "wbar!" : "");
       out << (img._memBar  ? "mbar!" : "");
       out << (img._syscall ? "sys!" : "");
+      out << (img._floating ? "FP" : "");
+     
 
       if(img._mem_prod != 0) {
         out << "md(" << img._mem_prod << ")";
@@ -139,10 +143,12 @@ public:
   virtual void setEnergyEvents(pugi::xml_document& doc) {
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
 
+    uint64_t busyCycles=Prof::get().numCycles-Prof::get().idleCycles;
+
     //base stuff 
     sa(system_node,"total_cycles",Prof::get().numCycles);
     sa(system_node,"idle_cycles",Prof::get().idleCycles);
-    sa(system_node,"busy_cycles",Prof::get().numCycles-Prof::get().idleCycles);
+    sa(system_node,"busy_cycles",busyCycles);
 
     pugi::xml_node core_node = 
               system_node.find_child_by_attribute("name","core0");
@@ -156,12 +162,14 @@ public:
     sa(core_node,"store_instructions",Prof::get().storeOps);
 
     sa(core_node,"committed_instructions",Prof::get().commitInsts);
-    sa(core_node,"committed_int_instructions",Prof::get().commitIntInsts);
+    //sa(core_node,"committed_int_instructions",Prof::get().commitIntInsts);
+    sa(core_node,"committed_int_instructions",Prof::get().commitInsts-
+                                              Prof::get().commitFPInsts);
     sa(core_node,"committed_fp_instructions",Prof::get().commitFPInsts);
 
     sa(core_node,"total_cycles",Prof::get().numCycles);
     sa(core_node,"idle_cycles",Prof::get().idleCycles);
-    sa(core_node,"busy_cycles",Prof::get().numCycles);
+    sa(core_node,"busy_cycles",busyCycles);
 
     sa(core_node,"ROB_reads",Prof::get().rob_reads);
     sa(core_node,"ROB_writes",Prof::get().rob_writes);

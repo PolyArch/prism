@@ -1,7 +1,7 @@
 CC :=  /s/gcc-4.8.1/bin/gcc
 CXX := /s/gcc-4.8.1/bin/g++
 
-GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
+GEM5_DIR=/scratch/tjn/mafia/gem5
 
 OPT ?= -O3
 SRC := critpath.cpp gzstream.cpp cp_dep_graph.cpp prof.cpp

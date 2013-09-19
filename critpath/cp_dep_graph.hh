@@ -155,7 +155,7 @@ public:
     Complete = 4,
     Commit = 5,
     Writeback = 6,
-    NumStages
+    NumStages = 7
   };
 
 private:
@@ -206,6 +206,9 @@ public:
   uint16_t _upc=0;
   bool _floating=false;
   bool _iscall=false;
+  uint8_t _numSrcRegs=0;
+  uint8_t _numFPDestRegs=0;
+  uint8_t _numIntDestRegs=0;
 
   //Energy Counters, for validation
   //We could potentially delete this eventually
@@ -240,6 +243,9 @@ public:
     _upc=img._upc;
     _floating=img._floating;
     _iscall=img._iscall;
+    _numSrcRegs=img._numSrcRegs;
+    _numFPDestRegs=img._numFPDestRegs;
+    _numIntDestRegs=img._numIntDestRegs;
 
     for (int i = 0; i < NumStages; ++i) {
       events[i].set_inst(this);

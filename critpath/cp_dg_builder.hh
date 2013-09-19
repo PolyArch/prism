@@ -10,6 +10,7 @@ extern int WRITEBACK_WIDTH;
 extern int COMMIT_WIDTH;
 extern int SQUASH_WIDTH;
 extern int IQ_WIDTH;
+
 extern int ROB_SIZE;
 
 extern int BR_MISS_PENALTY;
@@ -66,6 +67,13 @@ public:
     addDeps(*inst,op);
     pushPipe(sh_inst); 
     inserted(sh_inst,img);
+
+    //cheatign a little here
+    regfile_freads+=img._regfile_fread;
+    //regfile_fwrites+=img._regfile_fwrite;
+    regfile_reads+=img._regfile_read;
+    //regfile_writes+=img._regfile_write;
+
   }
 
   virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
@@ -94,7 +102,7 @@ public:
   }
 
   virtual void traceOut(uint64_t index, 
-                        const CP_NodeDiskImage &img,Op* op) {
+                        const CP_NodeDiskImage &img, Op* op) {
     if(TraceOutputs) {
       Inst_t& inst = 
            static_cast<Inst_t&>(getCPDG()->queryNodes(index));  
@@ -135,6 +143,8 @@ public:
                                                (SQind-sq_head_at_dispatch+32);
       out << " sq:" << sqSize;
 
+      //out << " " << (int)inst.regfile_reads << " " << (int)inst.regfile_freads;
+      out << " " << (int)img._numSrcRegs;
 
       //CriticalPath::traceOut(index,img,op);
       out << "\n";
@@ -176,6 +186,10 @@ protected:
   FuUsage fuUsage;
   NodeResp nodeResp; 
 
+  typedef std::set<uint64_t> ActivityMap;
+  ActivityMap activityMap;
+  
+
   int rob_head_at_dispatch;
   int prev_rob_head_at_dispatch;
   int prev_squash_penalty;
@@ -213,43 +227,31 @@ protected:
     upperbound_sc = issueRes.upper_bound(_curCycle);
     issueRes.erase(issueRes.begin(),upperbound_sc); 
 
-    //upperbound = LQ.upper_bound(_curCycle);
-    //LQ.erase(LQ.begin(),upperbound);
-    //upperbound = LQ.upper_bound(_curCycle);
-    //LQ.erase(LQ.begin(),upperbound);
-
-/*
-    for (typename ResVec::iterator I = InstQueue.begin(); I != InstQueue.end();) {
-      std::shared_ptr<Inst_t> previnst = *I;
-      if (previnst->cycleOfStage(Inst_t::Execute) < _curCycle) {
-        I = InstQueue.erase(I);
-      } else {
-        ++I;
-      }
-    }*/
-
-/*
-    for (typename ResVec::iterator I=LQ.begin();I!=LQ.end();) {
-      std::shared_ptr<Inst_t> i = *I;
-      if (i->cycleOfStage(Inst_t::Commit) < _curCycle) {
-        I = LQ.erase(I);
-      } else {
-        ++I;
-      }
+     
+    //add to activity
+    for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
+      activityMap.insert(inst->cycleOfStage(i));
     }
 
-    for (typename ResVec::iterator I = SQ.begin();I!=SQ.end();) {
-      std::shared_ptr<Inst_t> i = *I;
-      if (i->cycleOfStage(Inst_t::Commit) < _curCycle) {
-        I = SQ.erase(I);
-      } else {
-        ++I;
+    //summing up idle cycles
+    uint64_t prevCycle=0;
+    for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
+      uint64_t cycle=*I;
+      if(prevCycle!=0 && cycle-prevCycle>14) {
+        idleCycles+=(cycle-prevCycle-14);
       }
+      if (cycle + 50  < _curCycle && activityMap.size() > 2) {
+        I = activityMap.erase(I);
+        prevCycle=cycle;
+      } else {
+        //++I;
+        break;
+      } 
     }
-  */  
+
+    //for funcUnitUsage
     for(FuUsage::iterator I=fuUsage.begin(),EE=fuUsage.end();I!=EE;++I) {
       FuUsageMap& fuUseMap = *I;
-      assert(fuUseMap.size()>=2);
       for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
         uint64_t cycle = i->first;
         assert(cycle!=0);
@@ -260,7 +262,6 @@ protected:
           break;
         }
       }
-      assert(fuUseMap.size()>=2);
     }
     
     for(typename NodeResp::iterator I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
@@ -351,7 +352,6 @@ protected:
         }
         
         typename NodeRespMap::iterator respIter = nodeRespMap.find(cur_cycle);
-
         nodeRespMap[cur_cycle+duration]=cpnode;
 
         if(respIter == nodeRespMap.end() || min_cycle == cur_cycle) {
@@ -412,12 +412,15 @@ protected:
         iw_writes++;
       }
 
-      if(op != NULL && op->numUses() > 0) {
-        if(inst._floating) {
-          rename_fwrites++;
-        } else {
-          rename_writes++;
-        }
+      //rename_fwrites+=inst._numFPDestRegs;
+      //rename_writes+=inst._numIntDestRegs;
+
+      if(inst._floating) {
+        rename_freads+=inst._numSrcRegs;
+        rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
+      } else {
+        rename_reads+=inst._numSrcRegs;
+        rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
       }
 
     }
@@ -489,6 +492,19 @@ protected:
     } else {
       //no other barriers
     }
+
+    /*
+    // num src regs is wrong... eventually fix this in gem5, for now just cheat
+    if(inst._floating) {
+      regfile_freads+=inst._numSrcRegs;
+    } else {
+      regfile_reads+=inst._numSrcRegs;
+    }*/
+
+    regfile_fwrites+=inst._numFPDestRegs;
+    regfile_writes+=inst._numIntDestRegs;
+
+
   }
 
   virtual void setExecuteCycle(Inst_t &inst) {
@@ -514,9 +530,9 @@ protected:
       }
     }
     if(inst._floating) {
-      iw_freads++;
+      iw_freads+=2;
     } else {
-      iw_reads++;
+      iw_reads+=2;
     }
   }
 
@@ -539,9 +555,9 @@ protected:
     //Energy Events
     if(op && op->numUses()>0) {
       if( inst._floating) {
-        regfile_fwrites++;
+        //regfile_fwrites++;
       } else {
-        regfile_writes++;
+        //regfile_writes++;
       }
     }
 
@@ -724,6 +740,12 @@ protected:
                                n._icache_lat + //don't add in the icache latency?
           prev_squash_penalty + 1); //two to commit, 1 to 
 
+        //we need to make sure that the processor stays active during squash
+        uint64_t i=depInst->cycleOfStage(Inst_t::Complete);
+        for(;i<n.cycleOfStage(Inst_t::Fetch);++i) {
+          activityMap.insert(i);
+        }
+
         mispeculatedInstructions++;
     }
     return n;
@@ -905,17 +927,6 @@ protected:
       if (prod <= 0 || prod >= n.index()) {
         continue;
       }
-
-      if(n._floating) {
-        iw_freads++;
-        regfile_freads++;
-        rename_freads++;
-      } else {
-        iw_reads++;
-        regfile_reads++;
-        rename_reads++;
-      }
-
       dg_inst_base<T,E>& depInst =
             getCPDG()->queryNodes(n.index()-prod);
 
@@ -1324,6 +1335,8 @@ protected:
         }
 
         insts_to_squash = insts_to_squash*0.6f + avg_rob_head*0.4f;
+        squashed_insts+=insts_to_squash;
+
         int squash_cycles = 1 +  insts_to_squash/SQUASH_WIDTH 
                               + (insts_to_squash%SQUASH_WIDTH!=0);
 
@@ -1374,52 +1387,63 @@ protected:
     //set the normal events based on the m5out/stats file
     CriticalPath::setEnergyEvents(doc);
  
+    uint64_t busyCycles=numCycles()-idleCycles;
+
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
     pugi::xml_node core_node = 
               system_node.find_child_by_attribute("name","core0");
    
     sa(system_node,"total_cycles",numCycles());
-    sa(system_node,"idle_cycles", 0); //TODO: how to get this?
-    sa(system_node,"busy_cycles",numCycles()-0);
+    sa(system_node,"idle_cycles", idleCycles);
+    sa(system_node,"busy_cycles",busyCycles);
 
     //Modify relevent events to be what we predicted
-    double specFactor = 1.00f;
+    double squashRatio = (double)squashed_insts/(double)(committed_insts);
+    double highSpecFactor = 1.00+1.5*squashRatio;
+    double specFactor = 1.00+squashRatio;
+    double halfSpecFactor = 1.00+0.5*squashRatio;
+    double fourthSpecFactor = 1.00+0.25*squashRatio;
+    //double eigthSpecFactor = 1.00+0.125*squashRatio;
+    double sixteenthSpecFactor = 1.00+0.0625*squashRatio;
+
+
+    uint64_t intOps=committed_int_insts-committed_load_insts-committed_store_insts;
 
     sa(core_node,"total_instructions",(uint64_t)(committed_insts*specFactor));
-    sa(core_node,"int_instructions",(uint64_t)(committed_int_insts*specFactor));
+    sa(core_node,"int_instructions",(uint64_t)(intOps*specFactor));
     sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts*specFactor));
-    sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts*specFactor));
-    sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions*specFactor));
-    sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*specFactor));
-    sa(core_node,"store_instructions",(uint64_t)(committed_store_insts*specFactor));
+    sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts*highSpecFactor));
+    sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions*sixteenthSpecFactor));
+    sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*fourthSpecFactor));
+    sa(core_node,"store_instructions",(uint64_t)(committed_store_insts*fourthSpecFactor));
 
     sa(core_node,"committed_instructions",committed_insts);
     sa(core_node,"committed_int_instructions",committed_int_insts);
     sa(core_node,"committed_fp_instructions",committed_fp_insts);
 
     sa(core_node,"total_cycles",numCycles());
-    sa(core_node,"idle_cycles", 0); //TODO: how to get this?
-    sa(core_node,"busy_cycles",numCycles()-0);
+    sa(core_node,"idle_cycles", idleCycles); //TODO: how to get this?
+    sa(core_node,"busy_cycles",busyCycles);
 
-    sa(core_node,"ROB_reads",(uint64_t)(rob_reads*specFactor));
-    sa(core_node,"ROB_writes",(uint64_t)(rob_writes*specFactor));
+    sa(core_node,"ROB_reads",(uint64_t)(rob_reads-idleCycles)*halfSpecFactor);
+    sa(core_node,"ROB_writes",(uint64_t)(rob_writes*specFactor)+squashed_insts);
 
     sa(core_node,"rename_reads",(uint64_t)(rename_reads*specFactor));
-    sa(core_node,"rename_writes",(uint64_t)(rename_writes*specFactor));
+    sa(core_node,"rename_writes",(uint64_t)(rename_writes*highSpecFactor));
     sa(core_node,"fp_rename_reads",(uint64_t)(rename_freads*specFactor));
     sa(core_node,"fp_rename_writes",(uint64_t)(rename_fwrites*specFactor));
-
-    sa(core_node,"inst_window_reads",(uint64_t)(iw_reads*specFactor));
-    sa(core_node,"inst_window_writes",(uint64_t)(iw_writes*specFactor));
+                                                                    
+    sa(core_node,"inst_window_reads",(uint64_t)(iw_reads*specFactor)+busyCycles);
+    sa(core_node,"inst_window_writes",(uint64_t)(iw_writes*specFactor)+squashed_insts);
     sa(core_node,"inst_window_wakeup_accesses",(uint64_t)(iw_writes*specFactor));
 
     sa(core_node,"fp_inst_window_reads",(uint64_t)(iw_freads*specFactor));
     sa(core_node,"fp_inst_window_writes",(uint64_t)(iw_fwrites*specFactor));
     sa(core_node,"fp_inst_window_wakeup_accesses",(uint64_t)(iw_fwrites*specFactor));
 
-    sa(core_node,"int_regfile_reads",(uint64_t)(regfile_reads*specFactor));
+    sa(core_node,"int_regfile_reads",(uint64_t)(regfile_reads*halfSpecFactor));
     sa(core_node,"int_regfile_writes",(uint64_t)(regfile_writes*specFactor));
-    sa(core_node,"float_regfile_reads",(uint64_t)(regfile_freads*specFactor));
+    sa(core_node,"float_regfile_reads",(uint64_t)(regfile_freads*halfSpecFactor));
     sa(core_node,"float_regfile_writes",(uint64_t)(regfile_fwrites*specFactor));
 
     sa(core_node,"function_calls",(uint64_t)(func_calls*specFactor));
