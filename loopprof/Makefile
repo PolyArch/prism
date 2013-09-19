@@ -3,7 +3,9 @@ CXX := /s/gcc-4.8.1/bin/g++
 
 OPT ?= -O3
 
-GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
+#GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
+GEM5_DIR=/scratch/tjn/mafia/gem5
+
 
 SRC := pathprof.cpp gzstream.cpp op.cpp bb.cpp loopinfo.cpp functioninfo.cpp
 CFLAGS :=  -std=c++11 ${OPT} -ggdb -gdwarf-3 -g -I. -Wall -Werror -pedantic -fPIC -rdynamic -I$(GEM5_DIR)/src  -I$(GEM5_DIR)/src

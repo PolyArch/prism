@@ -260,7 +260,7 @@ public:
           getStat("iq.FU_type_0::total",tag,val,totalInsts);
 
           getStat("iq.FU_type_0::MemRead",tag,val,loadOps);
-          getStat("iq.FU_type_0::MemWrites",tag,val,storeOps);
+          getStat("iq.FU_type_0::MemWrite",tag,val,storeOps);
 
           getStat("iq.FU_type_0::No_OpClass",tag,val,nOps);
           getStat("iq.FU_type_0::IntAlu",tag,val,aluOps);
@@ -274,17 +274,17 @@ public:
           getStat("iq.FU_type_0::FloatDiv",tag,val,fdivOps);
           getStat("iq.FU_type_0::FloatSqrt",tag,val,fsqrtOps);
 
-          getStat("BPredUnit.lookups",tag,val,branchPredictions);
-          getStat("BPredUnit.condIncorrect",tag,val,mispredicts);
+          getStat("branchPred.lookups",tag,val,branchPredictions);
+          getStat("branchPred.condIncorrect",tag,val,mispredicts);
 
           getStat("rob.rob_reads",tag,val,rob_reads);
           getStat("rob.rob_writes",tag,val,rob_writes);
 
           getStat("rename.int_rename_lookups",tag,val,rename_reads);
-          getStat("rename.RenamedOperands",tag,val,rename_writes);
+          getStat("rename.int_rename_operands",tag,val,rename_writes);
 
           getStat("rename.fp_rename_lookups",tag,val,fp_rename_reads);
-          getStat("rename.RenamedOperands",tag,val,fp_rename_writes);
+          getStat("rename.fp_rename_operands",tag,val,fp_rename_writes);
 
           getStat("iq.int_inst_queue_reads",tag,val,int_iw_reads);
           getStat("iq.int_inst_queue_writes",tag,val,int_iw_writes);
@@ -307,7 +307,7 @@ public:
 
           getStat("fetch.CacheLines",tag,val,icacheLinesFetched);
 
-          getStat("committedInsts_total",tag,val,commitInsts);
+          getStat("committedOps",tag,val,commitInsts);
           getStat("commit.int_insts",tag,val,commitIntInsts);
           getStat("commit.fp_insts",tag,val,commitFPInsts);
           getStat("commit.branches",tag,val,commitBranches);
