@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
       {"gpu-ld-lat", required_argument, 0, 'l'},
       {"trace-out", no_argument, &TraceOutputs, 1},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
-      {"no-mcpat", no_argument, &noMcPAT, 0},
+      {"no-mcpat", no_argument, &noMcPAT, 1},
       {0,0,0,0}
     };
   uint64_t max_inst = (uint64_t)-1;

@@ -1,13 +1,13 @@
 
 #ifndef CP_REGISTRY_HH
 #define CP_REGISTRY_HH
-#include<string>
+#include <string>
 
 #include "critpath.hh"
 #include "map"
 
-#include<vector>
-#include<tuple>
+#include <vector>
+#include <tuple>
 
 class CPRegistry {
 private:
@@ -64,7 +64,7 @@ public:
     }
     cpmap[fullname.c_str()] = cp;
     std::string trace_out = std::string(fullname.c_str()) + ".txt";
-    cp->setupOutFile(trace_out.c_str()); 
+    cp->setupOutFile(trace_out.c_str());
   }
 
   void insert(CP_NodeDiskImage img, uint64_t index, Op* op) {
