@@ -194,8 +194,8 @@ private:
 
 };
 
-static RegisterCP<cp_ccores> cp_ccores1("cp-ccores",false);
-static RegisterCP<cp_ccores> cp_ccores2("cp-ccores",true);
+static RegisterCP<cp_ccores> cp_ccores1("ccores",false);
+static RegisterCP<cp_ccores> cp_ccores2("ccores",true);
 
 
 #endif //CP_CCORES

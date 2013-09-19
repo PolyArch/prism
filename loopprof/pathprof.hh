@@ -336,10 +336,12 @@ public:
     fpOps=faddOps+fcmpOps+fcvtOps+fmultOps+fdivOps+fsqrtOps;
     commitStores=commitMemRefs-commitLoads;
 
+    #if 0
     std::cout << "Example " << int_iw_reads << ", ";
     std::cout << dcacheReads << ", ";
     std::cout << storeOps << ","; 
     std::cout << "\n";
+    #endif
   }
 
 

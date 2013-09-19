@@ -2,6 +2,7 @@
 #ifndef CP_REGISTRY_HH
 #define CP_REGISTRY_HH
 #include <string>
+#include <getopt.h>
 
 #include "critpath.hh"
 #include "map"
@@ -14,6 +15,7 @@ private:
   CPRegistry() {}
   static CPRegistry *_registry;
   std::map<std::string, CriticalPath*> cpmap;
+  std::map<std::string, bool> cp2Enabled;
 
 public:
   static CPRegistry* get() {
@@ -23,35 +25,54 @@ public:
     return _registry;
   }
 
-  bool inorder_model;
-  bool ooo_model;
-
-  void setModels(bool inorder,bool ooo) {
-    inorder_model=inorder;
-    ooo_model=ooo; 
-
-    if(inorder_model==false) {
-      for(auto i=cpmap.begin();i!=cpmap.end();) {
-        CriticalPath* cp = i->second;
-        if(cp->isInOrder()) {
-          i = cpmap.erase(i); 
-        } else {
-          ++i;
-        }
+  void handleArgv(const char *argv, bool chkForBothModel = true) {
+    if (cp2Enabled.count(argv)) {
+      cp2Enabled[argv] = true;
+      return;
+    }
+    if (strncmp(argv, "no-", 3) == 0 && argv[3]) {
+      if (cp2Enabled.count(&argv[3])) {
+        cp2Enabled[&argv[3]] = false;
+        return;
       }
-    } else if(ooo_model==false) {
-      for(auto i=cpmap.begin();i!=cpmap.end();) {
-        CriticalPath* cp = i->second;
-        if(!cp->isInOrder()) {
-          i = cpmap.erase(i); 
-        } else {
-          ++i;
-        }
+      if (chkForBothModel) {
+        std::string inorder = (std::string("no-inorder-")
+                               + std::string(&argv[3]));
+        std::string ooo = std::string("no-ooo-") + std::string(&argv[3]);
+        handleArgv(inorder.c_str(), false);
+        handleArgv(ooo.c_str(), false);
       }
     }
+    if (!chkForBothModel)
+      return;
+
+    std::string inorder = std::string("inorder-") + std::string(argv);
+    std::string ooo = std::string("ooo-") + std::string(argv);
+    handleArgv(inorder.c_str(), false);
+    handleArgv(ooo.c_str(), false);
   }
 
-  void register_cp(std::string name, CriticalPath *cp) {
+
+  void pruneCP(bool inorder, bool ooo) {
+
+    assert((inorder || ooo) && "both inorder and ooo are false.");
+
+    // erase inorder, ooo
+    for (auto i = cpmap.begin(); i != cpmap.end(); ) {
+      bool isInorder = i->second->isInOrder();
+      if ((isInorder && !inorder) // no inorder allowed
+          || (!isInorder && !ooo) // no ooo allowed
+          || !cp2Enabled[i->first]) //specific
+        i = cpmap.erase(i);
+      else
+        ++i;
+    }
+
+
+  }
+
+  void register_cp(std::string name, CriticalPath *cp,
+                   bool EnableByDefault) {
     std::string fullname;
     if(cp->isInOrder()) {
        fullname="inorder-"+name;
@@ -65,6 +86,7 @@ public:
     cpmap[fullname.c_str()] = cp;
     std::string trace_out = std::string(fullname.c_str()) + ".txt";
     cp->setupOutFile(trace_out.c_str());
+    cp2Enabled[fullname] = EnableByDefault;
   }
 
   void insert(CP_NodeDiskImage img, uint64_t index, Op* op) {
@@ -95,17 +117,17 @@ public:
   }
   void printMcPATFiles() {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      I->second->printMcPATxml( (std::string("mcpat/") + 
+      I->second->printMcPATxml( (std::string("mcpat/") +
                                I->first + std::string(".xml")).c_str() );
-    }   
+    }
   }
   void runMcPAT() {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       std::cout << "Calculating " << I->first << " Energy/Power...";
       std::cout.flush();
 
-      std::string ms = std::string("mcpat -infile mcpat/") + I->first + 
-                       std::string(".xml 2>&1 > mcpat/") + I->first + 
+      std::string ms = std::string("mcpat -infile mcpat/") + I->first +
+                       std::string(".xml 2>&1 > mcpat/") + I->first +
                        std::string(".out");
 
       system(ms.c_str());
@@ -114,8 +136,37 @@ public:
                        std::string(" | head -1 | cut -d\" \" -f6");
       system(gs.c_str());
 
-    }   
+    }
   }
+
+  void setupOptions(std::vector<struct option>& long_options,
+                    struct option *static_long_options) {
+    unsigned i = 0;
+    while (static_long_options[i].name) {
+      long_options.push_back(static_long_options[i]);
+      ++i;
+    }
+    for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
+      struct option opt;
+      opt.name = strdup(I->first.c_str());
+      opt.has_arg = no_argument;
+      opt.flag = 0; opt.val = 0;
+      long_options.push_back(opt);
+      std::string noOpt = std::string("no-") + I->first;
+      opt.name = strdup(noOpt.c_str());
+      long_options.push_back(opt);
+      if (I->first.find("ooo-") == 0) {
+        std::string nam = I->first.substr(4);
+        opt.name = strdup(nam.c_str());
+        long_options.push_back(opt);
+        std::string noOpt = std::string("no-") + nam;
+        opt.name = strdup(noOpt.c_str());
+        long_options.push_back(opt);
+      }
+    }
+    long_options.push_back(static_long_options[i]);
+  }
+
 };
 
 
@@ -123,9 +174,13 @@ template<typename T>
 struct RegisterCP
 {
   T cp_obj;
-  RegisterCP(const char *N, bool attachInorder=false) {
+  RegisterCP(const char *N,
+             bool attachInorder = false,
+             bool EnableByDefault = false) {
     cp_obj.setInOrder(attachInorder);
-    CPRegistry::get()->register_cp(std::string(N), &cp_obj);
+    CPRegistry::get()->register_cp(std::string(N),
+                                   &cp_obj,
+                                   EnableByDefault);
   }
 };
 

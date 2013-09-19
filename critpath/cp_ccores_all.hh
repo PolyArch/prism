@@ -11,7 +11,7 @@ extern int TraceOutputs;
 
 class ccores_inst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
-  typedef dg_edge_impl_t<T> E;  
+  typedef dg_edge_impl_t<T> E;
 
   typedef T* TPtr;
   typedef E* EPtr;
@@ -224,7 +224,7 @@ private:
 
 };
 
-static RegisterCP<cp_ccores_all> cp_ccores_all("cp-ccores-all",true);
+static RegisterCP<cp_ccores_all> cp_ccores_all("ccores-all",true);
 
 
 #endif //CP_CCORES_ALL

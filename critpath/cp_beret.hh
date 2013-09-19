@@ -455,8 +455,8 @@ private:
 
 };
 
-static RegisterCP<cp_beret> cp_beret1("beret",true);
-static RegisterCP<cp_beret> cp_beret2("beret",false);
+static RegisterCP<cp_beret> cp_beret1("beret", true);
+static RegisterCP<cp_beret> cp_beret2("beret", false);
 
 
 #endif //CP_BERET

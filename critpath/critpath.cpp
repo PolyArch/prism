@@ -68,18 +68,15 @@ OrigCP orig;
 static RegisterCP<default_cpdg_t> baseInorder("base",true);
 static RegisterCP<default_cpdg_t> baseOOO("base",false);
 
+
 int main(int argc, char *argv[])
 {
   orig.setupOutFile("orig_cp.txt");
-  //critp.setupOutFile("crit_cp.txt");
-  //base_ooo.setupOutFile("build_cp.txt"); 
-  //base_ooo.setupOutFile("build_cp.txt");
-  //base_ooo.setInOrder(true);
   bool inorder_model=true;
   bool ooo_model=true;
   int  noMcPAT=0;
 
-  static struct option long_options[] =
+  static struct option static_long_options[] =
     {
       {"help", no_argument, 0, 'h'},
       {"verbose",no_argument, 0, 'v'},
@@ -104,6 +101,11 @@ int main(int argc, char *argv[])
       {"no-mcpat", no_argument, &noMcPAT, 1},
       {0,0,0,0}
     };
+
+  std::vector<struct option> long_options;
+  CPRegistry::get()->setupOptions(long_options, static_long_options);
+
+
   uint64_t max_inst = (uint64_t)-1;
   bool verbose =false;
   bool registry_off = false;
@@ -111,13 +113,16 @@ int main(int argc, char *argv[])
   while (1) {
     int option_index = 0;
 
+    const struct option *longopts = &*long_options.begin();
     int c = getopt_long(argc, argv, "hvntf:c:r:b:i:m:s:a:y:l:x",
-                        long_options, &option_index);
+                        longopts, &option_index);
     if (c == -1)
       break;
 
     switch(c) {
     case 0:
+      CPRegistry::get()->handleArgv(long_options[option_index].name);
+      //std::cout << "Saw " << long_options[option_index].name << "\n";
       break;
     case 'h':
       std::cout << argv[0] << " [-f F|-c C|-r R|-b B|-h|-n] file\n";
@@ -135,7 +140,7 @@ int main(int argc, char *argv[])
     case 'a': CCA_Size = atoi(optarg); break;
     case 'y': DySER_Concurrency = atoi(optarg); break;
     case 'l': GPU_LD_Latency = atoi(optarg); break;
-    case 'x': 
+    case 'x':
       if(strcmp(optarg,"inorder")==0) {
         inorder_model=true;
         ooo_model=false;
@@ -197,7 +202,7 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  CPRegistry::get()->setModels(inorder_model,ooo_model);
+  CPRegistry::get()->pruneCP(inorder_model, ooo_model);
 
   //determine the prof file name
   std::string prof_file(argv[optind]);
@@ -314,26 +319,21 @@ int main(int argc, char *argv[])
 
     if (!registry_off) {
       CPRegistry::get()->results(orig.numCycles());
+
+      if(!noMcPAT) {
+        system("mkdir -p mcpat/");
+
+        orig.printMcPATxml("mcpat/orig.xml");
+        CPRegistry::get()->printMcPATFiles();
+
+        std::cout << "Calculating orig Energy/Power...";
+        std::cout.flush();
+
+        system("mcpat -infile mcpat/orig.xml 2>&1 > mcpat/orig.out");
+        system("grep -ir \"Runtime Dynamic\" mcpat/orig.out | head -1 | cut -d\" \" -f6");
+        CPRegistry::get()->runMcPAT();
+      }
     }
-
-    system("mkdir -p mcpat/");
-
-    orig.printMcPATxml("mcpat/orig.xml");
-    CPRegistry::get()->printMcPATFiles();
-
-    if(!noMcPAT) {  
-      std::cout << "Calculating orig Energy/Power...";
-      std::cout.flush();
-
-      system("mcpat -infile mcpat/orig.xml 2>&1 > mcpat/orig.out");
-      system("grep -ir \"Runtime Dynamic\" mcpat/orig.out | head -1 | cut -d\" \" -f6");
-
-      CPRegistry::get()->runMcPAT();
-    }
-
-
-
-
     std::cout << "--------------------\n";
   }
   return 0;

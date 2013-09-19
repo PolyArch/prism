@@ -3,7 +3,7 @@ CXX := /s/gcc-4.8.1/bin/g++
 
 GEM5_DIR=/scratch/tjn/mafia/gem5
 
-OPT ?= -O3
+OPT = -O0
 SRC := critpath.cpp gzstream.cpp cp_dep_graph.cpp prof.cpp
 CFLAGS := $(EXFLAGS) $(OPT) -std=c++11 -ggdb -gdwarf-3 -g3 -g -I. -Wall -Werror -pedantic -I../loopprof/. -I$(GEM5_DIR)/src
 LIBS := -lz -L../loopprof/. -lloopprof -lboost_serialization 
