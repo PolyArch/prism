@@ -283,14 +283,14 @@ int main(int argc, char *argv[])
       }
     }
     
-    if(count_nodes) {
+    if (count_nodes) {
       count++;
     }
 
     if (count == max_inst || count == Prof::get().stopInst) {
       break;
     }
-    if (count % 100000 == 0) {
+    if (count && count % 100000 == 0) {
       std::cout << "processed " << count << "\n";
     }
   }
