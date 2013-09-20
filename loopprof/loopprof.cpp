@@ -114,6 +114,17 @@ int main(int argc, char *argv[])
   }
   pathProf.procStackFile(stackfile.c_str());
 
+  //Process Stack File
+  string configfile;
+  if(start_pos != string::npos) {
+    string dir = filename.substr(0, start_pos);
+    stackfile = dir + "/m5out/config.ini";
+  } else {
+    stackfile = "m5out/config.ini";
+  }
+  pathProf.procConfigFile(stackfile.c_str());
+
+
   // 
   system("mkdir -p gams");
   if(print_cfgs) {

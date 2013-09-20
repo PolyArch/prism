@@ -651,9 +651,8 @@ void PathProf::printInfo() {
 }
 
 
-/*
-void procConfigFile(const char* filename) {
-  std::string line;
+void PathProf::procConfigFile(const char* filename) {
+  std::string line,tag,val;
   std::ifstream ifs(filename);
 
   if(!ifs.good()) {
@@ -662,18 +661,18 @@ void procConfigFile(const char* filename) {
   }
 
   while(std::getline(ifs, line)) {
-    std::istringstream iss( line );
-   
-    std::string tag,val;
-        
-
-    if( getToken(iss, tag) && getToken(iss,val) ) {
-      
-    } 
-
+    if(line.find("[system]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("cache_line_size",tag,val,cache_line_size);
+        }
+      } 
+    }
+  }
 
 }
-*/
+
 void PathProf::procStatsFile(const char* filename) {
   std::string line;
   std::ifstream ifs(filename);
@@ -684,7 +683,7 @@ void PathProf::procStatsFile(const char* filename) {
   }
 
   while(std::getline(ifs, line)) {
-    std::istringstream iss( line );
+    std::istringstream iss(line);
    
     std::string tag,val;
     if( getToken(iss, tag) && getToken(iss,val) ) {
