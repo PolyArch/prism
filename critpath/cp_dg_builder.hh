@@ -1,6 +1,7 @@
 #ifndef CP_DG_BUILDER_HH
 #define CP_DG_BUILDER_HH
 
+#if 0
 extern int FETCH_TO_DISPATCH_STAGES;
 extern int FETCH_WIDTH;
 extern int D_WIDTH;
@@ -17,6 +18,7 @@ extern int BR_MISS_PENALTY;
 extern int IN_ORDER_BR_MISS_PENALTY;
 extern int LQ_SIZE;
 extern int SQ_SIZE;
+#endif
 
 #include "cp_dep_graph.hh"
 #include "critpath.hh"
@@ -33,7 +35,6 @@ extern int SQ_SIZE;
 
 #include "pugixml/pugixml.hpp"
 
-extern int TraceOutputs;
 template<typename T, typename E>
 class CP_DG_Builder : public CriticalPath {
 

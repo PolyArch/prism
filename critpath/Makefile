@@ -3,13 +3,13 @@ CXX := /s/gcc-4.8.1/bin/g++
 
 GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
 
-OPT = -O0
+OPT = -O3
 
 SRC := critpath.cpp gzstream.cpp cp_dep_graph.cpp prof.cpp plugin.cpp
 CFLAGS := $(EXFLAGS) $(OPT) -std=c++11 -ggdb -gdwarf-3 -g3 -g -I. -Wall -Werror -pedantic -I../loopprof/. -I$(GEM5_DIR)/src
 LIBS := -lz -L../loopprof/. -lloopprof -lboost_serialization -ldl
 PWD := $(shell pwd)
-LDFLAGS := $(EXFLAGS) -ltcmalloc -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/  -Wl,-rpath,$(shell pwd)/../loopprof
+LDFLAGS := $(EXFLAGS) -ltcmalloc -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/  -Wl,-rpath,$(shell pwd)/../loopprof -rdynamic
 
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 

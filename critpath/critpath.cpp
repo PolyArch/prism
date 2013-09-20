@@ -24,6 +24,12 @@
 #include "cp_beret.hh"
 #include "cp_ccores.hh"
 
+CPRegistry* CPRegistry::_registry = 0;
+
+
+using namespace std;
+
+#if 0
 int FETCH_WIDTH = 4;
 int D_WIDTH = 4;
 int ISSUE_WIDTH = 4;
@@ -55,17 +61,10 @@ int DySER_LDOnly = 0;
 int TraceOutputs = 0;
 unsigned GPU_LD_Latency = 0;
 
-CPRegistry* CPRegistry::_registry = 0;
 int HighBW = 0;
-
-
-
-using namespace std;
-
-
-
-OrigCP orig;
-static RegisterCP<OrigCP> origCP("orig",false,true,true);
+#endif
+//OrigCP orig;
+static RegisterCP<OrigCP> origCP("orig", false, true, true);
 
 static RegisterCP<default_cpdg_t> baseInorder("base",true);
 static RegisterCP<default_cpdg_t> baseOOO("base",false);
@@ -78,6 +77,7 @@ int main(int argc, char *argv[])
   int  noMcPAT=0;
   int inorderWidth=0;
   int oooWidth=0;
+  bool traceOutputs = false;
 
   if (const char *plugin_dir = getenv("CP_PLUGINS_DIR"))
     load_plugins(plugin_dir);
@@ -88,25 +88,12 @@ int main(int argc, char *argv[])
       {"verbose",no_argument, 0, 'v'},
       {"count", no_argument, 0, 't'},
       {"no-registry", no_argument, 0, 'n'},
-      {"fetch-width", required_argument, 0, 'f'},
-      {"commit-width", required_argument, 0, 'c'},
-      {"rob-size", required_argument, 0, 'r'},
-      {"branch-miss-penalty", required_argument, 0, 'b'},
-      {"iq-size", required_argument, 0, 'i'},
       {"max-insts", required_argument, 0, 'm'},
-      {"dy-size", required_argument, 0, 's'},
-      {"cca-size", required_argument, 0, 'a'},
-      {"bandwidth", no_argument, &HighBW, 1},
-      {"concurrency", required_argument, 0, 'y'},
-      //{"dyser-loop", no_argument, &DySER_Loop, 1},
-      {"no-cca-ctrl", no_argument, &CCA_Ctrl, 0},
-      //{"dyser-load-only", no_argument, &DySER_LDOnly, 1},
-      {"gpu-ld-lat", required_argument, 0, 'l'},
-      {"trace-out", no_argument, &TraceOutputs, 1},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
       {"no-mcpat", no_argument, &noMcPAT, 1},
-      {"inorder-width", required_argument, 0, 2}, 
-      {"ooo-width", required_argument, 0, 3}, 
+      {"inorder-width", required_argument, 0, 2},
+      {"ooo-width", required_argument, 0, 3},
+      {"trace-out", no_argument, 0, 4},
       {0,0,0,0}
     };
 
@@ -122,7 +109,7 @@ int main(int argc, char *argv[])
     int option_index = 0;
 
     const struct option *longopts = &*long_options.begin();
-    int c = getopt_long(argc, argv, "hvntf:c:r:b:i:m:s:a:y:l:x",
+    int c = getopt_long(argc, argv, "hvtnm:x:",
                         longopts, &option_index);
     if (c == -1)
       break;
@@ -135,46 +122,45 @@ int main(int argc, char *argv[])
     case 1:
       break;
     case 2:
-      inorderWidth=atoi(optarg);
+      inorderWidth = atoi(optarg);
+      if (!inorderWidth)
+        inorderWidth = 2;
       break;
-    case 3: 
-      oooWidth=atoi(optarg);
+    case 3:
+      oooWidth = atoi(optarg);
+      if (!oooWidth)
+        oooWidth = 4;
+      break;
+    case 4:
+      traceOutputs = true;
       break;
     case 'h':
-      std::cout << argv[0] << " [-f F|-c C|-r R|-b B|-h|-n] file\n";
+      std::cout << argv[0] << " [options] file\n";
       return(0);
     case 'v': verbose = true; break;
-    case 'f': FETCH_WIDTH = atoi(optarg); break;
-    case 'c': COMMIT_WIDTH = atoi(optarg); break;
-    case 'r': ROB_SIZE = atoi(optarg); break;
-    case 'b': BR_MISS_PENALTY = atoi(optarg); break;
-    case 'i': IQ_WIDTH = atoi(optarg); break;
     case 'm': max_inst = atoi(optarg); break;
     case 'n': registry_off = true; break;
     case 't': count_nodes = true; break;
-    case 's': DySER_Size = atoi(optarg); break;
-    case 'a': CCA_Size = atoi(optarg); break;
-    case 'y': DySER_Concurrency = atoi(optarg); break;
-    case 'l': GPU_LD_Latency = atoi(optarg); break;
     case 'x':
-      if(strcmp(optarg,"inorder")==0) {
-        inorder_model=true;
-        ooo_model=false;
-      } else if(strcmp(optarg,"ooo")==0) {
-        inorder_model=false;
-        ooo_model=true;
-      } else if(strcmp(optarg,"both")==0) {
-        inorder_model=true;
-        ooo_model=true;
+      if (strcmp(optarg, "inorder") == 0) {
+        inorder_model = true;
+        ooo_model = false;
+      } else if (strcmp(optarg,"ooo") == 0) {
+        inorder_model = false;
+        ooo_model = true;
+      } else if (strcmp(optarg, "both") == 0) {
+        inorder_model = ooo_model = true;
       } else {
-        std::cerr << "option: \"" << optarg << "\" is not valid for --models";
+        std::cerr << "option: \""
+                  << optarg << "\" is not valid for --models."
+                  << "Options are inorder, ooo, or both.\n";
       }
     case '?': break;
     default:
       abort();
     }
   }
-
+#if 0
   if (GPU_LD_Latency <= 0) {
     GPU_LD_Latency = 0;
   }
@@ -205,6 +191,7 @@ int main(int argc, char *argv[])
   if (CCA_Size == 0) {
     CCA_Size = 3;
   }
+#endif
   if (argc - optind != 1) {
     std::cerr << "Requires one argument.\n";
     return 1;
@@ -234,13 +221,13 @@ int main(int argc, char *argv[])
 
   Prof::get().procStatsFile(statsfile.c_str());
 
-  if(inorderWidth>0) {
-    CPRegistry::get()->setWidth(inorderWidth,true);
+  if(inorderWidth > 0) {
+    CPRegistry::get()->setWidth(inorderWidth, true);
   }
-  if(oooWidth>0) {
-    CPRegistry::get()->setWidth(oooWidth,false);
+  if(oooWidth > 0) {
+    CPRegistry::get()->setWidth(oooWidth, false);
   }
-
+  CPRegistry::get()->setTraceOutputs(traceOutputs);
 
   //open prof file
   size_t dot_pos =  prof_file.find(".",start_pos);

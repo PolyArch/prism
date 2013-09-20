@@ -13,7 +13,6 @@
 #include <ostream>
 #include <fstream>
 
-extern int TraceOutputs; 
 
 #include "prof.hh"
 
@@ -31,6 +30,15 @@ protected:
   int WRITEBACK_WIDTH = 4;
   int COMMIT_WIDTH = 4;
   int SQUASH_WIDTH = 4;
+
+  int IQ_WIDTH = 64;
+  int ROB_SIZE = 192;
+  int LQ_SIZE = 32;
+  int SQ_SIZE = 32;
+
+  int FETCH_TO_DISPATCH_STAGES = 4;
+
+  bool TraceOutputs = false;
 
   //------- energy events -----------
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
@@ -97,6 +105,10 @@ protected:
 
 public:
   virtual void accelSpecificStats(std::ostream& out) {
+  }
+
+  void setTraceOutputs(bool t) {
+    TraceOutputs = t;
   }
 
   void setupOutFile(std::string file) {

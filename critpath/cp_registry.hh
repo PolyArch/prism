@@ -61,6 +61,12 @@ public:
     }
   }
 
+  void setTraceOutputs(bool t) {
+    for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
+      i->second->setTraceOutputs(t);
+    }
+  }
+
   void pruneCP(bool inorder, bool ooo) {
 
     assert((inorder || ooo) && "both inorder and ooo are false.");
