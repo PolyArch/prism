@@ -34,6 +34,11 @@ static-cp: static-critpath.o gzstream.o
 	@echo $($(quiet)cmd_ccld_out_o)
 	@g++ -o $@ $^ -lz -I.
 
+dyser: plugin
+	+make -C dyser
+
+plugin:
+	mkdir -p plugin
 
 %.o : %.cpp
 	@echo $($(quiet)cmd_cxx_o_cxx)
@@ -43,8 +48,9 @@ static-cp: static-critpath.o gzstream.o
 	@echo $($(quiet)cmd_cc_o_c)
 	@$(cmd_cc_o_c)
 
-.phony: clean
+.phony: clean dyser
 clean:
-	-rm -f critpath *.o *.d
+	-rm -rf critpath *.o *.d plugin
+	-make -C dyser clean
 
 -include $(OBJ:.o=.d)

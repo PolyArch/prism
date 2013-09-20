@@ -79,8 +79,7 @@ int main(int argc, char *argv[])
   int oooWidth=0;
   bool traceOutputs = false;
 
-  if (const char *plugin_dir = getenv("CP_PLUGINS_DIR"))
-    load_plugins(plugin_dir);
+  load_plugins(argv[0]);
 
   static struct option static_long_options[] =
     {

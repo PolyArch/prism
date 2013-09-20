@@ -2,7 +2,11 @@
 CC :=  /s/gcc-4.8.1/bin/gcc
 CXX := /s/gcc-4.8.1/bin/g++
 
-CFLAGS := -O3  -gdwarf-3  -I../ -I$(GEM5_DIR)/src -std=c++11 -I../../loopprof -fPIC
+GEM5_DIR = /p/vertical/afs-huge0/MaFIA/src/gem5
+OPT = -O3
+-include ../../make.config
+
+CFLAGS := $(OPT)  -gdwarf-3  -I../ -I$(GEM5_DIR)/src -std=c++11 -I../../loopprof -fPIC
 
 quiet_cmd_cc_o_c = "	[CC]			$(notdir $<)"
 	cmd_cc_o_c	 = $(CC) $(CFLAGS) -MD -c -o $@ $<
@@ -16,10 +20,15 @@ quiet_cmd_ccld_out_so = "	[CCLD]  -shared		$@"
 
 OBJ = cp_dyser.o
 
+install: libcpdyser.so ../plugin/
+	cp libcpdyser.so ../plugin/
+
 libcpdyser.so : $(OBJ) *.hh
 	@echo $($(quiet)cmd_ccld_out_so)
 	@$(cmd_ccld_out_so)
 
+../plugin:
+	mkdir -p ../plugin
 
 %.o : %.cpp
 	@echo $($(quiet)cmd_cxx_o_cxx)

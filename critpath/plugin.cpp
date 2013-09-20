@@ -8,12 +8,28 @@
 #include <iostream>
 #include <string>
 
-void load_plugins(const char *dirname)
+static std::string get_dir_name(const char *fname)
 {
+  std::string ret = std::string(fname);
+  size_t idx = ret.find_last_of('/');
+  if (idx == ret.length()) {
+    // skip the last /.
+    idx = ret.find_last_of('/', idx);
+  }
+  // /bin/critpath -> /bin
+  // /bin/critpath/ -> /bin
+  return ret.substr(0, idx);
+}
+
+void load_plugins(const char *argv0)
+{
+  const char *env_dirname = getenv("CP_PLUGIN_DIR");
+  std::string dirname = ((env_dirname)? std::string(env_dirname)
+                         : (get_dir_name(argv0) + "/" + "plugin"));
 
   DIR *dir;
   struct dirent *ent;
-  if ((dir = opendir(dirname)) == NULL) {
+  if ((dir = opendir(dirname.c_str())) == NULL) {
     //std::cerr << "cannot open directory: " << dirname << "\n";
     return;
   }

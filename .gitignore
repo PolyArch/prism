@@ -1,0 +1,10 @@
+
+
+*~
+*.o
+*.d
+*.so
+make.config
+critpath
+archive-test
+loopprof
