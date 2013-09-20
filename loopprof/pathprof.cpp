@@ -649,3 +649,166 @@ void PathProf::printInfo() {
     }
   } 
 }
+
+
+/*
+void procConfigFile(const char* filename) {
+  std::string line;
+  std::ifstream ifs(filename);
+
+  if(!ifs.good()) {
+    std::cerr << filename << " doesn't look good";
+    return;
+  }
+
+  while(std::getline(ifs, line)) {
+    std::istringstream iss( line );
+   
+    std::string tag,val;
+        
+
+    if( getToken(iss, tag) && getToken(iss,val) ) {
+      
+    } 
+
+
+}
+*/
+void PathProf::procStatsFile(const char* filename) {
+  std::string line;
+  std::ifstream ifs(filename);
+
+  if(!ifs.good()) {
+    std::cerr << filename << " doesn't look good";
+    return;
+  }
+
+  while(std::getline(ifs, line)) {
+    std::istringstream iss( line );
+   
+    std::string tag,val;
+    if( getToken(iss, tag) && getToken(iss,val) ) {
+      if( tag.find("switch_cpus") != std::string::npos ) {
+        getStat("numCycles",tag,val,numCycles);
+        getStat("idleCycles",tag,val,idleCycles);
+
+        getStat("iq.FU_type_0::total",tag,val,totalInsts);
+
+        getStat("iq.FU_type_0::MemRead",tag,val,loadOps);
+        getStat("iq.FU_type_0::MemWrite",tag,val,storeOps);
+
+        getStat("iq.FU_type_0::No_OpClass",tag,val,nOps);
+        getStat("iq.FU_type_0::IntAlu",tag,val,aluOps);
+        getStat("iq.FU_type_0::IntMult",tag,val,multOps);
+        getStat("iq.FU_type_0::IntDiv",tag,val,divOps);
+
+        getStat("iq.FU_type_0::FloatAdd",tag,val,faddOps);
+        getStat("iq.FU_type_0::FloatCmp",tag,val,fcmpOps);
+        getStat("iq.FU_type_0::FloatCvt",tag,val,fcvtOps);
+        getStat("iq.FU_type_0::FloatMult",tag,val,fmultOps);
+        getStat("iq.FU_type_0::FloatDiv",tag,val,fdivOps);
+        getStat("iq.FU_type_0::FloatSqrt",tag,val,fsqrtOps);
+
+        getStat("branchPred.lookups",tag,val,branchPredictions);
+        getStat("branchPred.condIncorrect",tag,val,mispredicts);
+
+        getStat("rob.rob_reads",tag,val,rob_reads);
+        getStat("rob.rob_writes",tag,val,rob_writes);
+
+        getStat("rename.int_rename_lookups",tag,val,rename_reads);
+        getStat("rename.int_rename_operands",tag,val,rename_writes);
+
+        getStat("rename.fp_rename_lookups",tag,val,fp_rename_reads);
+        getStat("rename.fp_rename_operands",tag,val,fp_rename_writes);
+
+        getStat("iq.int_inst_queue_reads",tag,val,int_iw_reads);
+        getStat("iq.int_inst_queue_writes",tag,val,int_iw_writes);
+        getStat("iq.int_inst_queue_wakeup_accesses",tag,val,int_iw_wakeups);
+
+        getStat("iq.fp_inst_queue_reads",tag,val,fp_iw_reads);
+        getStat("iq.fp_inst_queue_writes",tag,val,fp_iw_writes);
+        getStat("iq.fp_inst_queue_wakeup_accesses",tag,val,fp_iw_wakeups); 
+
+        getStat("int_regfile_reads",tag,val,int_regfile_reads);
+        getStat("int_regfile_writes",tag,val,int_regfile_writes);
+
+        getStat("fp_regfile_reads",tag,val,fp_regfile_reads);
+        getStat("fp_regfile_writes",tag,val,fp_regfile_writes);
+
+        getStat("function_calls",tag,val,func_calls);
+
+        getStat("iq.int_alu_accesses",tag,val,ialu_ops);
+        getStat("iq.fp_alu_accesses",tag,val,fp_alu_ops);
+
+        getStat("fetch.CacheLines",tag,val,icacheLinesFetched);
+
+        getStat("committedOps",tag,val,commitInsts);
+        getStat("commit.int_insts",tag,val,commitIntInsts);
+        getStat("commit.fp_insts",tag,val,commitFPInsts);
+        getStat("commit.branches",tag,val,commitBranches);
+        getStat("commit.branchMispredicts",tag,val,commitBranchMispredicts);
+        getStat("commit.loads",tag,val,commitLoads);
+        getStat("commit.refs",tag,val,commitMemRefs);
+      } else {
+        getStat("icache.overall_misses",tag,val,icacheMisses);
+        getStat("icache.replacements",tag,val,icacheReplacements);
+
+        getStat("dcache.ReadReq_accesses",tag,val,dcacheReads);
+        getStat("dcache.WriteReq_accesses",tag,val,dcacheWrites);
+        getStat("dcache.ReadReq_misses",tag,val,dcacheReadMisses);
+        getStat("dcache.WriteReq_misses",tag,val,dcacheWriteMisses);
+        getStat("dcache.replacements",tag,val,dcacheReplacements);
+
+        getStat("l2.ReadReq_accesses",tag,val,l2Reads); 
+        getStat("l2.WriteReq_accesses",tag,val,l2Writes); 
+        getStat("l2.ReadReq_misses",tag,val,l2ReadMisses); 
+        getStat("l2.WriteReq_misses",tag,val,l2WriteMisses); 
+        getStat("l2.replacements",tag,val,l2Replacements); 
+      }
+    }
+  }
+  intOps=nOps+aluOps+multOps+divOps;
+  fpOps=faddOps+fcmpOps+fcvtOps+fmultOps+fdivOps+fsqrtOps;
+  commitStores=commitMemRefs-commitLoads;
+
+  #if 0
+  std::cout << "Example " << int_iw_reads << ", ";
+  std::cout << dcacheReads << ", ";
+  std::cout << storeOps << ","; 
+  std::cout << "\n";
+  #endif
+}
+
+
+void PathProf::procStackFile(const char* filename) {
+  std::string line,line1,line2;
+  std::ifstream ifs(filename);
+
+  if(!ifs.good()) {
+    std::cerr << filename << " doesn't look good";
+    return;
+  }
+
+  std::getline(ifs,line1);
+  std::getline(ifs,line2);
+  std::cout << "line1: \"" << line1 << "\"\n";
+  _origPrevCPC = std::make_pair(std::stoul(line1), (uint16_t)std::stoi(line2));
+
+  std::getline(ifs,line1);
+  _origPrevCtrl = to_bool(line1);
+
+  std::getline(ifs,line1);
+  _origPrevCall = to_bool(line1);
+
+  std::getline(ifs,line1);
+  _origPrevRet = to_bool(line1);
+
+  if(ifs) {
+    while(std::getline(ifs, line)) {
+      _origstack.push_back(std::stoul(line)); 
+    }
+  }
+}
+
+
+

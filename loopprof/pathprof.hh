@@ -161,6 +161,101 @@ public:
   uint64_t l2ReadMisses=0,l2WriteMisses=0,l2Replacements=0;
   uint64_t intOps=0,fpOps=0;
 
+  //stats from m5out/config.ini
+  //[system]
+  int cache_line_size=0;
+  //[system.cpu.dcache]
+  int dcache_assoc=2, dcache_hit_latency=2, dcache_mshrs=4, dcache_response_latency=2;
+  int dcache_size=65536, dcache_tgts_per_mshr=20, dcache_write_buffers=8;
+
+  //[system.cpu.icache]
+  int icache_assoc, icache_hit_latency=2, icache_mshrs=4, icache_response_latency=2;
+  int icache_size=32768, icache_tgts_per_mshr=20, icache_write_buffers=8;
+  
+  //[system.l2]
+  int l2_assoc=2, l2_hit_latency=20, l2_mshrs=20, l2_response_latench=20;
+  int l2_size=2097152, l2_tgts_per_mshr=12, l2_write_buffers=8;
+  
+  //[system.switch_cpus]
+  int LQEntries=32, LSQDepCheckShift=0, SQEntries=32, cachePorts=2;
+  int commitToDecodeDelay=1, commitToFetchDelay=1;
+  int commitToIEWDelay=1, commitToRenameDelay=1;
+  int fetchWidth=4, decodeWidth=4, dispatchWidth=4, renameWidth=4;
+  int issueWidth=4, commitWidth=4, squashWidth=4;
+  int decodeToFetchDelay=1, decodeToRenameDelay=1;
+  int fetchToDecodeDelay=1, fetchTrapLatency=1;
+  int iewToDecodeDelay=1, iewToFetchDelay=1,iewToRenameDelay=1;
+  int issueToExecuteDelay=1;
+  int needsTSO=false;
+  int numIQEntries=64,numRobEntries=192;
+  int numPhysFloatRegs=256, numPhysIntRegs=256;
+  int renameToDecodeDelay=1, renameToFetchDelay=1, renameToIEWDelay=2;
+  int renameToROBDelay=1;
+  int wbDepth=16, wbWidth=4;
+
+  //[system.switch_cpus.branchPred]
+  int BTBEntries=4096, BTBTagSize=16, RASSize=16;
+
+  // ... this is hokey, but it will work for now ...
+  //[system.switch_cpus.fuPool.FUList0]
+  int int_alu_count=6;
+  
+  //[system.switch_cpus.fuPool.FUList0.opList]
+  int int_alu_issueLat=1;
+  int int_alu_opLat=1;
+
+  //[system.switch_cpus.fuPool.FUList1]
+  int mult_div_count=2;
+
+  //[system.switch_cpus.fuPool.FUList1.opList0]
+  int mult_issueLat=1;
+  int mult_opLat=3;
+
+  //[system.switch_cpus.fuPool.FUList1.opList0]
+  int div_issueLat=19;
+  int div_opLat=20;
+
+  //[system.switch_cpus.fuPool.FUList2]
+  int fp_alu_count=4;
+
+  //[system.switch_cpus.fuPool.FUList2.opList0]
+  int fadd_issueLat=1;
+  int fadd_opLat=2;
+
+  //[system.switch_cpus.fuPool.FUList2.opList1]
+  int fcmp_issueLat=1;
+  int fcmp_opLat=2;
+
+  //[system.switch_cpus.fuPool.FUList2.opList2]
+  int fcvt_issueLat=1;
+  int fcvt_opLat=2;
+
+  //[system.switch_cpus.fuPool.FUList3]
+  int fp_mul_div_sqrt_count=2; 
+
+  //[system.switch_cpus.fuPool.FUList3.opList0]
+  int fmul_issueLat=1;
+  int fmul_opLat=4;
+
+  //[system.switch_cpus.fuPool.FUList3.opList1]
+  int fdiv_issueLat=12;
+  int fdiv_opLat=12;
+
+  //[system.switch_cpus.fuPool.FUList3.opList2]
+  int fsqrt_issueLat=24;
+  int fsqrt_opLat=24;
+
+  //[system.switch_cpus.fuPool.FUList7]
+  int read_write_port_count=2;
+
+  //[system.switch_cpus.fuPool.FUList7.opList0]
+  int read_port_issueLat=1;
+  int read_port_opLat=1;
+
+  //[system.switch_cpus.fuPool.FUList7.opList1]
+  int write_port_issueLat=1;
+  int write_port_opLat=1;
+
 private:
   //KNOWN_ISSUE: FunctionInfo's are not deleted
 
@@ -211,10 +306,10 @@ private:
   Op* _op_buf[MAX_OPS];
 
   //get a token from a stream
-  static bool getToken(std::istringstream& iss, std::string& thing) {
+  static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
     bool valid = true; 
     do {
-      valid = std::getline( iss, thing , ' ');
+      valid = std::getline( iss, thing , c);
     } while(valid && thing.size() == 0);
     return valid;
   }
@@ -225,6 +320,14 @@ private:
       stat = std::stoul(val);
     }
   }
+
+  static void getStat(const char* tag_str, std::string& tag, 
+               std::string& val, int& stat) {
+    if(tag.find(tag_str) != std::string::npos) {
+      stat = std::stoi(val);
+    }
+  }
+
 
   static bool to_bool(std::string const& s) {
     return s != "0";
@@ -239,141 +342,9 @@ public:
     ELF_parser::read_symbol_tables(filename,sym_tab);
   }
 
-  void procStatsFile(const char* filename) {
-    std::string line;
-    std::ifstream ifs(filename);
-
-    if(!ifs.good()) {
-      std::cerr << filename << " doesn't look good";
-      return;
-    }
-
-    while(std::getline(ifs, line)) {
-      std::istringstream iss( line );
-     
-      std::string tag,val;
-      if( getToken(iss, tag) && getToken(iss,val) ) {
-        if( tag.find("switch_cpus") != std::string::npos ) {
-          getStat("numCycles",tag,val,numCycles);
-          getStat("idleCycles",tag,val,idleCycles);
-
-          getStat("iq.FU_type_0::total",tag,val,totalInsts);
-
-          getStat("iq.FU_type_0::MemRead",tag,val,loadOps);
-          getStat("iq.FU_type_0::MemWrite",tag,val,storeOps);
-
-          getStat("iq.FU_type_0::No_OpClass",tag,val,nOps);
-          getStat("iq.FU_type_0::IntAlu",tag,val,aluOps);
-          getStat("iq.FU_type_0::IntMult",tag,val,multOps);
-          getStat("iq.FU_type_0::IntDiv",tag,val,divOps);
-
-          getStat("iq.FU_type_0::FloatAdd",tag,val,faddOps);
-          getStat("iq.FU_type_0::FloatCmp",tag,val,fcmpOps);
-          getStat("iq.FU_type_0::FloatCvt",tag,val,fcvtOps);
-          getStat("iq.FU_type_0::FloatMult",tag,val,fmultOps);
-          getStat("iq.FU_type_0::FloatDiv",tag,val,fdivOps);
-          getStat("iq.FU_type_0::FloatSqrt",tag,val,fsqrtOps);
-
-          getStat("branchPred.lookups",tag,val,branchPredictions);
-          getStat("branchPred.condIncorrect",tag,val,mispredicts);
-
-          getStat("rob.rob_reads",tag,val,rob_reads);
-          getStat("rob.rob_writes",tag,val,rob_writes);
-
-          getStat("rename.int_rename_lookups",tag,val,rename_reads);
-          getStat("rename.int_rename_operands",tag,val,rename_writes);
-
-          getStat("rename.fp_rename_lookups",tag,val,fp_rename_reads);
-          getStat("rename.fp_rename_operands",tag,val,fp_rename_writes);
-
-          getStat("iq.int_inst_queue_reads",tag,val,int_iw_reads);
-          getStat("iq.int_inst_queue_writes",tag,val,int_iw_writes);
-          getStat("iq.int_inst_queue_wakeup_accesses",tag,val,int_iw_wakeups);
-
-          getStat("iq.fp_inst_queue_reads",tag,val,fp_iw_reads);
-          getStat("iq.fp_inst_queue_writes",tag,val,fp_iw_writes);
-          getStat("iq.fp_inst_queue_wakeup_accesses",tag,val,fp_iw_wakeups); 
-
-          getStat("int_regfile_reads",tag,val,int_regfile_reads);
-          getStat("int_regfile_writes",tag,val,int_regfile_writes);
-
-          getStat("fp_regfile_reads",tag,val,fp_regfile_reads);
-          getStat("fp_regfile_writes",tag,val,fp_regfile_writes);
-
-          getStat("function_calls",tag,val,func_calls);
-
-          getStat("iq.int_alu_accesses",tag,val,ialu_ops);
-          getStat("iq.fp_alu_accesses",tag,val,fp_alu_ops);
-
-          getStat("fetch.CacheLines",tag,val,icacheLinesFetched);
-
-          getStat("committedOps",tag,val,commitInsts);
-          getStat("commit.int_insts",tag,val,commitIntInsts);
-          getStat("commit.fp_insts",tag,val,commitFPInsts);
-          getStat("commit.branches",tag,val,commitBranches);
-          getStat("commit.branchMispredicts",tag,val,commitBranchMispredicts);
-          getStat("commit.loads",tag,val,commitLoads);
-          getStat("commit.refs",tag,val,commitMemRefs);
-        } else {
-          getStat("icache.overall_misses",tag,val,icacheMisses);
-          getStat("icache.replacements",tag,val,icacheReplacements);
-
-          getStat("dcache.ReadReq_accesses",tag,val,dcacheReads);
-          getStat("dcache.WriteReq_accesses",tag,val,dcacheWrites);
-          getStat("dcache.ReadReq_misses",tag,val,dcacheReadMisses);
-          getStat("dcache.WriteReq_misses",tag,val,dcacheWriteMisses);
-          getStat("dcache.replacements",tag,val,dcacheReplacements);
-
-          getStat("l2.ReadReq_accesses",tag,val,l2Reads); 
-          getStat("l2.WriteReq_accesses",tag,val,l2Writes); 
-          getStat("l2.ReadReq_misses",tag,val,l2ReadMisses); 
-          getStat("l2.WriteReq_misses",tag,val,l2WriteMisses); 
-          getStat("l2.replacements",tag,val,l2Replacements); 
-        }
-      }
-    }
-    intOps=nOps+aluOps+multOps+divOps;
-    fpOps=faddOps+fcmpOps+fcvtOps+fmultOps+fdivOps+fsqrtOps;
-    commitStores=commitMemRefs-commitLoads;
-
-    #if 0
-    std::cout << "Example " << int_iw_reads << ", ";
-    std::cout << dcacheReads << ", ";
-    std::cout << storeOps << ","; 
-    std::cout << "\n";
-    #endif
-  }
-
-
-  void procStackFile(const char* filename) {
-    std::string line,line1,line2;
-    std::ifstream ifs(filename);
-
-    if(!ifs.good()) {
-      std::cerr << filename << " doesn't look good";
-      return;
-    }
-
-    std::getline(ifs,line1);
-    std::getline(ifs,line2);
-    std::cout << "line1: \"" << line1 << "\"\n";
-    _origPrevCPC = std::make_pair(std::stoul(line1), (uint16_t)std::stoi(line2));
-
-    std::getline(ifs,line1);
-    _origPrevCtrl = to_bool(line1);
-
-    std::getline(ifs,line1);
-    _origPrevCall = to_bool(line1);
-
-    std::getline(ifs,line1);
-    _origPrevRet = to_bool(line1);
-
-    if(ifs) {
-      while(std::getline(ifs, line)) {
-        _origstack.push_back(std::stoul(line)); 
-      }
-    }
-  }
+  void procConfigFile(const char* filename);
+  void procStatsFile(const char* filename);
+  void procStackFile(const char* filename);
 
   FunctionInfo* getOrAddFunc(CPC newCPC);
   void setStartInst(uint64_t count) {startInst=count;}
