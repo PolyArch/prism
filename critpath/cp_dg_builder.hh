@@ -74,8 +74,8 @@ public:
     std::shared_ptr<Inst_t> sh_inst(inst);
     getCPDG()->addInst(sh_inst,index);
     addDeps(*inst,op);
-    pushPipe(sh_inst); 
-    inserted(sh_inst,img);
+    pushPipe(sh_inst);
+    inserted(sh_inst);
 
     //cheatign a little here
     regfile_freads+=img._regfile_fread;
@@ -215,7 +215,7 @@ protected:
   uint64_t maxIndex;
   uint64_t _curCycle;
 
-  virtual void inserted(std::shared_ptr<Inst_t>& inst, const CP_NodeDiskImage& img) {
+  virtual void inserted(std::shared_ptr<Inst_t>& inst) {
     maxIndex = inst->index();
     _curCycle = inst->cycleOfStage(Inst_t::Fetch);
 

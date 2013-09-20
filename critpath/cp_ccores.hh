@@ -100,8 +100,8 @@ public:
                                *inst, Inst_t::Fetch, 2, E_CXFR);
       }
       addDeps(*inst);
-      pushPipe(sh_inst); 
-      inserted(sh_inst,img);
+      pushPipe(sh_inst);
+      inserted(sh_inst);
     }
 
   }

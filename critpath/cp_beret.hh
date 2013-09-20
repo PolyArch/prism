@@ -296,11 +296,10 @@ public:
             inst->set_ex_lat(5);
             std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
             addDeps(*inst);
-            pushPipe(sh_inst); 
-            inserted(sh_inst,img);
+            pushPipe(sh_inst);
+            inserted(sh_inst);
             //inserted(inst,img);
 
-	    
             curBeretStartCycle=inst->cycleOfStage(inst->eventComplete());
 	    addLoopIteration(inst,Inst_t::Commit);
           }
@@ -334,8 +333,8 @@ public:
               std::shared_ptr<Inst_t> sh_inst(inst);
               getCPDG()->addInst(sh_inst,index);
               addDeps(*inst);
-              pushPipe(sh_inst); 
-              inserted(sh_inst,img);
+              pushPipe(sh_inst);
+              inserted(sh_inst);
 	    }
 	    //Done Replaying up to the instruction before the bad instruction!
 	    //The CPU execution is now caught up.
@@ -355,8 +354,8 @@ public:
         std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
         getCPDG()->addInst(sh_inst,index);
         addDeps(*inst);
-        pushPipe(sh_inst); 
-        inserted(sh_inst,img);  
+        pushPipe(sh_inst);
+        inserted(sh_inst);
         break;
       } case BERET: {
         //make beret instruction

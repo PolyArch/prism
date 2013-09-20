@@ -12,6 +12,7 @@
 #include "cp_registry.hh"
 #include "critpath.hh"
 #include "gzstream.hh"
+#include "plugin.hh"
 
 #include "origcp.hh"
 #include "default_cpdg.hh"
@@ -78,6 +79,9 @@ int main(int argc, char *argv[])
   int inorderWidth=0;
   int oooWidth=0;
 
+  if (const char *plugin_dir = getenv("CP_PLUGINS_DIR"))
+    load_plugins(plugin_dir);
+
   static struct option static_long_options[] =
     {
       {"help", no_argument, 0, 'h'},
@@ -94,9 +98,9 @@ int main(int argc, char *argv[])
       {"cca-size", required_argument, 0, 'a'},
       {"bandwidth", no_argument, &HighBW, 1},
       {"concurrency", required_argument, 0, 'y'},
-      {"dyser-loop", no_argument, &DySER_Loop, 1},
+      //{"dyser-loop", no_argument, &DySER_Loop, 1},
       {"no-cca-ctrl", no_argument, &CCA_Ctrl, 0},
-      {"dyser-load-only", no_argument, &DySER_LDOnly, 1},
+      //{"dyser-load-only", no_argument, &DySER_LDOnly, 1},
       {"gpu-ld-lat", required_argument, 0, 'l'},
       {"trace-out", no_argument, &TraceOutputs, 1},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
