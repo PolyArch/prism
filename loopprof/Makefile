@@ -3,8 +3,8 @@ CXX := /s/gcc-4.8.1/bin/g++
 
 OPT ?= -O3
 
-#GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
-GEM5_DIR=/scratch/tjn/mafia/gem5
+GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
+-include ../make.config
 
 
 SRC := pathprof.cpp gzstream.cpp op.cpp bb.cpp loopinfo.cpp functioninfo.cpp
