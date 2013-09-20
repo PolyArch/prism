@@ -159,8 +159,6 @@ int main(int argc, char *argv[])
     }
   }
 
-  //std::cout << inorder_model << " " << ooo_model << "\n"; 
-  
   if (GPU_LD_Latency <= 0) {
     GPU_LD_Latency = 0;
   }
