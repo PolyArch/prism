@@ -25,6 +25,13 @@ protected:
   bool _isInOrder;
   bool _setInOrder=false;
 
+  int FETCH_WIDTH = 4;
+  int D_WIDTH = 4;
+  int ISSUE_WIDTH = 4;
+  int WRITEBACK_WIDTH = 4;
+  int COMMIT_WIDTH = 4;
+  int SQUASH_WIDTH = 4;
+
   //------- energy events -----------
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
   uint64_t committed_branch_insts=0, mispeculatedInstructions=0;
@@ -104,6 +111,10 @@ public:
     _setInOrder=true;
   }
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
+
+  virtual void setWidth(int i) {
+    return;
+  }
 
   virtual void insert(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     insert_inst(img,index,op);

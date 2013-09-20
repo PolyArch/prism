@@ -16,6 +16,7 @@ private:
   static CPRegistry *_registry;
   std::map<std::string, CriticalPath*> cpmap;
   std::map<std::string, bool> cp2Enabled;
+  CriticalPath* baselineCP=NULL;
 
 public:
   static CPRegistry* get() {
@@ -52,6 +53,13 @@ public:
     handleArgv(ooo.c_str(), false);
   }
 
+  void setWidth(int width, bool inorder) {
+    for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
+      if(i->second->isInOrder() == inorder) {
+        i->second->setWidth(width);
+      }
+    }
+  }
 
   void pruneCP(bool inorder, bool ooo) {
 
@@ -72,7 +80,7 @@ public:
   }
 
   void register_cp(std::string name, CriticalPath *cp,
-                   bool EnableByDefault) {
+                   bool EnableByDefault, bool isBaseline) {
     std::string fullname;
     if(cp->isInOrder()) {
        fullname="inorder-"+name;
@@ -87,6 +95,10 @@ public:
     std::string trace_out = std::string(fullname.c_str()) + ".txt";
     cp->setupOutFile(trace_out.c_str());
     cp2Enabled[fullname] = EnableByDefault;
+
+    if(isBaseline) {
+      baselineCP = cp;
+    }
   }
 
   void insert(CP_NodeDiskImage img, uint64_t index, Op* op) {
@@ -95,18 +107,12 @@ public:
     }
   }
 
-/*
-  void verbose() {
-    for (std::map<const char*, CriticalPath *>::iterator I = cpmap.begin(),
-           E = cpmap.end(); I != E; ++I) {
-      std::cout << I->first << " :: ";
-      I->second->_nodes.back().print_to_stream(std::cout);
+  void results() {
+    if(!baselineCP) {
+      baselineCP = cpmap.begin()->second;
     }
-  }
-*/
+    double baseline = baselineCP->numCycles();
 
-
-  void results(uint64_t baseline) {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       std::cout << "Number of cycles [ " << I->first << " ]: "
                 << I->second->numCycles() << "  "
@@ -123,7 +129,7 @@ public:
   }
   void runMcPAT() {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      std::cout << "Calculating " << I->first << " Energy/Power...";
+      std::cout << I->first << " Dynamic Power(W)... ";
       std::cout.flush();
 
       std::string ms = std::string("mcpat -infile mcpat/") + I->first +
@@ -176,11 +182,13 @@ struct RegisterCP
   T cp_obj;
   RegisterCP(const char *N,
              bool attachInorder = false,
-             bool EnableByDefault = false) {
+             bool EnableByDefault = false,
+             bool isBaseline = false) {
     cp_obj.setInOrder(attachInorder);
     CPRegistry::get()->register_cp(std::string(N),
                                    &cp_obj,
-                                   EnableByDefault);
+                                   EnableByDefault,
+                                   isBaseline);
   }
 };
 

@@ -60,6 +60,15 @@ public:
   virtual ~CP_DG_Builder() {
   }
 
+  virtual void setWidth(int i) {
+    FETCH_WIDTH = i;
+    D_WIDTH = i;
+    ISSUE_WIDTH = i;
+    WRITEBACK_WIDTH = i;
+    COMMIT_WIDTH = i;
+    SQUASH_WIDTH = i;
+  }
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
     Inst_t* inst = new Inst_t(img,index);
     std::shared_ptr<Inst_t> sh_inst(inst);
@@ -1429,7 +1438,7 @@ protected:
     sa(core_node,"ROB_writes",(uint64_t)(rob_writes*specFactor)+squashed_insts);
 
     sa(core_node,"rename_reads",(uint64_t)(rename_reads*specFactor));
-    sa(core_node,"rename_writes",(uint64_t)(rename_writes*highSpecFactor));
+    sa(core_node,"rename_writes",(uint64_t)(rename_writes*specFactor)+squashed_insts);
     sa(core_node,"fp_rename_reads",(uint64_t)(rename_freads*specFactor));
     sa(core_node,"fp_rename_writes",(uint64_t)(rename_fwrites*specFactor));
                                                                     

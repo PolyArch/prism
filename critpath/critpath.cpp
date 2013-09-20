@@ -27,7 +27,6 @@ int FETCH_WIDTH = 4;
 int D_WIDTH = 4;
 int ISSUE_WIDTH = 4;
 int FETCH_TO_DISPATCH_STAGES = 4;
-int EXECUTE_WIDTH =2;
 int WRITEBACK_WIDTH = 4;
 int COMMIT_WIDTH = 4;
 int SQUASH_WIDTH = 4;
@@ -65,16 +64,19 @@ using namespace std;
 
 
 OrigCP orig;
+static RegisterCP<OrigCP> origCP("orig",false,true,true);
+
 static RegisterCP<default_cpdg_t> baseInorder("base",true);
 static RegisterCP<default_cpdg_t> baseOOO("base",false);
 
 
 int main(int argc, char *argv[])
 {
-  orig.setupOutFile("orig_cp.txt");
   bool inorder_model=true;
   bool ooo_model=true;
   int  noMcPAT=0;
+  int inorderWidth=0;
+  int oooWidth=0;
 
   static struct option static_long_options[] =
     {
@@ -99,6 +101,8 @@ int main(int argc, char *argv[])
       {"trace-out", no_argument, &TraceOutputs, 1},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
       {"no-mcpat", no_argument, &noMcPAT, 1},
+      {"inorder-width", required_argument, 0, 2}, 
+      {"ooo-width", required_argument, 0, 3}, 
       {0,0,0,0}
     };
 
@@ -123,6 +127,14 @@ int main(int argc, char *argv[])
     case 0:
       CPRegistry::get()->handleArgv(long_options[option_index].name);
       //std::cout << "Saw " << long_options[option_index].name << "\n";
+      break;
+    case 1:
+      break;
+    case 2:
+      inorderWidth=atoi(optarg);
+      break;
+    case 3: 
+      oooWidth=atoi(optarg);
       break;
     case 'h':
       std::cout << argv[0] << " [-f F|-c C|-r R|-b B|-h|-n] file\n";
@@ -218,6 +230,12 @@ int main(int argc, char *argv[])
 
   Prof::get().procStatsFile(statsfile.c_str());
 
+  if(inorderWidth>0) {
+    CPRegistry::get()->setWidth(inorderWidth,true);
+  }
+  if(oooWidth>0) {
+    CPRegistry::get()->setWidth(oooWidth,false);
+  }
 
 
   //open prof file
@@ -269,20 +287,12 @@ int main(int argc, char *argv[])
       prevRet=img._isreturn;
 
       if(op!=NULL) {
-        orig.insert(img, count, op);
-        //base_ooo.insert(img, count, op);
-
         if (!registry_off) {
           CPRegistry::get()->insert(img, count, op);
-          //if (verbose) {
-          //  CPRegistry::get()->verbose();
-          //}
         }
 
         numCycles += img._fc;
-        //assert(numCycles + img._cmpc == orig.numCycles());
         ++count;
-
       }
     }
     
@@ -310,25 +320,13 @@ int main(int argc, char *argv[])
   std::cout << "numCycles " << numCycles << "\n";
   inf.close();
   std::cout << "Num of records              :" << count << "\n";
-  if (!count_nodes) {
-    std::cout << "Number of cycles [ original ]: " << orig.numCycles() << "\n";
-    //std::cout << "Number of cycles [cpdg]    :" << base_ooo.numCycles()
-    //          << "  " << (double)orig.numCycles()/base_ooo.numCycles() << "\n";
 
+  if (!count_nodes) {
     if (!registry_off) {
-      CPRegistry::get()->results(orig.numCycles());
+      CPRegistry::get()->results();
 
       if(!noMcPAT) {
         system("mkdir -p mcpat/");
-
-        orig.printMcPATxml("mcpat/orig.xml");
-        CPRegistry::get()->printMcPATFiles();
-
-        std::cout << "Calculating orig Energy/Power...";
-        std::cout.flush();
-
-        system("mcpat -infile mcpat/orig.xml 2>&1 > mcpat/orig.out");
-        system("grep -ir \"Runtime Dynamic\" mcpat/orig.out | head -1 | cut -d\" \" -f6");
         CPRegistry::get()->runMcPAT();
       }
     }

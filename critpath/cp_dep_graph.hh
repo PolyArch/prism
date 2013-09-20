@@ -708,6 +708,10 @@ public:
 
   uint64_t numCycles;
   uint64_t getMaxCycles() {
+    if(_latestIdx==0) {
+      return -1;
+    } 
+
     dg_inst_base<T,E> &inst = queryNodes(_latestIdx);
     return inst.finalCycle();
   }
