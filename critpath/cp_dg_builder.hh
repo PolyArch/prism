@@ -91,7 +91,7 @@ public:
     rob_head_at_dispatch++;
   }
 
-  virtual dep_graph_t<Inst_t,T,E> * getCPDG() =0;
+  virtual dep_graph_t<Inst_t,T,E> * getCPDG() = 0;
 
   uint64_t numCycles() {
     getCPDG()->finish(maxIndex);

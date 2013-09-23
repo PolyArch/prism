@@ -5,6 +5,6 @@
 *.d
 *.so
 make.config
-critpath
+critpath/critpatch
 archive-test
-loopprof
+loopprof/loopprof

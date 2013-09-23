@@ -1,6 +1,6 @@
 
-#ifndef CP_DYSER_NEW_HH
-#define CP_DYSER_NEW_HH
+#ifndef CP_DYSER_HH
+#define CP_DYSER_HH
 
 #include "cp_dg_builder.hh"
 #include "cp_registry.hh"
