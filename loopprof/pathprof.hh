@@ -173,7 +173,7 @@ public:
   int icache_size=32768, icache_tgts_per_mshr=20, icache_write_buffers=8;
   
   //[system.l2]
-  int l2_assoc=2, l2_hit_latency=20, l2_mshrs=20, l2_response_latench=20;
+  int l2_assoc=2, l2_hit_latency=20, l2_mshrs=20, l2_response_latency=20;
   int l2_size=2097152, l2_tgts_per_mshr=12, l2_write_buffers=8;
   
   //[system.switch_cpus]
@@ -186,8 +186,8 @@ public:
   int fetchToDecodeDelay=1, fetchTrapLatency=1;
   int iewToDecodeDelay=1, iewToFetchDelay=1,iewToRenameDelay=1;
   int issueToExecuteDelay=1;
-  int needsTSO=false;
-  int numIQEntries=64,numRobEntries=192;
+  bool needsTSO=false;
+  int numIQEntries=64, numROBEntries=192;
   int numPhysFloatRegs=256, numPhysIntRegs=256;
   int renameToDecodeDelay=1, renameToFetchDelay=1, renameToIEWDelay=2;
   int renameToROBDelay=1;
@@ -205,13 +205,13 @@ public:
   int int_alu_opLat=1;
 
   //[system.switch_cpus.fuPool.FUList1]
-  int mult_div_count=2;
+  int mul_div_count=2;
 
   //[system.switch_cpus.fuPool.FUList1.opList0]
-  int mult_issueLat=1;
-  int mult_opLat=3;
+  int mul_issueLat=1;
+  int mul_opLat=3;
 
-  //[system.switch_cpus.fuPool.FUList1.opList0]
+  //[system.switch_cpus.fuPool.FUList1.opList1]
   int div_issueLat=19;
   int div_opLat=20;
 
@@ -325,6 +325,13 @@ private:
                std::string& val, int& stat) {
     if(tag.find(tag_str) != std::string::npos) {
       stat = std::stoi(val);
+    }
+  }
+
+  static void getStat(const char* tag_str, std::string& tag, 
+               std::string& val, bool& stat) {
+    if(tag.find(tag_str) != std::string::npos) {
+      stat = val.find("false")!=std::string::npos;
     }
   }
 

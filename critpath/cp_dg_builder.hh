@@ -77,13 +77,6 @@ public:
     addDeps(*inst,op);
     pushPipe(sh_inst);
     inserted(sh_inst);
-
-    //cheatign a little here
-    regfile_freads+=img._regfile_fread;
-    //regfile_fwrites+=img._regfile_fwrite;
-    regfile_reads+=img._regfile_read;
-    //regfile_writes+=img._regfile_write;
-
   }
 
   virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
@@ -514,6 +507,8 @@ protected:
     regfile_fwrites+=inst._numFPDestRegs;
     regfile_writes+=inst._numIntDestRegs;
 
+    regfile_freads+=inst._numFPSrcRegs;
+    regfile_reads+=inst._numIntSrcRegs;
 
   }
 

@@ -668,9 +668,217 @@ void PathProf::procConfigFile(const char* filename) {
           getStat("cache_line_size",tag,val,cache_line_size);
         }
       } 
+    } else if(line.find("[system.cpu.dcache]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("assoc",tag,val,dcache_assoc);
+          getStat("hit_latency",tag,val,dcache_hit_latency);
+          getStat("mshrs",tag,val,dcache_mshrs);
+          getStat("response_latency",tag,val,dcache_response_latency);
+          getStat("size",tag,val,dcache_size);
+          getStat("tgts_per_mshr",tag,val,dcache_tgts_per_mshr);
+          getStat("write_buffers",tag,val,dcache_write_buffers);
+        }
+      } 
+    } else if(line.find("[system.cpu.icache]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("assoc",tag,val,icache_assoc);
+          getStat("hit_latency",tag,val,icache_hit_latency);
+          getStat("mshrs",tag,val,icache_mshrs);
+          getStat("response_latency",tag,val,icache_response_latency);
+          getStat("size",tag,val,icache_size);
+          getStat("tgts_per_mshr",tag,val,icache_tgts_per_mshr);
+          getStat("write_buffers",tag,val,icache_write_buffers);
+        }
+      } 
+    } else if(line.find("[system.l2]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("assoc",tag,val,l2_assoc);
+          getStat("hit_latency",tag,val,l2_hit_latency);
+          getStat("mshrs",tag,val,l2_mshrs);
+          getStat("response_latency",tag,val,l2_response_latency);
+          getStat("size",tag,val,l2_size);
+          getStat("tgts_per_mshr",tag,val,l2_tgts_per_mshr);
+          getStat("write_buffers",tag,val,l2_write_buffers);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("LQEntries",tag,val,LQEntries);
+          getStat("LSQDepCheckShift",tag,val,LSQDepCheckShift);
+          getStat("SQEntries",tag,val,SQEntries);
+          getStat("cachePorts",tag,val,cachePorts);
+          getStat("commitToDecodeDelay",tag,val,commitToDecodeDelay);
+          getStat("commitToFetchDelay",tag,val,commitToFetchDelay);
+          getStat("fetchWidth",tag,val,fetchWidth);
+          getStat("decodeWidth",tag,val,decodeWidth);
+          getStat("dispatchWidth",tag,val,dispatchWidth);
+          getStat("renameWidth",tag,val,renameWidth);
+          getStat("issueWidth",tag,val,issueWidth);
+          getStat("commitWidth",tag,val,commitWidth);
+          getStat("squashWidth",tag,val,squashWidth);
+          getStat("decodeToFetchDelay",tag,val,decodeToFetchDelay);
+          getStat("decodeTorenameDelay",tag,val,decodeToRenameDelay);
+          getStat("fetchToDecodeDelay",tag,val,fetchToDecodeDelay);
+          getStat("fetchTrapLatency",tag,val,fetchTrapLatency);
+          getStat("iewToDecodeDelay",tag,val,iewToDecodeDelay);
+          getStat("iewToFetchDelay",tag,val,iewToFetchDelay);
+          getStat("iewToRenameDelay",tag,val,iewToRenameDelay);
+          getStat("issueToExecuteDelay",tag,val,issueToExecuteDelay);
+          getStat("needsTSO",tag,val,needsTSO);
+          getStat("numIQEntries",tag,val,numIQEntries);
+          getStat("numROBEntries",tag,val,numROBEntries);
+          getStat("numPhysFloatRegs",tag,val,numPhysFloatRegs);
+          getStat("numPhysIntRegs",tag,val,numPhysIntRegs);
+          getStat("renameToDecodeDelay",tag,val,renameToDecodeDelay);
+          getStat("renameToFetchDelay",tag,val,renameToFetchDelay);
+          getStat("renameToIEWDelay",tag,val,renameToIEWDelay);
+          getStat("renameToROBDelay",tag,val,renameToROBDelay);
+          getStat("wbDepth",tag,val,wbDepth);
+          getStat("wbWidth",tag,val,wbWidth);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.branchPred]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("BTBEntries",tag,val,BTBEntries);
+          getStat("BTBTagSize",tag,val,BTBTagSize);
+          getStat("RASSize",tag,val,RASSize);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList0]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("count",tag,val,int_alu_count);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList0.opList]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,int_alu_issueLat);
+          getStat("opLat",tag,val,int_alu_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList1]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("count",tag,val,mul_div_count);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList1.opList0]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,mul_issueLat);
+          getStat("opLat",tag,val,mul_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList1.opList1]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,div_issueLat);
+          getStat("opLat",tag,val,div_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList2]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("count",tag,val,fp_alu_count);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList2.opList0]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,fadd_issueLat);
+          getStat("opLat",tag,val,fadd_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList2.opList1]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,fcmp_issueLat);
+          getStat("opLat",tag,val,fcmp_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList2.opList2]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,fcvt_issueLat);
+          getStat("opLat",tag,val,fcvt_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList3]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("count",tag,val,fp_mul_div_sqrt_count);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList3.opList0]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,fmul_issueLat);
+          getStat("opLat",tag,val,fmul_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList3.opList1]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,fdiv_issueLat);
+          getStat("opLat",tag,val,fdiv_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList3.opList2]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,fsqrt_issueLat);
+          getStat("opLat",tag,val,fsqrt_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList7]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("count",tag,val,read_write_port_count);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList7.opList0]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,read_port_issueLat);
+          getStat("opLat",tag,val,read_port_opLat);
+        }
+      } 
+    } else if(line.find("[system.switch_cpus.fuPool.FUList7.opList1]")!= string::npos) {
+      while(std::getline(ifs, line) && !line.empty()) {
+        std::istringstream iss(line);
+        if( getToken(iss, tag,'=') && getToken(iss,val) ) {
+          getStat("issueLat",tag,val,write_port_issueLat);
+          getStat("opLat",tag,val,write_port_opLat);
+        }
+      } 
     }
   }
-
 }
 
 void PathProf::procStatsFile(const char* filename) {
@@ -790,7 +998,6 @@ void PathProf::procStackFile(const char* filename) {
 
   std::getline(ifs,line1);
   std::getline(ifs,line2);
-  std::cout << "line1: \"" << line1 << "\"\n";
   _origPrevCPC = std::make_pair(std::stoul(line1), (uint16_t)std::stoi(line2));
 
   std::getline(ifs,line1);

@@ -207,6 +207,8 @@ public:
   bool _floating=false;
   bool _iscall=false;
   uint8_t _numSrcRegs=0;
+  uint8_t _numFPSrcRegs=0;
+  uint8_t _numIntSrcRegs=0;
   uint8_t _numFPDestRegs=0;
   uint8_t _numIntDestRegs=0;
 
@@ -244,6 +246,8 @@ public:
     _floating=img._floating;
     _iscall=img._iscall;
     _numSrcRegs=img._numSrcRegs;
+    _numFPSrcRegs=img._regfile_fread;
+    _numIntSrcRegs=img._regfile_read;
     _numFPDestRegs=img._numFPDestRegs;
     _numIntDestRegs=img._numIntDestRegs;
 

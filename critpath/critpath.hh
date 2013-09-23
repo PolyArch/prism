@@ -23,7 +23,10 @@ protected:
   uint64_t _last_index;
   bool _isInOrder;
   bool _setInOrder=false;
-
+  
+  //careful, these are not necessarily the defaults...
+  //we will try to load the values from m5out/config.ini 
+  //as the defaults through the prof class
   int FETCH_WIDTH = 4;
   int D_WIDTH = 4;
   int ISSUE_WIDTH = 4;
@@ -114,6 +117,25 @@ public:
   void setupOutFile(std::string file) {
     out.open(file.c_str(), std::ofstream::out | std::ofstream::trunc);
   }
+
+  void setDefaultsFromProf() {
+   FETCH_WIDTH = Prof::get().fetchWidth;
+   D_WIDTH = Prof::get().dispatchWidth;
+   ISSUE_WIDTH = Prof::get().issueWidth;
+   WRITEBACK_WIDTH = Prof::get().wbWidth;
+   COMMIT_WIDTH = Prof::get().commitWidth;
+   SQUASH_WIDTH = Prof::get().squashWidth;
+ 
+   IQ_WIDTH = Prof::get().numIQEntries;
+   ROB_SIZE = Prof::get().numROBEntries;
+   LQ_SIZE =  Prof::get().LQEntries;
+   SQ_SIZE =  Prof::get().SQEntries;
+ 
+   FETCH_TO_DISPATCH_STAGES = Prof::get().fetchToDecodeDelay +
+                                  Prof::get().decodeToRenameDelay +
+                                  Prof::get().renameToIEWDelay;
+  }
+
   virtual ~CriticalPath() {
   }
 
@@ -122,6 +144,7 @@ public:
     _isInOrder=inOrder; 
     _setInOrder=true;
   }
+
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
 
   virtual void setWidth(int i) {
@@ -162,8 +185,19 @@ public:
     ss << val;
     temp.attribute("value").set_value(ss.str().c_str());
   } 
+
+  //sets a particular energy event attribute of the mcpat xml doc 
+  //"sa" for conciseness (set attribute)
+  static void sa(pugi::xml_node& node, const char* attr, std::string sval) {
+    pugi::xml_node temp;
+    temp = node.find_child_by_attribute("name",attr);
+    temp.attribute("value").set_value(sval.c_str());
+  } 
+
+
   
   virtual void setEnergyEvents(pugi::xml_document& doc) {
+    std::stringstream ss;
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
 
     uint64_t busyCycles=Prof::get().numCycles-Prof::get().idleCycles;
@@ -176,6 +210,31 @@ public:
     pugi::xml_node core_node = 
               system_node.find_child_by_attribute("name","core0");
 
+    //set params:
+    sa(core_node,"fetch_width",FETCH_WIDTH); 
+    sa(core_node,"decode_width",D_WIDTH); 
+    sa(core_node,"issue_width",ISSUE_WIDTH); 
+    sa(core_node,"commit_width",COMMIT_WIDTH); 
+    sa(core_node,"fp_issue_width",ISSUE_WIDTH); 
+
+    sa(core_node,"ALU_per_core", Prof::get().int_alu_count); 
+    sa(core_node,"MUL_per_core", Prof::get().mul_div_count); 
+    sa(core_node,"FPU_per_core", Prof::get().fp_alu_count); 
+
+    sa(core_node,"instruction_window_size", Prof::get().numIQEntries); 
+    sa(core_node,"fp_instruction_window_size", Prof::get().numIQEntries); 
+    sa(core_node,"ROB_size", Prof::get().numROBEntries); 
+
+    sa(core_node,"phy_Regs_IRF_size", Prof::get().numPhysIntRegs); 
+    sa(core_node,"phy_Regs_FRF_size", Prof::get().numPhysFloatRegs); 
+
+    sa(core_node,"store_buffer_size", Prof::get().SQEntries); 
+    sa(core_node,"load_buffer_size", Prof::get().LQEntries); 
+
+    sa(core_node,"memory_ports", Prof::get().read_write_port_count); 
+    sa(core_node,"RAS_size", Prof::get().RASSize); 
+
+    //set stats:
     sa(core_node,"total_instructions",Prof::get().totalInsts);
     sa(core_node,"int_instructions",Prof::get().intOps);
     sa(core_node,"fp_instructions",Prof::get().fpOps);
@@ -225,15 +284,49 @@ public:
     sa(core_node,"cdb_fpu_accesses",Prof::get().fp_alu_ops);
     sa(core_node,"cdb_mul_accesses",Prof::get().multOps);
 
+    // ---------- icache --------------
+
     pugi::xml_node icache_node = 
               core_node.find_child_by_attribute("name","icache");
+    ss.str("");
+    // capacity, block_width, associativity, bank, throughput w.r.t. core clock, 
+    // latency w.r.t. core clock,output_width, cache policy
+    // cache_policy: 0 -- no write or write-though with non-write allocate
+    //               1 -- write-back with write-allocate
 
+    ss << Prof::get().icache_size << "," << Prof::get().cache_line_size 
+      << "," << Prof::get().icache_assoc << "," << 8 /*banks*/ << "," << 1 /*thr*/
+      << "," << Prof::get().icache_response_latency 
+      << "," << 32 /*out*/ << "," << 0 /*policy*/;
+    sa(icache_node,"icache_config",ss.str());
+
+    ss.str("");
+    //miss_buffer_size(MSHR),fill_buffer_size,
+    //prefetch_buffer_size,wb_buffer_size
+    ss << Prof::get().icache_mshrs << "," << Prof::get().icache_mshrs << ","
+       << Prof::get().icache_mshrs << "," << Prof::get().icache_write_buffers;
+    sa(icache_node,"buffer_sizes",ss.str());
+    
     sa(icache_node,"read_accesses",Prof::get().icacheLinesFetched);
     sa(icache_node,"read_misses",Prof::get().icacheMisses);
     sa(icache_node,"conflicts",Prof::get().icacheReplacements);
 
+    // ---------- dcache --------------
+
     pugi::xml_node dcache_node = 
               core_node.find_child_by_attribute("name","dcache");
+
+    ss.str("");
+    ss << Prof::get().dcache_size << "," << Prof::get().cache_line_size 
+      << "," << Prof::get().dcache_assoc << "," << 1 /*banks*/ << "," << 4 /*thr*/
+      << "," << Prof::get().dcache_response_latency 
+      << "," << 32 /*out*/ << "," << 1 /*policy*/;
+    sa(dcache_node,"dcache_config",ss.str());
+
+    ss.str("");
+    ss << Prof::get().dcache_mshrs << "," << Prof::get().dcache_mshrs << ","
+       << Prof::get().dcache_mshrs << "," << Prof::get().dcache_write_buffers;
+    sa(dcache_node,"buffer_sizes",ss.str());
 
     sa(dcache_node,"read_accesses",Prof::get().dcacheReads);
     sa(dcache_node,"write_accesses",Prof::get().dcacheWrites);
@@ -241,15 +334,27 @@ public:
     sa(dcache_node,"write_misses",Prof::get().dcacheWriteMisses);
     sa(dcache_node,"conflicts",Prof::get().dcacheReplacements);
 
+    // ---------- L2 --------------
     pugi::xml_node l2_node = 
               system_node.find_child_by_attribute("name","L20");
+
+    ss.str("");
+    ss << Prof::get().l2_size << "," << Prof::get().cache_line_size 
+      << "," << Prof::get().l2_assoc << "," << 8 /*banks*/ << "," << 8 /*thr*/
+      << "," << Prof::get().l2_response_latency 
+      << "," << 32 /*out*/ << "," << 1 /*policy*/;
+    sa(l2_node,"L2_config",ss.str());
+
+    ss.str("");
+    ss << Prof::get().l2_mshrs << "," << Prof::get().l2_mshrs << ","
+       << Prof::get().l2_mshrs << "," << Prof::get().l2_write_buffers;
+    sa(l2_node,"buffer_sizes",ss.str());
 
     sa(l2_node,"read_accesses",Prof::get().l2Reads);
     sa(l2_node,"write_accesses",Prof::get().l2Writes);
     sa(l2_node,"read_misses",Prof::get().l2ReadMisses);
     sa(l2_node,"write_misses",Prof::get().l2WriteMisses);
     sa(l2_node,"conflicts",Prof::get().l2Replacements);
-
   }
 
 };

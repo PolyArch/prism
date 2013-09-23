@@ -202,13 +202,10 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  CPRegistry::get()->pruneCP(inorder_model, ooo_model);
-
   //determine the prof file name
   std::string prof_file(argv[optind]);
   size_t start_pos = prof_file.find_last_of("/");
 
-  //read in m5out/stats.txt file
   //Process m5out/stats.txt for events
   string statsfile;
   if(start_pos != string::npos) {
@@ -217,9 +214,21 @@ int main(int argc, char *argv[])
   } else {
     statsfile = "m5out/stats.txt";
   }
-
   Prof::get().procStatsFile(statsfile.c_str());
 
+  //Process m5out/config.ini for events
+  string configfile;
+  if(start_pos != string::npos) {
+    string dir = prof_file.substr(0, start_pos);
+    configfile = dir + "/m5out/config.ini";
+  } else {
+    configfile = "m5out/config.ini";
+  }
+  Prof::get().procConfigFile(configfile.c_str());
+
+  CPRegistry::get()->pruneCP(inorder_model, ooo_model);
+  CPRegistry::get()->setDefaults();
+ 
   if(inorderWidth > 0) {
     CPRegistry::get()->setWidth(inorderWidth, true);
   }
@@ -315,8 +324,10 @@ int main(int argc, char *argv[])
     if (!registry_off) {
       CPRegistry::get()->results();
 
+      system("mkdir -p mcpat/");
+      CPRegistry::get()->printMcPATFiles();
+
       if(!noMcPAT) {
-        system("mkdir -p mcpat/");
         CPRegistry::get()->runMcPAT();
       }
     }

@@ -68,9 +68,7 @@ public:
   }
 
   void pruneCP(bool inorder, bool ooo) {
-
     assert((inorder || ooo) && "both inorder and ooo are false.");
-
     // erase inorder, ooo
     for (auto i = cpmap.begin(); i != cpmap.end(); ) {
       bool isInorder = i->second->isInOrder();
@@ -81,9 +79,14 @@ public:
       else
         ++i;
     }
-
-
   }
+
+  void setDefaults() {
+    for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
+      i->second->setDefaultsFromProf();
+    }
+  }
+
 
   void register_cp(std::string name, CriticalPath *cp,
                    bool EnableByDefault, bool isBaseline) {
@@ -120,7 +123,7 @@ public:
     double baseline = baselineCP->numCycles();
 
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      std::cout << "Number of cycles [ " << I->first << " ]: "
+      std::cout << "Number of cycles [" << I->first << "]: "
                 << I->second->numCycles() << "  "
                 << (double)baseline/(double)I->second->numCycles();
       I->second->accelSpecificStats(std::cout);
@@ -138,7 +141,7 @@ public:
       std::cout << I->first << " Dynamic Power(W)... ";
       std::cout.flush();
 
-      std::string ms = std::string("mcpat -infile mcpat/") + I->first +
+      std::string ms = std::string("mcpat -print_level 5 -infile mcpat/") + I->first +
                        std::string(".xml 2>&1 > mcpat/") + I->first +
                        std::string(".out");
 
