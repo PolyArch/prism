@@ -75,6 +75,7 @@ int main(int argc, char *argv[])
   bool inorder_model=true;
   bool ooo_model=true;
   int  noMcPAT=0;
+  int  allModels=0;
   int inorderWidth=0;
   int oooWidth=0;
   bool traceOutputs = false;
@@ -93,6 +94,7 @@ int main(int argc, char *argv[])
       {"inorder-width", required_argument, 0, 2},
       {"ooo-width", required_argument, 0, 3},
       {"trace-out", no_argument, 0, 4},
+      {"all-models", no_argument, &allModels, 1},
       {0,0,0,0}
     };
 
@@ -226,7 +228,9 @@ int main(int argc, char *argv[])
   }
   Prof::get().procConfigFile(configfile.c_str());
 
-  CPRegistry::get()->pruneCP(inorder_model, ooo_model);
+  if(!allModels) {
+    CPRegistry::get()->pruneCP(inorder_model, ooo_model);
+  }
   CPRegistry::get()->setDefaults();
  
   if(inorderWidth > 0) {
