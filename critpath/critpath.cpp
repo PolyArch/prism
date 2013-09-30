@@ -79,6 +79,7 @@ int main(int argc, char *argv[])
   int inorderWidth=0;
   int oooWidth=0;
   bool traceOutputs = false;
+  int gen_loop_prof = 0;
 
   load_plugins(argv[0]);
 
@@ -95,6 +96,7 @@ int main(int argc, char *argv[])
       {"ooo-width", required_argument, 0, 3},
       {"trace-out", no_argument, 0, 4},
       {"all-models", no_argument, &allModels, 1},
+      {"gen-loop-prof", no_argument, &gen_loop_prof, 1},
       {0,0,0,0}
     };
 
@@ -117,10 +119,12 @@ int main(int argc, char *argv[])
 
     switch(c) {
     case 0:
-      CPRegistry::get()->handleArgv(long_options[option_index].name);
+      CPRegistry::get()->handleModelArgv(long_options[option_index].name);
       //std::cout << "Saw " << long_options[option_index].name << "\n";
       break;
     case 1:
+      CPRegistry::get()->handleArgv(long_options[option_index].name,
+                                    optarg);
       break;
     case 2:
       inorderWidth = atoi(optarg);
@@ -242,22 +246,31 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setTraceOutputs(traceOutputs);
 
   //open prof file
-  size_t dot_pos =  prof_file.find(".",start_pos);
-  prof_file = (string::npos == dot_pos)? prof_file : prof_file.substr(0, dot_pos);
-  prof_file += string(".prof");
+  if (gen_loop_prof) {
+    size_t dot_pos =  prof_file.find(".", start_pos);
+    prof_file = ((dot_pos == string::npos)
+                 ? prof_file
+                 : prof_file.substr(0, dot_pos));
+    prof_file += string(".prof");
 
-  std::cout << "reading prof file: " << prof_file;
-  std::cout.flush();
-  Prof::init(prof_file);
-  std::cout << "... done!\n";
-  
+    std::cout << "reading prof file: " << prof_file;
+    std::cout.flush();
+    Prof::init(prof_file);
+    std::cout << "... done!\n";
+  } else {
+    std::cout << "Generating Loop Info from trace\n";
+    std::cout.flush();
+    Prof::init_from_trace(argv[optind], max_inst);
+    std::cout << "... generating loop info ... done!!\n";
+  }
+
   uint64_t count = 0;
   uint64_t numCycles =  0;
 
   bool prevCall=true;
   bool prevRet=false;
   bool notused=false;
-  CPC notusedCPC; 
+  CPC notusedCPC;
 
   //this sets the prevCall/prevRet based on the information
   //stored in the profile.  Originally from the file containing

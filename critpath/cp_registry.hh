@@ -10,11 +10,18 @@
 #include <vector>
 #include <tuple>
 
+class ArgumentHandler {
+public:
+  virtual void handle_argument(const char *name, const char *optarg) = 0;
+};
+
 class CPRegistry {
 private:
   CPRegistry() {}
   static CPRegistry *_registry;
   std::map<std::string, CriticalPath*> cpmap;
+  std::map<std::string, std::vector<std::pair<bool, ArgumentHandler*>> >
+    register_arg_map;
   std::map<std::string, bool> cp2Enabled;
   CriticalPath* baselineCP=NULL;
 
@@ -26,7 +33,8 @@ public:
     return _registry;
   }
 
-  void handleArgv(const char *argv, bool chkForBothModel = true) {
+  void handleModelArgv(const char *argv, bool chkForBothModel = true)
+  {
     if (cp2Enabled.count(argv)) {
       cp2Enabled[argv] = true;
       return;
@@ -40,8 +48,8 @@ public:
         std::string inorder = (std::string("no-inorder-")
                                + std::string(&argv[3]));
         std::string ooo = std::string("no-ooo-") + std::string(&argv[3]);
-        handleArgv(inorder.c_str(), false);
-        handleArgv(ooo.c_str(), false);
+        handleModelArgv(inorder.c_str(), false);
+        handleModelArgv(ooo.c_str(), false);
       }
     }
     if (!chkForBothModel)
@@ -49,8 +57,8 @@ public:
 
     std::string inorder = std::string("inorder-") + std::string(argv);
     std::string ooo = std::string("ooo-") + std::string(argv);
-    handleArgv(inorder.c_str(), false);
-    handleArgv(ooo.c_str(), false);
+    handleModelArgv(inorder.c_str(), false);
+    handleModelArgv(ooo.c_str(), false);
   }
 
   void setWidth(int width, bool inorder) {
@@ -105,9 +113,14 @@ public:
     cp->setupOutFile(trace_out.c_str());
     cp2Enabled[fullname] = EnableByDefault;
 
-    if(isBaseline) {
+    if (isBaseline) {
       baselineCP = cp;
     }
+  }
+
+  void register_argument(std::string name, bool has_arg,
+                         ArgumentHandler *handler) {
+    register_arg_map[name].push_back(std::make_pair(has_arg, handler));
   }
 
   void insert(CP_NodeDiskImage img, uint64_t index, Op* op) {
@@ -179,9 +192,26 @@ public:
         long_options.push_back(opt);
       }
     }
+    //
+    for (auto I = register_arg_map.begin(), E = register_arg_map.end();
+         I != E; ++I) {
+      struct option opt;
+      opt.name = strdup(I->first.c_str());
+      opt.has_arg = I->second[0].first;
+      opt.flag = 0; opt.val = 1;
+      long_options.push_back(opt);
+    }
+    //
     long_options.push_back(static_long_options[i]);
   }
 
+  void handleArgv(const char *name, const char *optarg) {
+    auto I = register_arg_map.find(name);
+    assert(I != register_arg_map.end());
+    for (auto J = I->second.begin(), E = I->second.end(); J != E; ++J) {
+      J->second->handle_argument(name, optarg);
+    }
+  }
 };
 
 

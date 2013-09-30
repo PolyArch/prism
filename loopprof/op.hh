@@ -7,6 +7,8 @@
 #include <boost/serialization/set.hpp>
 #include <boost/serialization/bitset.hpp>
 #include <sstream>
+#include <vector>
+#include <iostream>
 
 class Op;
 class FunctionInfo;
@@ -66,8 +68,10 @@ private:
   uint64_t _totLat; //total latency accross all executions
   uint64_t _times;  //total number of times this instruction was executed
   Subgraph* _subgraph;
-
-  
+  uint64_t _effAddr = 0;
+  int stride = 0;
+  enum stride_value_type { st_Unknown, st_Constant, st_Variable };
+  enum stride_value_type stride_ty = st_Unknown;
   friend class boost::serialization::access;
 
   template<class Archive>
@@ -116,6 +120,64 @@ public:
   int           bb_pos() {return _bb_pos;}
   Subgraph*     subgraph() {return _subgraph;}
   void          setSubgraph(Subgraph* sg) {_subgraph=sg;}
+
+  struct eainfo {
+    uint64_t addr;
+    int itercnt;
+    stride_value_type sty;
+    int stride;
+    eainfo(uint64_t a, int i, stride_value_type ty, int s):
+      addr(a), itercnt(i), sty(ty), stride(s) {}
+  };
+
+  std::vector<eainfo> effAddrAccessed;
+
+  void printEffAddrs() {
+    int i = 0;
+    std::cout << "size: " << _size << "\n";
+    for (auto I = effAddrAccessed.begin(), E = effAddrAccessed.end(); I != E; ++I) {
+      std::cout << I->addr << ":" << I->itercnt << ":"
+                << ((I->sty == st_Constant)?"C"
+                    : (I->sty == st_Unknown)?"U"
+                    : "V") << ":" << I->stride << " ";
+      if ( (++i) % 8 == 0)
+        std::cout << "\n";
+    }
+  }
+  unsigned _size = 0;
+  void initEffAddr(uint64_t addr, unsigned size, int iterCnt) {
+    effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
+    _effAddr = addr;
+    _size = size;
+  }
+  void          computeStride(uint64_t addr, int iterCnt) {
+
+    if (_effAddr == 0) {
+      _effAddr = addr;
+      return;
+    }
+    if (stride_ty == st_Unknown) {
+      stride_ty = st_Constant;
+      stride = ((int64_t)addr - (int64_t)_effAddr);
+      _effAddr = addr;
+    } else if (stride_ty == st_Constant) {
+      int new_stride = (addr - _effAddr);
+      _effAddr = addr;
+      if ( new_stride != stride) {
+        stride_ty = st_Variable;
+      }
+    }
+    effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
+  }
+  bool getStride(int *strideLen) const {
+    if (stride_ty == st_Constant) {
+      if (strideLen)
+        *strideLen = stride;
+      return true;
+    }
+    return false;
+  }
+
   std::string   name() {
     std::stringstream ss;
     ss << "v" << _id;
@@ -152,9 +214,11 @@ public:
 
   bool dependsOn(Op* op) {return _deps.count(op)!=0;}
 
+  Deps::iterator m_begin() { return _memDeps.begin(); }
+  Deps::iterator m_end() { return _memDeps.end(); }
   Deps::iterator d_begin() {return _deps.begin();}
   Deps::iterator d_end() {return _deps.end();}
-
+  
   Deps::iterator u_begin() {return _uses.begin();}
   Deps::iterator u_end() {return _uses.end();}
   int numUses() {return _uses.size();}

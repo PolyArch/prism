@@ -8,10 +8,9 @@
 
 #include "gzstream.hh"
 
-#define STANDALONE_CRITPATH 1
 #include "cpu/crtpath/crtpathnode.hh"
 #include "pathprof.hh"
-
+#include "lpanalysis.hh"
 #include "stdlib.h"
 
 #define INST_WINDOW_SIZE 1000
@@ -85,7 +84,6 @@ int main(int argc, char *argv[])
   struct timeval end;
   gettimeofday(&start, 0);
 
-  CP_NodeDiskImage* cp_array = new CP_NodeDiskImage[winsize];
 
   PathProf pathProf;
   if(argc>optind+1) {
@@ -130,7 +128,7 @@ int main(int argc, char *argv[])
   if(print_cfgs) {
     system((string("mkdir -p ") + cfgdir).c_str());
   }
-
+#if 0
   //Two Passes
   for(int pass = 1; pass <= 2; ++pass) {
     igzstream inf(argv[optind], std::ios::in | std::ios::binary);
@@ -210,6 +208,13 @@ int main(int argc, char *argv[])
 
     inf.close();
   }
+#else
+  if (!doLoopProfAnalysis(argv[optind],
+                          max_inst, winsize, verbose,
+                          no_gams, gams_details,
+                          count, pathProf))
+    return 1;
+#endif
   if(print_cfgs) {
     pathProf.printCFGs(cfgdir);
   }
@@ -224,7 +229,6 @@ int main(int argc, char *argv[])
 
   std::cout << "Num of records              :" << count << "\n";
   
-  delete[] cp_array;
 
 
   pathProf.setStopInst(count);

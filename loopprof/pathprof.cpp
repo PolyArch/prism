@@ -569,7 +569,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
                           sf.isDirectRecursing(),sf.isRecursing());
 
   //Check if op is new
-  if(op->cpc().first==0) {
+  if (op->cpc().first == 0) {
     op->setCPC(newCPC);
     op->setIsLoad(img._isload);
     op->setIsStore(img._isstore);
@@ -592,10 +592,11 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
       sf.dyn_dep(op,full_ind,false);
     }
   }
-  if(img._mem_prod!=0) {
+
+  if (img._mem_prod != 0) {
     uint64_t full_ind = _dId - img._mem_prod;
-    if(img._mem_prod<=_dId) {
-      op->addMemDep(_op_buf[(full_ind+MAX_OPS)%MAX_OPS]);
+    if (img._mem_prod <= _dId) {
+      op->addMemDep(_op_buf[(full_ind + MAX_OPS) % MAX_OPS]);
     }
   }
 
@@ -603,6 +604,14 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     uint64_t full_ind = _dId - img._cache_prod;
     if(img._cache_prod <= _dId) {
       op->addCacheDep(_op_buf[(full_ind+MAX_OPS)%MAX_OPS]);
+    }
+  }
+  if (op->isLoad() || op->isStore()) {
+    int iterNum = sf.getLoopIterNum();
+    if (iterNum == 0) {
+      op->initEffAddr(img._eff_addr, img._acc_size, iterNum);
+    } else if (iterNum > 0) {
+      op->computeStride(img._eff_addr, iterNum);
     }
   }
 

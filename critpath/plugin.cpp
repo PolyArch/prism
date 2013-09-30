@@ -49,7 +49,7 @@ void load_plugins(const char *argv0)
       std::cout << "error loading " << dlerror() << "\n";
       continue;
     }
-    //std::cout << "plugin " << ent->d_name << " loaded successfully.\n";
+    std::cout << "plugin " << ent->d_name << " loaded successfully.\n";
   }
   closedir(dir);
 }

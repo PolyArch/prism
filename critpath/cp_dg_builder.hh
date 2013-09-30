@@ -249,7 +249,7 @@ protected:
       } else {
         //++I;
         break;
-      } 
+      }
     }
 
     //for funcUnitUsage

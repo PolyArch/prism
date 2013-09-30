@@ -188,6 +188,9 @@ public:
   bool isInnerLoop() {
     return _immInnerLoops.size() == 0;
   }
+  bool isVectorizable() {
+    return false;
+  }
   int pathFreq(int i) {
     return _iterCount[i];
   }

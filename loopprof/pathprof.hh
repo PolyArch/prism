@@ -18,6 +18,7 @@
 #include <bitset>
 #include <string>
 #include <assert.h>
+
 #include "cpu/crtpath/crtpathnode.hh"
 #define MAX_OPS 1000
 
@@ -84,7 +85,19 @@ public:
                      std::forward_as_tuple(dId),
 		     std::forward_as_tuple(_iterStack.back()));
   }
-  
+
+  int getLoopIterNum() {
+    if ( _iterStack.back()->relevantLoopIter() != -1) {
+      #if 0
+      std::cout << _iterStack.back()->relevantLoop()
+                << ":"
+                <<  _iterStack.back()->relevantLoop()->curIter()
+                <<"\n";
+      #endif
+      return _iterStack.back()->relevantLoop()->curIter();
+    }
+    return -1;
+  }
   bool isLooping() {
     return _loopStack.size()>0;
   }
