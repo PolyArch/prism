@@ -1,6 +1,16 @@
 #include "prof.hh"
 #include "lpanalysis.hh"
 
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
+#include <iostream>
+#include <utility>
+#include <string> 
+
+
 PathProf Prof::pathProf;
 
 void Prof::init(std::string& filename) {

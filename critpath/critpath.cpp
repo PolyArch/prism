@@ -20,8 +20,6 @@
 #include "prof.hh"
 
 #include <fstream>
-#include "cp_beret.hh"
-
 
 CPRegistry* CPRegistry::_registry = 0;
 
