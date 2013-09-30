@@ -10,9 +10,12 @@ class OrigCP : public CriticalPath {
 
 
   class orig_dg_inst : public dg_inst<dg_event, dg_edge_impl_t<dg_event>> {
+    typedef dg_event T;
+    typedef dg_edge_impl_t<T> E;
+
     public:
     orig_dg_inst(const CP_NodeDiskImage &img, uint64_t index) :
-      dg_inst(img,index) { }  
+      dg_inst(img, index) { }
     orig_dg_inst() : dg_inst() {}
   };
 

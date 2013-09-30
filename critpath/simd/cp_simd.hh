@@ -62,8 +62,12 @@ namespace simd {
     }
 
     std::map<Op*, unsigned> _op2Count;
-
+    std::map<LoopInfo *, bool> isVectorizableMap;
     bool isVectorizable(LoopInfo *li) {
+
+      if (isVectorizableMap.count(li))
+        return isVectorizableMap[li];
+
       bool shouldPrint =  !li_printed.count(li);
       printLoop(li);
 
@@ -107,6 +111,7 @@ namespace simd {
           }
         }
       }
+      isVectorizableMap[li] = canVectorize;
       return canVectorize;
     }
     unsigned getSIMDPos(InstPtr inst, Op *op, LoopInfo *li) {
@@ -129,7 +134,7 @@ namespace simd {
       return pos;
     }
 
-    std::map<LoopInfo*, bool> li_printed;
+    static std::map<LoopInfo*, bool> li_printed;
 
     void printDisasm(uint64_t pc, int upc) {
       std::cout << pc << "," << upc << " : "
@@ -157,6 +162,12 @@ namespace simd {
       std::cout << "================" << li << "==========\n";
       std::cout << "======================================\n";
     }
+
+    InstPtr addShuffleInst(InstPtr inst)
+    {
+      return inst;
+    }
+
     //
     // Override insert_inst to transform to SIMD graph
     //
@@ -175,6 +186,12 @@ namespace simd {
         addDeps(*inst, op);
         // and add to the pipe
         pushPipe(inst);
+
+        // handle broadcast_loads
+        //  load followed by shuffles ...
+        //if (op->isLoad() && isStrideAccess(0)) {
+        //  Inst = addShuffleInst(inst);
+        //}
       }
 
       // Keep track of the instruction..

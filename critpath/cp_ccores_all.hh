@@ -51,7 +51,7 @@ public:
   uint16_t _ex_lat=0;
 
   ccores_inst(const CP_NodeDiskImage &img, uint64_t index):
-              dg_inst_base<T,E>(img,index){
+              dg_inst_base<T,E>(index){
     _opclass=img._opclass;
     _isload=img._isload;
     _isstore=img._isstore;

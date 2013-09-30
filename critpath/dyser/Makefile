@@ -30,7 +30,7 @@ libcpdyser.so : $(OBJ) *.hh
 ../plugin:
 	mkdir -p ../plugin
 
-%.o : %.cpp
+%.o : %.cpp *.hh
 	@echo $($(quiet)cmd_cxx_o_cxx)
 	@$(cmd_cxx_o_cxx)
 

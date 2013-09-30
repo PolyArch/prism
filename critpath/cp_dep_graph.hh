@@ -120,7 +120,7 @@ public:
 
 protected:
 
-  dg_inst_base(const CP_NodeDiskImage &img,uint64_t index):
+  dg_inst_base(uint64_t index):
     _index(index){
   }
 
@@ -226,7 +226,8 @@ public:
   uint8_t btb_read_accesses=0, btb_write_accesses=0;
 
 
-  dg_inst(const CP_NodeDiskImage &img,uint64_t index): dg_inst_base<T,E>(img,index) {
+  dg_inst(const CP_NodeDiskImage &img,uint64_t index):
+    dg_inst_base<T,E>(index) {
     _opclass=img._opclass;
     _isload=img._isload;
     _isstore=img._isstore;
