@@ -1,13 +1,13 @@
 
 
-.phony: all clean critpath loopprof
+.phony: all clean cp lp simd dyser ccores
 
-all: critpath simd dyser
+all: cp simd dyser ccores
 
-critpath:: loopprof
+cp:: lp
 	+make -C critpath
 
-loopprof::
+lp::
 	+make -C loopprof
 
 simd:
@@ -16,8 +16,12 @@ simd:
 dyser:
 	+make -C critpath/dyser
 
+ccores:
+	+make -C critpath/ccores
+
 clean:
 	+make -C loopprof clean
 	+make -C critpath clean
 	+make -C critpath/simd clean
 	+make -C critpath/dyser clean
+	+make -C critpath/ccores clean

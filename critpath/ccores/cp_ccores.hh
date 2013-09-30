@@ -1,5 +1,5 @@
-#ifndef CP_CCORES_ALL
-#define CP_CCORES_ALL
+#ifndef CP_CCORES
+#define CP_CCORES
 
 #include <algorithm>
 
@@ -7,93 +7,21 @@
 #include "cp_registry.hh"
 #include <memory>
 
+#include "cp_ccores_all.hh"
+
 extern int TraceOutputs;
 
-class ccores_inst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
-  typedef dg_event T;
-  typedef dg_edge_impl_t<T> E;
-
-  typedef T* TPtr;
-  typedef E* EPtr;
-
-public:
-  //Events:
-  enum NodeTy {
-      BBReady = 0,
-      Execute = 1,
-      Complete = 2,
-      NumStages
-  };
-private:
-  T events[NumStages];
-
-public:
- std::shared_ptr<T>   endBB;
- std::shared_ptr<T> startBB;
-
-  virtual ~ccores_inst() { 
-    /*for (int i = 0; i < 3; ++i) {
-      events[i].remove_all_edges();
-    }
-    endBB->remove_all_edges();
-    startBB->remove_all_edges();*/
-  }
-
-
-  uint16_t _opclass=0;
-  bool _isload=false;
-  bool _isstore=false;
-  bool _isctrl=false;
-  uint16_t _icache_lat=0;
-  uint16_t _prod[7];
-  uint16_t _mem_prod=0;
-  uint16_t _cache_prod=0;
-  uint16_t _ex_lat=0;
-
-  ccores_inst(const CP_NodeDiskImage &img, uint64_t index):
-              dg_inst_base<T,E>(index){
-    _opclass=img._opclass;
-    _isload=img._isload;
-    _isstore=img._isstore;
-    _isctrl=img._isctrl;
-    std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
-    _mem_prod=img._mem_prod;
-    _cache_prod=img._cache_prod;
-    _ex_lat=img._cc-img._ec;
-  }
-
-  ccores_inst() : dg_inst_base<T,E>() {}
-
-  T& operator[](const unsigned i) {
-    assert(i < NumStages);
-    return events[i];
-  }
-
-  virtual unsigned numStages() {
-    return NumStages;
-  }
-
-  virtual uint64_t cycleOfStage(const unsigned i) {
-    return events[i].cycle(); 
-  }
-  virtual unsigned eventComplete() {
-    return Complete; 
-  }
-
-};
-
-
-class cp_ccores_all : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
+class cp_ccores : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
 
   typedef dg_inst<T, E> Inst_t;
 
 public:
-  cp_ccores_all() : CP_DG_Builder<T,E>() {
+  cp_ccores() : CP_DG_Builder<T,E>() {
   }
 
-  virtual ~cp_ccores_all() {
+  virtual ~cp_ccores() {
   }
 
   virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
@@ -105,36 +33,77 @@ public:
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if(TraceOutputs) {
       dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);  
-  
-      out << index + Prof::get().skipInsts << ": ";
-      out << inst.cycleOfStage(0) << " ";
-      out << inst.cycleOfStage(1) << " ";
-      out << inst.cycleOfStage(2) << " ";
-
-      CriticalPath::traceOut(index,img,op);
-      out << "\n";
+      if(inst.isPipelineInst()) {
+        CP_DG_Builder::traceOut(index,img,op);
+      } else {  
+        out << index + Prof::get().skipInsts << ": ";
+        out << inst.cycleOfStage(0) << " ";
+        out << inst.cycleOfStage(1) << " ";
+        out << inst.cycleOfStage(2) << " ";
+        CriticalPath::traceOut(index,img,op);
+        out << "\n";
+      }
     }
   }
 
+  bool prevCall = false;
+  bool prevRet = false;
+  bool inCCore = false;
+  
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
-/*    Inst_t* inst = new Inst_t(img,index);
-    std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
-    getCPDG()->addInst(sh_inst,index);
-    addDeps(*inst,img);
-    getCPDG()->pushPipe(sh_inst);
-    inserted(*inst,img);*/
-    ccores_inst* cc_inst = new ccores_inst(img,index);
-    std::shared_ptr<ccores_inst> sh_inst(cc_inst);
-    getCPDG()->addInst(sh_inst,index);
 
-    
-    if(op->isBBHead() || op->isMem()) {
-      //only one memory instruction per basic block
-      prev_bb_end=cur_bb_end;
-      T* event_ptr = new T();
-      cur_bb_end.reset(event_ptr);
-    } 
-    addDeps(*cc_inst,img);
+    bool transitioned=false;
+
+    if(!inCCore) {
+      if((prevCall) && !op->func()->hasFuncCalls()) {
+        inCCore=true;
+        transitioned=true;
+      }
+
+      prevCall = op->isCall();
+    }
+
+    if(inCCore) {
+      ccores_inst* cc_inst = new ccores_inst(img,index);
+      std::shared_ptr<ccores_inst> sh_inst(cc_inst);
+      getCPDG()->addInst(sh_inst,index);
+
+      if(transitioned) {
+        Inst_t* prevInst = getCPDG()->peekPipe(-1);
+        assert(prevInst);
+        T* event_ptr = new T();
+        cur_bb_end.reset(event_ptr);
+        getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
+                               *cur_bb_end, 8, E_CXFR);
+      }
+  
+      if(op->isBBHead() || op->isMem()) {
+        //only one memory instruction per basic block
+        prev_bb_end=cur_bb_end;
+        T* event_ptr = new T();
+        cur_bb_end.reset(event_ptr);
+      }
+      addCCoreDeps(*cc_inst,img);
+
+      prevRet = op->isReturn();
+      if(prevRet) {
+        inCCore=false;
+      }
+    } else {
+
+
+      Inst_t* inst = new Inst_t(img,index);
+      std::shared_ptr<Inst_t> sh_inst(inst);
+      getCPDG()->addInst(sh_inst,index);
+      if(prevRet) {
+        getCPDG()->insert_edge(*cur_bb_end,
+                               *inst, Inst_t::Fetch, 2, E_CXFR);
+      }
+      addDeps(sh_inst);
+      pushPipe(sh_inst);
+      inserted(sh_inst);
+    }
+
   }
 
 private:
@@ -142,7 +111,7 @@ private:
   std::shared_ptr<T> prev_bb_end, cur_bb_end;
 
 
-  virtual void addDeps(ccores_inst& inst,const CP_NodeDiskImage &img) { 
+  virtual void addCCoreDeps(ccores_inst& inst,const CP_NodeDiskImage &img) { 
     setBBReadyCycle_cc(inst,img);
     setExecuteCycle_cc(inst,img);
     setCompleteCycle_cc(inst,img);
@@ -174,7 +143,8 @@ private:
       if (prod <= 0 || prod >= inst.index()) {
         continue;
       }
-      getCPDG()->insert_edge(inst.index()-prod, ccores_inst::Complete,
+      dg_inst_base<T,E>& dep_inst = getCPDG()->queryNodes(inst.index()-prod);
+      getCPDG()->insert_edge(dep_inst, dep_inst.eventComplete(),
                              inst, ccores_inst::Execute, 0, true);
     }
     //Memory dependence enforced by BB ordering -- if this is going to be
@@ -224,7 +194,6 @@ private:
 
 };
 
-static RegisterCP<cp_ccores_all> cp_ccores_all("ccores-all",true);
 
 
-#endif //CP_CCORES_ALL
+#endif //CP_CCORES

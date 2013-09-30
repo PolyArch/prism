@@ -170,28 +170,65 @@ public:
   void setupOptions(std::vector<struct option>& long_options,
                     struct option *static_long_options) {
     unsigned i = 0;
+    std::map<std::string, bool> optionMap;
+
     while (static_long_options[i].name) {
       long_options.push_back(static_long_options[i]);
+      if (optionMap.count(static_long_options[i].name)) {
+        std::cerr << "Warning: Duplicate option: "
+                  << static_long_options[i].name << "\n";
+      }
+      optionMap[static_long_options[i].name] = true;
       ++i;
     }
+
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       struct option opt;
       opt.name = strdup(I->first.c_str());
       opt.has_arg = no_argument;
       opt.flag = 0; opt.val = 0;
       long_options.push_back(opt);
+
+      if (optionMap.count(I->first)) {
+        std::cerr << "Warning: Duplicate option: "
+                  << I->first << "\n";
+      }
+
+      optionMap[opt.name] = true;
+
       std::string noOpt = std::string("no-") + I->first;
       opt.name = strdup(noOpt.c_str());
       long_options.push_back(opt);
-      if (I->first.find("ooo-") == 0) {
-        std::string nam = I->first.substr(4);
-        opt.name = strdup(nam.c_str());
-        long_options.push_back(opt);
-        std::string noOpt = std::string("no-") + nam;
-        opt.name = strdup(noOpt.c_str());
-        long_options.push_back(opt);
+
+      // No need to check here
+      if (optionMap.count(noOpt)) {
+        std::cerr << "Warning: Duplicate option: "
+                  << noOpt << "\n";
       }
+      optionMap[opt.name] = true;
     }
+
+    for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
+      struct option opt;
+      std::string nam = ((I->first.find("ooo-") == 0)
+                         ? I->first.substr(4)
+                         : ((I->first.find("inorder-") == 0)
+                            ? I->first.substr(8)
+                            : ""));
+      if (nam == "")
+        continue;
+      // already defined option -- FIXME:: Warn if duplicate??
+      if (optionMap.count(nam))
+        continue;
+      opt.name = strdup(nam.c_str());
+      long_options.push_back(opt);
+      optionMap[nam] = true;
+      std::string noOpt = std::string("no-") + nam;
+      opt.name = strdup(noOpt.c_str());
+      long_options.push_back(opt);
+      optionMap[noOpt] = true;
+    }
+
     //
     for (auto I = register_arg_map.begin(), E = register_arg_map.end();
          I != E; ++I) {
