@@ -116,7 +116,9 @@ class dg_inst_base {
 public:
   uint64_t _index;
   virtual T &operator[](const unsigned i) =0;
-  virtual ~dg_inst_base() { }
+  virtual ~dg_inst_base() {
+    //std::cout << "del: " << _index << " " << this << "\n";
+  }
 
 protected:
 
@@ -138,7 +140,7 @@ public:
 
   virtual unsigned eventComplete() {return (unsigned)-1;} //return the index of when the node's data is ready
   virtual unsigned eventCommit() {return numStages()-1;}
-
+  
 };
 
 template<typename T, typename E>
@@ -204,6 +206,7 @@ public:
   uint16_t _st_lat=0;
   uint64_t _pc=0;
   uint16_t _upc=0;
+  uint64_t _eff_addr;
   bool _floating=false;
   bool _iscall=false;
   uint8_t _numSrcRegs=0;
@@ -251,7 +254,8 @@ public:
     _numIntSrcRegs=img._regfile_read;
     _numFPDestRegs=img._numFPDestRegs;
     _numIntDestRegs=img._numIntDestRegs;
-
+    _eff_addr=img._eff_addr;
+ 
     for (int i = 0; i < NumStages; ++i) {
       events[i].set_inst(this);
       if (img._isload)
@@ -293,11 +297,12 @@ public:
     remove_edges();
   }*/
 
-/*  void remove_edges() {
-    for (int i = 0; i < 6; ++i) {
+  void reset_inst() {
+    for (int i = 0; i < NumStages; ++i) {
       events[i].remove_all_edges();
     }
-  }*/
+  }
+  
   bool isMem() {return _isload || _isstore;}
 
 };

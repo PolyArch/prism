@@ -99,7 +99,7 @@ public:
         getCPDG()->insert_edge(*cur_bb_end,
                                *inst, Inst_t::Fetch, 2, E_CXFR);
       }
-      addDeps(*inst);
+      addDeps(sh_inst);
       pushPipe(sh_inst);
       inserted(sh_inst);
     }

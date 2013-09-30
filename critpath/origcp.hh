@@ -68,7 +68,7 @@ protected:
   
       CriticalPath::traceOut(index,img,op);
  
-      out << " " << (int)img._regfile_read << " " << (int)img._regfile_fread;
+      //out << " " << (int)img._regfile_read << " " << (int)img._regfile_fread;
  
       out << "\n";
     }

@@ -295,7 +295,7 @@ public:
             //like loop constants, initial values for induction vars, etc
             inst->set_ex_lat(5);
             std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
-            addDeps(*inst);
+            addDeps(sh_inst);
             pushPipe(sh_inst);
             inserted(sh_inst);
             //inserted(inst,img);
@@ -332,7 +332,7 @@ public:
 	      }
               std::shared_ptr<Inst_t> sh_inst(inst);
               getCPDG()->addInst(sh_inst,index);
-              addDeps(*inst);
+              addDeps(sh_inst);
               pushPipe(sh_inst);
               inserted(sh_inst);
 	    }
@@ -353,7 +353,7 @@ public:
         Inst_t* inst = new Inst_t(img,index);
         std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
         getCPDG()->addInst(sh_inst,index);
-        addDeps(*inst);
+        addDeps(sh_inst);
         pushPipe(sh_inst);
         inserted(sh_inst);
         break;

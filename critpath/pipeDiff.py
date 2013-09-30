@@ -20,7 +20,7 @@ def filterDiff(i,stage,filterLen,curVal,filterFactor):
   return raw_diff*filterFactor + curVal*(1-filterFactor)
    
 
-csvfile1 = open('orig_cp.txt', 'rb')
+csvfile1 = open('ooo-orig.txt', 'rb')
 csvfile2 = open('ooo-base.txt', 'rb')
 
 reader1 = csv.reader(csvfile1, delimiter=' ')
@@ -55,7 +55,7 @@ for row1,row2 in izip(reader1,reader2):
 #         pipe1[5][rinst] - pipe1[0][rinst], pipe2[5][rinst] - pipe2[0][rinst],
 #         filter_val[0],filter_val[1],filter_val[2])
 
-  print '{0:5.0f} {1:5.0f} {2:5.0f} {3:5.0f} {4:5.0f} {5:5.0f} | {6:5.0f} {7:5.0f} {8:5.0f} {9:5.0f} {10:5.0f} | {11:5.0f} {12:5.0f} {13:5.0f} '.format(
+  print '{0:4.0f} {1:4.0f} {2:4.0f} {3:4.0f} {4:4.0f} {5:4.0f} | {6:4.0f} {7:4.0f} {8:4.0f} {9:4.0f} {10:4.0f} | {11:3.0f} {12:4.0f} {13:5.0f} '.format(
          sdiff[0],sdiff[1],sdiff[2],sdiff[3],sdiff[4],sdiff[5], 
 #         pipe1[5][rinst] - pipe1[0][rinst], pipe2[5][rinst] - pipe2[0][rinst],
          idiff[0],idiff[1],idiff[2],idiff[3],idiff[4],

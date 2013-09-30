@@ -27,12 +27,7 @@ extern int SQ_SIZE;
 
 #include "edge_table.hh"
 #include "prof.hh"
-#define MAX_FU_POOLS 10
-
-//Fake MSHRs as a functional unit
-#define MSHR_FU (MAX_FU_POOLS-1)
-#define MSHR_OPCLASS 100
-
+#define MAX_FU_POOLS 8
 #include "pugixml/pugixml.hpp"
 
 template<typename T, typename E>
@@ -48,6 +43,8 @@ public:
        fuUsage[i][0]=0; //begining usage is 0
        fuUsage[i][(uint64_t)-1000]=0; //end usage is 0 too (1000 to prevent overflow)
      }
+     MSHRUseMap[0];
+     MSHRUseMap[(uint64_t)-1000];
      LQ.resize(LQ_SIZE);
      SQ.resize(SQ_SIZE);
      rob_head_at_dispatch=0;
@@ -74,7 +71,7 @@ public:
     Inst_t* inst = new Inst_t(img,index);
     std::shared_ptr<Inst_t> sh_inst(inst);
     getCPDG()->addInst(sh_inst,index);
-    addDeps(*inst,op);
+    addDeps(sh_inst,op);
     pushPipe(sh_inst);
     inserted(sh_inst);
   }
@@ -147,7 +144,7 @@ public:
       out << " sq:" << sqSize;
 
       //out << " " << (int)inst.regfile_reads << " " << (int)inst.regfile_freads;
-      out << " " << (int)img._numSrcRegs;
+      //out << " " << (int)img._numSrcRegs;
 
       //CriticalPath::traceOut(index,img,op);
       out << "\n";
@@ -157,14 +154,14 @@ public:
 protected:
 
   //function to add dependences onto uarch event nodes -- for the pipeline
-  virtual void addDeps(Inst_t& inst, Op* op=NULL) { 
-    setFetchCycle(inst);
-    setDispatchCycle(inst,op);
-    setReadyCycle(inst);
-    setExecuteCycle(inst);
-    setCompleteCycle(inst,op);
-    setCommittedCycle(inst);
-    setWritebackCycle(inst);
+  virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op=NULL) { 
+    setFetchCycle(*inst);
+    setDispatchCycle(*inst);
+    setReadyCycle(*inst);
+    setExecuteCycle(inst); //uses shared_ptr
+    setCompleteCycle(*inst,op);
+    setCommittedCycle(*inst);
+    setWritebackCycle(inst); //uses shared_ptr
   }
 
   //Variables to hold dynamic state not directly expressible in graph theory
@@ -182,6 +179,9 @@ protected:
 
   typedef std::map<uint64_t,int> FuUsageMap;
   typedef std::vector<FuUsageMap> FuUsage;
+ 
+  std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
+  std::map<uint64_t,std::shared_ptr<Inst_t>> MSHRResp;
 
   typedef typename std::map<uint64_t,Inst_t*> NodeRespMap;
   typedef typename std::vector<NodeRespMap> NodeResp;
@@ -266,14 +266,48 @@ protected:
         }
       }
     }
-    
-    for(typename NodeResp::iterator I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
+
+    //MSHR Usage
+    for(auto i=++MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
+      uint64_t cycle = i->first;
+      assert(cycle!=0);
+      if (cycle + 50  < _curCycle) {
+        i = MSHRUseMap.erase(i);
+      } else {
+        //++i;
+        break;
+      }
+    }
+
+    //delete irrelevent 
+    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle);
+    MSHRResp.erase(MSHRResp.begin(),upperMSHRResp); 
+
+
+    for(typename NodeResp::iterator I=nodeResp.begin(),EE=nodeResp.end();
+                                                                 I!=EE;++I) {
       NodeRespMap& respMap = *I;
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
-        if (cycle + 50  < _curCycle) {
+/*
+        std::cout << "remove? (" << i->first << "," << _curCycle << ") " << i->second->_index << " " << i->second->_isload << " " << i->second->_isstore << "nri: " << nri << " " << i->second << i->second->cycleOfStage(0) << " " << i->second->cycleOfStage(5);
+        if(i->second->_isstore) {
+          std::cout << " " << i->second->cycleOfStage(6);
+        }
+        std::cout << "\n";
+*/
+
+    /*    if(!(i->second->_isload || i->second->_isstore)) {
+          std::cout << "wtf " << i->second->_index << " " << i->second->_isload << " " << i->second->_isstore << "nri:" << nri << " " << i->second << "\n";
+          assert(0);
+        }*/
+
+        if (cycle  < _curCycle) {
+          //std::cout << respMap.size() << " (yes)\n";
           i = respMap.erase(i);
+          //std::cout << respMap.size() << "\n";
         } else {
+          
           //++i;
           break;
         }
@@ -283,8 +317,140 @@ protected:
   }
 
   //Adds a resource to the resource utilization map.
+  Inst_t* addMSHRResource(uint64_t min_cycle, uint32_t duration, 
+		     std::shared_ptr<Inst_t>& cpnode,
+                     int re_check_frequency,
+                     int& rechecks,
+                     uint64_t& extraLat) { 
+
+    int maxUnits = Prof::get().dcache_mshrs;
+    rechecks=0; 
+
+    uint64_t cur_cycle=min_cycle;
+    std::map<uint64_t,std::set<uint64_t>>::iterator
+                       cur_cycle_iter,next_cycle_iter,last_cycle_iter;
+   
+    cur_cycle_iter = --MSHRUseMap.upper_bound(min_cycle);
+
+    uint64_t filter_addr=(((uint64_t)-1)^(Prof::get().cache_line_size-1));
+    uint64_t addr = cpnode->_eff_addr & filter_addr;
+
+    //std::cout << addr << ", " << filter_addr << " (" << Prof::get().cache_line_size << "," << cpnode->_eff_addr << ")\n";
+
+
+    //keep going until we find a spot .. this is gauranteed
+    while(true) {
+      assert(cur_cycle_iter->second.size() <= maxUnits);
+      if(cur_cycle_iter->second.count(addr)) {
+        //return NULL; //just add myself to some other MSHR, and return
+        //we found a match... iterate until addr is gone
+        while(true) {
+          cur_cycle_iter--;
+          if(cur_cycle_iter->second.count(addr)==0) {
+            cur_cycle_iter++;
+            auto  respIter = MSHRResp.find(cur_cycle_iter->first);
+            if(respIter!=MSHRResp.end()) {
+              return respIter->second.get();
+            } else {
+              return NULL; 
+            }
+          }
+        }
+      }
+
+      //If no spots, keep looking later (pessimistic)
+      if(cur_cycle_iter->second.size() == maxUnits) {
+        if(re_check_frequency<=1) {
+          ++cur_cycle_iter;
+          cur_cycle=cur_cycle_iter->first;
+        } else {
+          cur_cycle+=re_check_frequency;
+          cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
+          rechecks++;
+        }
+        continue;
+      }
+
+      //we have found a spot with less than maxUnits, now we need to check
+      //if there are enough cycles inbetween
+      assert(cur_cycle_iter->second.size() < maxUnits);
+
+      next_cycle_iter=cur_cycle_iter;
+      bool foundSpot=false;
+      
+      while(true) {
+        ++next_cycle_iter;
+        if(next_cycle_iter->first >= cur_cycle+duration) {
+          foundSpot=true;
+          last_cycle_iter=next_cycle_iter;
+          break;
+        } else if(next_cycle_iter->second.size() == maxUnits) {
+          //we couldn't find a spot, so increment cur_iter and restart
+          if(re_check_frequency<=1) {
+            ++next_cycle_iter;
+            cur_cycle_iter=next_cycle_iter;
+            cur_cycle=cur_cycle_iter->first;
+          } else {
+            cur_cycle+=re_check_frequency;
+            cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
+            rechecks++;
+          }
+          break;
+        }
+      }
+
+      if(foundSpot) {
+        if(cur_cycle_iter->first!=cur_cycle) {
+          MSHRUseMap[cur_cycle]=cur_cycle_iter->second; 
+          cur_cycle_iter = MSHRUseMap.find(cur_cycle); 
+        }
+        cur_cycle_iter->second.insert(addr);
+
+ 
+        //iterate through the others
+        ++cur_cycle_iter; //i already added here
+        while(cur_cycle_iter->first < cur_cycle + duration) {
+          assert(cur_cycle_iter->second.size() < maxUnits);
+          cur_cycle_iter->second.insert(addr);
+          ++cur_cycle_iter;
+        }
+
+        //cur_cycle_iter now points to the iter aftter w
+        //final cycle iter
+        if(cur_cycle_iter->first==cur_cycle+duration) {
+          //no need to add a new marker
+        } else {
+          //need to return to original usage here
+          --cur_cycle_iter;
+          MSHRUseMap[cur_cycle+duration] = cur_cycle_iter->second;
+          MSHRUseMap[cur_cycle+duration].erase(addr);
+        }
+       
+        auto respIter = MSHRResp.find(cur_cycle);
+        MSHRResp[cur_cycle+duration]=cpnode;
+
+        if(rechecks>0) {
+          respIter = --MSHRResp.upper_bound(cur_cycle);
+          extraLat = cur_cycle-respIter->first;
+        }
+
+        if(respIter == MSHRResp.end() || min_cycle == cur_cycle) {
+          return NULL;
+        } else {
+          return respIter->second.get();
+        }
+        
+      }
+    }
+    assert(0);
+    return NULL;
+  }
+
+  //Adds a resource to the resource utilization map.
   Inst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
-                       Inst_t* cpnode) { 
+                       Inst_t* cpnode, uint64_t addr=0) { 
+    return NULL;
+
     int fuIndex = fuPoolIdx(opclass);
     FuUsageMap& fuUseMap = fuUsage[fuIndex];
     NodeRespMap& nodeRespMap = nodeResp[fuIndex];
@@ -369,7 +535,7 @@ protected:
     return NULL;
   }
 
-  virtual void setFetchCycle(Inst_t &inst) {
+  virtual void setFetchCycle(Inst_t& inst) {
     checkFBW(inst);
     //checkICache(inst);
     checkPipeStalls(inst);
@@ -395,7 +561,7 @@ protected:
     }
   }
 
-  virtual void setDispatchCycle(Inst_t &inst, Op* op) {
+  virtual void setDispatchCycle(Inst_t &inst) {
     checkFD(inst);
     checkDD(inst);
     checkDBW(inst);
@@ -512,29 +678,29 @@ protected:
 
   }
 
-  virtual void setExecuteCycle(Inst_t &inst) {
-    checkRE(inst);
+  virtual void setExecuteCycle(std::shared_ptr<Inst_t>& inst) {
+    checkRE(*inst);
 
     if(_isInOrder) {
-      checkEE(inst); //issue in order
-      checkInorderIssueWidth(inst); //in order issue width
+      checkEE(*inst); //issue in order
+      checkInorderIssueWidth(*inst); //in order issue width
     } else {
-      checkIssueWidth(inst);
-      checkFuncUnits(inst);
+      checkIssueWidth(*inst);
+      checkFuncUnits(*inst);
 
-      if(inst._isload) {
+      if(inst->_isload) {
         //loads acquire MSHR at execute
         checkNumMSHRs(inst,false);
       }
 
       //Non memory instructions can leave the IQ now!
       //Push onto the IQ by cycle that we leave IQ (execute cycle)
-      if(!inst.isMem()) {
+      if(!inst->isMem()) {
         InstQueue.insert(
-               std::make_pair(inst.cycleOfStage(Inst_t::Execute),&inst));
+               std::make_pair(inst->cycleOfStage(Inst_t::Execute),inst.get()));
       }
     }
-    if(inst._floating) {
+    if(inst->_floating) {
       iw_freads+=2;
     } else {
       iw_reads+=2;
@@ -604,11 +770,11 @@ protected:
     func_calls+=inst._iscall;
   }
 
-  virtual void setWritebackCycle(Inst_t &inst) {
+  virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {
     if(!_isInOrder) {
-      if(inst._isstore) {
-        getCPDG()->insert_edge(inst, Inst_t::Commit,
-                               inst, Inst_t::Writeback, 2+inst._st_lat, E_WB);
+      if(inst->_isstore) {
+        getCPDG()->insert_edge(*inst, Inst_t::Commit,
+                               *inst, Inst_t::Writeback, 2+inst->_st_lat, E_WB);
         checkNumMSHRs(inst,true);
       }
     }
@@ -882,7 +1048,6 @@ protected:
 
   //Finite LQ & SQ
   virtual Inst_t &checkLSQSize(Inst_t &n) {
-/*
     if (n._isload) {
       if(LQ[LQind]) {
         getCPDG()->insert_edge(*LQ[LQind], Inst_t::Commit,
@@ -896,8 +1061,6 @@ protected:
                                n, Inst_t::Dispatch, 1,E_LSQ);
       }
     }
-*/
-
     return n;
   }
 
@@ -992,8 +1155,6 @@ protected:
     case 30: //MemRead
     case 31: //MemWrite
       return 6;
-    case MSHR_OPCLASS:
-      return MSHR_FU;
     }
     assert(0);
   }
@@ -1053,8 +1214,6 @@ protected:
     case 30: //MemRead
     case 31: //MemWrite
       return 2;
-    case MSHR_OPCLASS:
-      return 10;
     default:
       return 4;
     }
@@ -1113,94 +1272,85 @@ protected:
   }
 
   //check MSHRs to see if they are full
-  virtual Inst_t &checkNumMSHRs(Inst_t &n, bool store) {
-    //
-    //
-    //turned off!
-    return n;
-    //
-    //
-    if(!store) {
-      Inst_t* min_node = addResource(MSHR_OPCLASS, n.cycleOfStage(Inst_t::Execute), 
-                                     n._ex_lat, &n);
-      if(min_node) {
+  virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
+    int mlat;
+    assert(n->_isload || n->_isstore);
+    if(n->_isload) {
+      mlat = n->_ex_lat;
+    } else {
+      mlat = n->_st_lat;
+    }
+    if(mlat <= Prof::get().dcache_hit_latency + 
+               Prof::get().dcache_response_latency+3) {
+      //We don't need an MSHR for non-missing loads/stores
+      return;
+    }
+
+    int reqDelayT  = Prof::get().dcache_hit_latency; // # cycles delayed before acquiring the MSHR
+    int respDelayT = Prof::get().dcache_response_latency; // # cycles delayed after releasing the MSHR
+    int mshrT = mlat - reqDelayT - respDelayT;  // the actual time of using the MSHR
+ 
+    assert(mshrT>0);
+    int rechecks=0;
+    uint64_t extraLat=0;
+    if(!store) { //if load
+
+      //have to wait this long before each event
+      int insts_to_squash=instsToSquash();
+      int squash_cycles = squashCycles(insts_to_squash);
+      int recheck_cycles = squash_cycles + 4;
+      
+      Inst_t* min_node = 
+           addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
+                           mshrT, n, recheck_cycles, rechecks, extraLat);
+	    if(rechecks==0) {
+        if(min_node) {
+          if(min_node->_isload) {
+            getCPDG()->insert_edge(*min_node, Inst_t::Complete,
+                                   *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
+          } else if(min_node->_isstore) {
+            getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
+                                   *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
+          } else {
+            assert(0 && "what is this doing here");
+          }
+          squashed_insts+=rechecks*insts_to_squash;
+        }
+	    } else { //rechecks > 0 -- time to refetch
+        n->reset_inst();
+        
+        setFetchCycle(*n);
         if(min_node->_isload) {
           getCPDG()->insert_edge(*min_node, Inst_t::Complete,
-                         n, Inst_t::Execute, 1,E_MSHR);
+                                 *n, Inst_t::Fetch, rechecks*recheck_cycles, E_MSHR);
         } else if(min_node->_isstore) {
           getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
-                         n, Inst_t::Execute, 1,E_MSHR);
-        } else {
-          assert(0 && "what is this doing here");
+                                 *n, Inst_t::Fetch, rechecks*recheck_cycles, E_MSHR);
         }
-      }
+        setDispatchCycle(*n);
+        setReadyCycle(*n);
+        checkRE(*n);        
+	    }
     } else { //if store
-       Inst_t* min_node = addResource(MSHR_OPCLASS, n.cycleOfStage(Inst_t::Commit)+2,
-                                     n._st_lat, &n);
+       Inst_t* min_node = 
+           addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Commit), 
+                           mshrT, n, 1, rechecks, extraLat);
       if(min_node) {
         if(min_node->_isload) {
           getCPDG()->insert_edge(*min_node, Inst_t::Complete,
-                         n, Inst_t::Writeback, n._st_lat,E_MSHR);
+                         *n, Inst_t::Writeback, mshrT+respDelayT, E_MSHR);
         } else if(min_node->_isstore) {
           getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
-                         n, Inst_t::Writeback, n._st_lat,E_MSHR);
+                         *n, Inst_t::Writeback, mshrT+respDelayT, E_MSHR);
         } else {
           assert(0 && "what is this doing here");
         }
       }
     }
 
-    return n;
+    return;
   }
 
-/*
-  virtual Inst_t &checkFuncUnits(Inst_t &n) {
-    if (n._img._isload || n._img._isstore)
-      return n;
-
-    uint64_t min_cycle_available = n.execute_cycle+50;
-    unsigned numOfFUAvailable = getNumFUAvailable(inst);
-    assert(numOfFUAvailable > 0);
-    const int e = _nodes.size();
-    Inst_t min_node;
-    for (int i = 0; i != e; ++i) {
-      Inst_t &prev_node = _nodes[-(i+1)];
-      //if (prev_node.execute_cycle +25 < n.execute_cycle)
-      //  break;
-
-      //break if we see 
-      if(prev_node.commit_cycle < n.fetch_cycle) {
-        break;
-      }
-
-      if (isSameOpClass(prev_node._img._opclass, n._img._opclass)) {
-        --numOfFUAvailable;
-
-        if (min_cycle_available > (prev_node.execute_cycle+ getFUIssueLatency(inst))) {
-          min_cycle_available = prev_node.execute_cycle + getFUIssueLatency(inst);
-          min_node = prev_node;
-        }
-      }
-      if (numOfFUAvailable == 0) {
-        break;
-      }
-    }
-    if (numOfFUAvailable != 0) {
-      return n;
-    }
-    if (min_cycle_available > n.execute_cycle) {
-
-//      int diff = min_cycle_available - n.execute_cycle;
-
-      n.execute_cycle = min_cycle_available;
-      getCPDG()->insert_edge(min_node.index, Inst_t::Execute,
-                       n.index(), Inst_t::Execute, getFUIssueLatency(inst));
-//                       n.index(), Inst_t::Execute, diff);
-
-    }
-    return n;
-  }
-*/
 
   //Ready to Execute Stage -- no delay
   virtual Inst_t &checkRE(Inst_t &n) {
@@ -1323,6 +1473,23 @@ protected:
     return n;
   }
 
+  // heuristic for calculating insts to squash
+  int instsToSquash() {
+    int insts_to_squash;
+    
+    insts_to_squash=rob_head_at_dispatch;
+    if(rob_growth_rate-0.05>0) {
+      insts_to_squash+=12*(rob_growth_rate-0.05);
+    }
+
+    return insts_to_squash*0.6f + avg_rob_head*0.4f;
+  }
+  
+  int squashCycles(int insts_to_squash) {
+    return 1 +  insts_to_squash/SQUASH_WIDTH 
+             + (insts_to_squash%SQUASH_WIDTH!=0);
+  }
+
   virtual Inst_t &checkSquashPenalty(Inst_t &n) {
     //BR_MISS_PENALTY no longer used
     //Instead we calculate based on the rob size, how long it's going to
@@ -1331,19 +1498,10 @@ protected:
     //but it might be close enough.
     if (n._ctrl_miss) {
 
-
-        int insts_to_squash;
-        
-        insts_to_squash=rob_head_at_dispatch;
-        if(rob_growth_rate-0.05>0) {
-          insts_to_squash+=12*(rob_growth_rate-0.05);
-        }
-
-        insts_to_squash = insts_to_squash*0.6f + avg_rob_head*0.4f;
+        int insts_to_squash=instsToSquash();
         squashed_insts+=insts_to_squash;
 
-        int squash_cycles = 1 +  insts_to_squash/SQUASH_WIDTH 
-                              + (insts_to_squash%SQUASH_WIDTH!=0);
+        int squash_cycles = squashCycles(insts_to_squash); 
 
 
         //int squash_cycles = (rob_head_at_dispatch + 1- 12*rob_growth_rate)/SQUASH_WIDTH;
