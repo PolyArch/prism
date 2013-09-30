@@ -246,7 +246,7 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setTraceOutputs(traceOutputs);
 
   //open prof file
-  if (gen_loop_prof) {
+  if (!gen_loop_prof) {
     size_t dot_pos =  prof_file.find(".", start_pos);
     prof_file = ((dot_pos == string::npos)
                  ? prof_file
