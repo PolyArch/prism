@@ -3,10 +3,11 @@
 #define CP_SIMD_HH
 
 #include "cp_dg_builder.hh"
-#include "cp_registry.hh"
 
 #include "simd_inst.hh"
 #include "exec_profile.hh"
+
+#include "cp_args.hh"
 
 namespace simd {
 

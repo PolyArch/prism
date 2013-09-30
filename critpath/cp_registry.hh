@@ -5,15 +5,12 @@
 #include <getopt.h>
 
 #include "critpath.hh"
+#include "cp_args.hh"
 #include "map"
 
 #include <vector>
 #include <tuple>
 
-class ArgumentHandler {
-public:
-  virtual void handle_argument(const char *name, const char *optarg) = 0;
-};
 
 class CPRegistry {
 private:

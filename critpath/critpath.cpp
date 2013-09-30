@@ -15,7 +15,6 @@
 #include "plugin.hh"
 
 #include "origcp.hh"
-#include "default_cpdg.hh"
 
 #include "prof.hh"
 
@@ -63,8 +62,6 @@ int HighBW = 0;
 //OrigCP orig;
 static RegisterCP<OrigCP> origCP("orig", false, true, true);
 
-static RegisterCP<default_cpdg_t> baseInorder("base",true);
-static RegisterCP<default_cpdg_t> baseOOO("base",false);
 
 
 int main(int argc, char *argv[])

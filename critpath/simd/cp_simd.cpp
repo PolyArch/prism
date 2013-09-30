@@ -1,5 +1,6 @@
 
 #include "cp_simd.hh"
+#include "cp_registry.hh"
 
 static RegisterCP<simd::cp_simd> OOO("simd", false);
 static RegisterCP<simd::cp_simd> In("simd", true);
