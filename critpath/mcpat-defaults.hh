@@ -1,7 +1,7 @@
 #ifndef MCPAT_DEFAULT_HH
 #define MCPAT_DEFAULT_HH
 
-const char * xml_str = R"(
+static const char * xml_str = R"(
 <?xml version="1.0" ?>
 <component id="root" name="root">
 	<component id="system" name="system">

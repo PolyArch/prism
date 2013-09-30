@@ -14,8 +14,6 @@
 #include "gzstream.hh"
 #include "plugin.hh"
 
-#include "origcp.hh"
-
 #include "prof.hh"
 
 #include <fstream>
@@ -59,8 +57,6 @@ unsigned GPU_LD_Latency = 0;
 
 int HighBW = 0;
 #endif
-//OrigCP orig;
-static RegisterCP<OrigCP> origCP("orig", false, true, true);
 
 
 

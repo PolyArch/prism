@@ -7,8 +7,6 @@
 #include "op.hh"
 
 #include "pugixml/pugixml.hpp"
-#include "mcpat-defaults.hh"
-
 #include <stdio.h>
 #include <ostream>
 #include <fstream>
@@ -162,6 +160,7 @@ public:
   virtual uint64_t numCycles()=0;
 
   virtual void printMcPATxml(const char* filename) {
+    #include "mcpat-defaults.hh"
     pugi::xml_document doc;
     std::istringstream ss(xml_str);
     pugi::xml_parse_result result = doc.load(ss);

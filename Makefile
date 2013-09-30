@@ -1,14 +1,17 @@
 
 
-.phony: all clean cp lp simd dyser ccores beret
+.phony: all clean cp lp base simd dyser ccores beret
 
-all: cp simd dyser ccores beret
+all: cp simd base dyser ccores beret
 
 cp:: lp
 	+make -C critpath
 
 lp::
 	+make -C loopprof
+
+base:
+	+make -C critpath/base
 
 simd:
 	+make -C critpath/simd

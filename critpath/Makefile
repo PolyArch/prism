@@ -6,7 +6,7 @@ GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
 
 OPT = -O3
 
-SRC := critpath.cpp gzstream.cpp cp_dep_graph.cpp prof.cpp plugin.cpp
+SRC := critpath.cpp gzstream.cpp prof.cpp plugin.cpp origcp.cpp
 CFLAGS := $(EXFLAGS) $(OPT) -std=c++11 -ggdb -gdwarf-3 -g3 -g -I. -Wall -Werror -pedantic -I../loopprof/. -I$(GEM5_DIR)/src
 LIBS := -lz -L../loopprof/. -lloopprof -lboost_serialization -ldl
 PWD := $(shell pwd)
