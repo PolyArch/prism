@@ -192,7 +192,7 @@ namespace DySER {
 
       // Adds Dependence Edges between events
       //   Different for IN_CPU and IN_DYSER
-      addDeps(*inst);
+      addDeps(inst);
 
       // For the Pipeline -- should only happen for CPU Instruction
       getCPDG()->pushPipe(sh_inst);
@@ -217,7 +217,7 @@ namespace DySER {
             InstPtr sh_inst = CurInsts[i];
             if (isInLS[sh_inst->_index]) {
               getCPDG()->addInst(sh_inst, sh_inst->_index);
-              addDeps(*sh_inst.get());
+              addDeps(sh_inst);
               getCPDG()->pushPipe(sh_inst);
               inserted(sh_inst);
             } else {
@@ -241,7 +241,7 @@ namespace DySER {
         Inst_t* inst = new Inst_t(img,index);
         std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
         getCPDG()->addInst(sh_inst,index);
-        addDeps(*inst);
+        addDeps(sh_inst);
         getCPDG()->pushPipe(sh_inst);
         inserted(sh_inst);
       }

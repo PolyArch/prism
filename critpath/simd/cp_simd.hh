@@ -183,7 +183,7 @@ namespace simd {
       unsigned vecPos = getSIMDPos(inst, op, li);
       if (vecPos == 0) {
         // Add dependency to the instruction
-        addDeps(*inst, op);
+        addDeps(inst, op);
         // and add to the pipe
         pushPipe(inst);
 
@@ -225,14 +225,14 @@ namespace simd {
 
       if (simd_state == IN_SIMD) {
         if (shouldExecuteInPipe(inst, CurLoop) ) {
-          addDeps(*inst->get(), op);
+          addDeps(inst, op);
           pushPipe(inst);
         } else {
           // No, we already executed as part of existing instruction.
         }
       } else {
         // Always execute in Pipe
-        addDeps(*inst->get(), op);
+        addDeps(inst, op);
         pushPipe(inst);
       }
       // Keep track of the instruction..
