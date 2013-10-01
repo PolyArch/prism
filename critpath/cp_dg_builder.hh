@@ -182,9 +182,9 @@ protected:
   typedef std::vector<FuUsageMap> FuUsage;
  
   std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
-  std::map<uint64_t,std::shared_ptr<Inst_t>> MSHRResp;
+  std::map<uint64_t,std::shared_ptr<dg_inst_base<T,E>>> MSHRResp;
 
-  typedef typename std::map<uint64_t,Inst_t*> NodeRespMap;
+  typedef typename std::map<uint64_t,dg_inst_base<T,E>*> NodeRespMap;
   typedef typename std::vector<NodeRespMap> NodeResp;
 
   FuUsage fuUsage;
@@ -318,7 +318,7 @@ protected:
   }
 
   //Adds a resource to the resource utilization map.
-  Inst_t* addMSHRResource(uint64_t min_cycle, uint32_t duration, 
+  dg_inst_base<T,E>* addMSHRResource(uint64_t min_cycle, uint32_t duration, 
 		     std::shared_ptr<Inst_t>& cpnode,
                      int re_check_frequency,
                      int& rechecks,
@@ -448,8 +448,8 @@ protected:
   }
 
   //Adds a resource to the resource utilization map.
-  Inst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
-                       Inst_t* cpnode, uint64_t addr=0) { 
+  dg_inst_base<T,E>* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
+                       dg_inst_base<T,E>* cpnode) { 
     return NULL;
 
     int fuIndex = fuPoolIdx(opclass);
@@ -1262,8 +1262,9 @@ protected:
       mult_ops++;
     }
 
-    Inst_t* min_node = addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
-                                   getFUIssueLatency(n), &n);
+    Inst_t* min_node = static_cast<dg_inst_base<T,E>*>(
+         addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
+                                   getFUIssueLatency(n), &n));
 
     if(min_node) {
       getCPDG()->insert_edge(min_node->index(), Inst_t::Execute,
@@ -1301,9 +1302,9 @@ protected:
       int squash_cycles = squashCycles(insts_to_squash);
       int recheck_cycles = squash_cycles + 4;
       
-      Inst_t* min_node = 
+      Inst_t* min_node = static_cast<Inst_t*>(
            addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
-                           mshrT, n, recheck_cycles, rechecks, extraLat);
+                           mshrT, n, recheck_cycles, rechecks, extraLat));
 	    if(rechecks==0) {
         if(min_node) {
           if(min_node->_isload) {
@@ -1333,9 +1334,9 @@ protected:
         checkRE(*n);        
 	    }
     } else { //if store
-       Inst_t* min_node = 
+       Inst_t* min_node = static_cast<Inst_t*>(
            addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Commit), 
-                           mshrT, n, 1, rechecks, extraLat);
+                           mshrT, n, 1, rechecks, extraLat));
       if(min_node) {
         if(min_node->_isload) {
           getCPDG()->insert_edge(*min_node, Inst_t::Complete,
