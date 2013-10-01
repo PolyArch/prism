@@ -1,0 +1,107 @@
+#===-- Makefile.rules ------------------------*- Makefile -*--===#
+
+# Things you can configure
+
+CC :=  /s/gcc-4.8.1/bin/gcc
+CXX := /s/gcc-4.8.1/bin/g++
+
+GEM5_DIR = /p/vertical/afs-huge0/MaFIA/src/gem5
+OPT = -O3
+
+# By default gcc-4.8.1 generated debug information in dwarf-4
+# g3 generates include extra information (about macro definition etc.,)
+DEBUG_FLAGS = -gdwarf-3 -g3 -ggdb
+WARN_FLAGS = -Wall -Werror -pedantic
+
+INCLUDES = -I. -I$(LEVEL)/ -I$(GEM5_DIR)/src -I$(LEVEL)/../loopprof
+
+CFLAGS = -std=c++11 $(OPT) $(DEBUG_FLAGS) $(WARN_FLAGS) $(INCLUDES) -fPIC $(EXTRA_FLAGS)
+
+LEVEL ?= .
+
+quiet = quiet_
+
+# Override with configuration
+-include $(LEVEL)/../make.config
+
+
+# Variables for quiet make
+quiet_cmd_cc_o_c = "	[CC]			$(notdir $<)"
+	cmd_cc_o_c	 = $(CC) $(CFLAGS) -MD -c -o $@ $<
+
+quiet_cmd_cxx_o_cxx = "	[CC]			$(notdir $<)"
+	cmd_cxx_o_cxx	 = $(CXX) $(CFLAGS) -MD -c -o $@ $<
+
+quiet_cmd_ccld_out = "	[CCLD]			$@"
+	cmd_ccld_out	 = $(CXX) $(CFLAGS) $(LDFLAGS) $(SHLDFLAGS) -o $@ $(OBJ)  $(LIBS)
+
+quiet_cmd_ccld_out_so = "	[CCLD]  -shared		$@"
+	cmd_ccld_out_so	 = $(CXX)  $(LDFLAGS) -shared -fPIC  -o $@ $(OBJ) $(LIBS)
+
+quiet_cmd_mkdir = "	[MKDIR]			$@"
+	cmd_mkdir = mkdir -p $@
+
+
+.PHONY: clean install
+
+ifdef BINARY
+$(BINARY): $(OBJ)
+	@echo $($(quiet)cmd_ccld_out)
+	@$(cmd_ccld_out)
+
+ifdef LIBNAME
+$(LIBNAME): $(OBJ)
+	@echo $($(quiet)cmd_ccld_out_so)
+	@$(cmd_ccld_out_so)
+clean:
+	-rm -f *.o *.d $(LIBNAME) $(BINARY)
+else
+clean:
+	-rm -f $(BINARY) *.o *.d
+endif
+
+else
+
+ifdef LIBNAME
+
+install: $(LIBNAME) $(LEVEL)/plugin
+	cp $(LIBNAME) $(LEVEL)/plugin/
+
+$(LEVEL)/plugin:
+	@echo $($(quiet)cmd_cmd_mkdir)
+	@$(cmd_mkdir)
+
+$(LIBNAME): $(OBJ)
+	@echo $($(quiet)cmd_ccld_out_so)
+	@$(cmd_ccld_out_so)
+clean:
+	-rm -f *.o *.d *.so $(LEVEL)/plugin/$(LIBNAME)
+
+else
+
+install:
+	echo "Error: LIBNAME not defined"
+
+clean:
+	-rm -f *.o *.d *.so
+
+endif
+
+endif
+
+-include $(OBJ:.o=.d)
+
+%.o : %.cpp
+	@echo $($(quiet)cmd_cxx_o_cxx)
+	@$(cmd_cxx_o_cxx)
+
+%.o : %.cc
+	@echo $($(quiet)cmd_cxx_o_cxx)
+	@$(cmd_cxx_o_cxx)
+
+%.o : %.c
+	@echo $($(quiet)cmd_cc_o_c)
+	@$(cmd_cc_o_c)
+
+
+

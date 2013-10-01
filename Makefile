@@ -1,6 +1,6 @@
 
 
-.phony: all clean cp lp base simd dyser ccores beret
+.PHONY: all clean cp lp base simd dyser ccores beret
 
 all: cp simd base dyser ccores beret
 

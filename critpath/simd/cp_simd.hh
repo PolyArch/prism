@@ -254,6 +254,6 @@ namespace simd {
 #endif
   };
 
-};
+} // SIMD namespace
 
 #endif
