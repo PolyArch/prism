@@ -14,9 +14,45 @@ namespace simd {
     typedef E* EPtr;
 
   public:
-    simd_inst(const CP_NodeDiskImage &img, uint64_t index):
-      dg_inst<T, E>(img, index) {}
     simd_inst() : dg_inst<T, E> () {}
+  };
+
+  class shuffle_inst: public simd_inst {
+  public:
+    shuffle_inst() {
+      _opclass = 0;
+      // not a memory or ctrl
+      _isload = _isstore = _isctrl = _ctrl_miss = false;
+      // no icache_miss
+      _icache_lat = 0;
+
+      // Its op is just a node added...
+      _prod[0] = 1;
+
+      // no memory
+      _mem_prod = _cache_prod = 0;
+      // executes in 1 cycle
+      _ex_lat = 1;
+      // not a serialization instruction
+      _serialBefore =  _serialAfter = _nonSpec = false;
+
+      _st_lat = 0;
+      _pc = -1; // what is the pc
+      _upc = -1; // what is the upc
+      _floating = true;
+      _iscall = false;
+      _numSrcRegs = 1;
+      _numFPSrcRegs = 1;
+      _numIntSrcRegs = 0;
+      _numFPDestRegs = 2;
+      _numIntDestRegs = 0;
+      _eff_addr = 0;
+
+      for (int i = 0; i < NumStages; ++i) {
+        events[i].set_inst(this);
+        events[i].prop_changed();
+      }
+    }
   };
 
 }

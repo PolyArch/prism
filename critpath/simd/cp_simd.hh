@@ -166,8 +166,17 @@ namespace simd {
 
     InstPtr addShuffleInst(InstPtr inst)
     {
-      return inst;
+      return InstPtr(new shuffle_inst());
     }
+
+    bool isStrideAccess(Op *op, int chkStride) {
+      int stride = 0;
+      if (!op->getStride(&stride)) {
+        return false;
+      }
+      return stride == chkStride;
+    }
+
 
     //
     // Override insert_inst to transform to SIMD graph
@@ -190,9 +199,11 @@ namespace simd {
 
         // handle broadcast_loads
         //  load followed by shuffles ...
-        //if (op->isLoad() && isStrideAccess(0)) {
-        //  Inst = addShuffleInst(inst);
-        //}
+        if (op->isLoad() && isStrideAccess(op, 0)) {
+          inst = addShuffleInst(inst);
+          addDeps(inst);
+          pushPipe(inst);
+        }
       }
 
       // Keep track of the instruction..

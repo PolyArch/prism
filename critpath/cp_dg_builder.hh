@@ -34,6 +34,7 @@ template<typename T, typename E>
 class CP_DG_Builder : public CriticalPath {
 
 public:
+  typedef dg_inst_base<T, E> BaseInst_t;
   typedef dg_inst<T, E> Inst_t;
 
   CP_DG_Builder() : CriticalPath() {
@@ -67,7 +68,7 @@ public:
     SQUASH_WIDTH = i;
   }
 
-  void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
+  void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     Inst_t* inst = new Inst_t(img,index);
     std::shared_ptr<Inst_t> sh_inst(inst);
     getCPDG()->addInst(sh_inst,index);

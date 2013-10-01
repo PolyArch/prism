@@ -160,7 +160,7 @@ public:
     NumStages = 7
   };
 
-private:
+protected:
   T events[NumStages];
 
 public:
@@ -190,30 +190,30 @@ public:
   }
 
   //Things from CP_Node image
-  uint16_t _opclass=0;
-  bool _isload=0;
-  bool _isstore=0;
-  bool _isctrl=0;
-  bool _ctrl_miss=0;
-  uint16_t _icache_lat=0;
-  uint16_t _prod[7]={0,0,0,0,0,0,0};
-  uint16_t _mem_prod=0;
-  uint16_t _cache_prod=0;
-  uint16_t _ex_lat=0;
-  bool _serialBefore=0;
-  bool _serialAfter=0;
-  bool _nonSpec=0;
-  uint16_t _st_lat=0;
-  uint64_t _pc=0;
-  uint16_t _upc=0;
+  uint16_t _opclass = 0;
+  bool _isload = false;
+  bool _isstore = false;
+  bool _isctrl = false;
+  bool _ctrl_miss = false;
+  uint16_t _icache_lat = 0;
+  uint16_t _prod[7] = {0,0,0,0,0,0,0};
+  uint16_t _mem_prod = 0;
+  uint16_t _cache_prod = 0;
+  uint16_t _ex_lat = 0;
+  bool _serialBefore = false;
+  bool _serialAfter = false;
+  bool _nonSpec = false;
+  uint16_t _st_lat = 0;
+  uint64_t _pc = 0;
+  uint16_t _upc = 0;
   uint64_t _eff_addr;
-  bool _floating=false;
-  bool _iscall=false;
-  uint8_t _numSrcRegs=0;
-  uint8_t _numFPSrcRegs=0;
-  uint8_t _numIntSrcRegs=0;
-  uint8_t _numFPDestRegs=0;
-  uint8_t _numIntDestRegs=0;
+  bool _floating = false;
+  bool _iscall = false;
+  uint8_t _numSrcRegs = 0;
+  uint8_t _numFPSrcRegs = 0;
+  uint8_t _numIntSrcRegs = 0;
+  uint8_t _numFPDestRegs = 0;
+  uint8_t _numIntDestRegs = 0;
 
   //Energy Counters, for validation
   //We could potentially delete this eventually

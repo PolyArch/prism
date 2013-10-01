@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
         ++count;
       }
     }
-    
+
     if (count_nodes) {
       count++;
     }
