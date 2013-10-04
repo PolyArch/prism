@@ -147,9 +147,12 @@ private:
       getCPDG()->insert_edge(dep_inst, dep_inst.eventComplete(),
                              inst, ccores_inst::Execute, 0, true);
     }
+
+
+/*
+
     //Memory dependence enforced by BB ordering -- if this is going to be
     //relaxed, then go ahead and implement mem dependence
-/*
     //memory dependence
     if (n._mem_prod > 0) {
       Inst_t& prev_node = static_cast<Inst_t&>( 
@@ -172,9 +175,11 @@ private:
 */
   }
 
+
   virtual void setCompleteCycle_cc(ccores_inst& inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(inst, ccores_inst::Execute,
                            inst, ccores_inst::Complete, inst._ex_lat);
+
     if(cur_bb_end) {
       inst.endBB = cur_bb_end; // have instruction keep
       getCPDG()->insert_edge(inst, ccores_inst::Complete,

@@ -1,4 +1,4 @@
-#include <boost/archive/text_oarchive.hpp>
+/*#include <boost/archive/text_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
 
 #include <boost/archive/binary_oarchive.hpp>
@@ -8,7 +8,35 @@
 
 #include "pathprof.hh"
 #include <string>
-#include <stdlib.h>
+#include <stdlib.h>*/
+
+#include <stdint.h>
+#include <sys/time.h>
+#include <cassert>
+#include <cstdlib>
+#include <iostream>
+#include <utility>
+#include <getopt.h>
+
+#include "gzstream.hh"
+
+#include "cpu/crtpath/crtpathnode.hh"
+#include "pathprof.hh"
+#include "lpanalysis.hh"
+#include "stdlib.h"
+
+#define INST_WINDOW_SIZE 1000
+
+using namespace std;
+
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
+
+
+
 
 using namespace std;
 

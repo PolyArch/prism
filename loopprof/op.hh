@@ -90,10 +90,17 @@ private:
     ar & _times;
     ar & _subgraph;
     _flags = std::bitset<8>(temp_flags);
+
     for(auto i=_deps.begin(),e=_deps.end();i!=e;++i) {
       Op* dep_op = *i;
       dep_op->addUse(this);
-    } 
+    }
+/*
+    for(auto i=_uses.begin(),e=_uses.end();i!=e;++i) {
+      Op* use_op = *i;
+      use_op->addJustDep(this);
+    }*/
+
   }
 
 public:
@@ -196,10 +203,20 @@ public:
   void setBB_pos(int i) {_bb_pos=i;}
 
   void addUse(Op* op) {
+     //assert(op!=this);
+     assert(op);
     _uses.insert(op);
   }
 
+  void addJustDep(Op* op) {
+    assert(op);
+    _deps.insert(op);
+  }
+
+
   void addDep(Op* op) {
+    //assert(op!=this);
+    assert(op);
     _deps.insert(op);
     op->addUse(this);
   }

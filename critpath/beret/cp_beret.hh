@@ -9,7 +9,7 @@
 
 extern int TraceOutputs;
 
-class beret_inst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
+class BeretInst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
 
@@ -22,43 +22,66 @@ public:
       SEBReady = 0,
       Execute = 1,
       Complete = 2,
+      Writeback = 3,
       NumStages
   };
 private:
   T events[NumStages];
 
 public:
-  virtual ~beret_inst() { 
+  virtual ~BeretInst() { 
     /*for (int i = 0; i < 3; ++i) {
       events[i].remove_all_edges();
     }*/
   }
 
-
   uint16_t _opclass=0;
-  bool _isload=false;
-  bool _isstore=false;
-  bool _isctrl=false;
-  uint16_t _prod[7];
+  bool _isload=0;
+  bool _isstore=0;
+  bool _isctrl=0;
+  bool _ctrl_miss=0;
+  uint16_t _icache_lat=0;
+  uint16_t _prod[7]={0,0,0,0,0,0,0};
   uint16_t _mem_prod=0;
   uint16_t _cache_prod=0;
   uint16_t _ex_lat=0;
+  bool _serialBefore=0;
+  bool _serialAfter=0;
+  bool _nonSpec=0;
+  uint16_t _st_lat=0;
+  uint64_t _pc=0;
+  uint16_t _upc=0;
+  uint64_t _eff_addr;
+  bool _floating=false;
+  bool _iscall=false;
+
+
 
   E* ex_edge;
 
-  beret_inst(const CP_NodeDiskImage &img, uint64_t index):
+  BeretInst(const CP_NodeDiskImage &img, uint64_t index):
               dg_inst_base<T,E>(index){
     _opclass=img._opclass;
     _isload=img._isload;
     _isstore=img._isstore;
     _isctrl=img._isctrl;
+    _ctrl_miss=img._ctrl_miss;
+    _icache_lat=img._icache_lat;
     std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
     _mem_prod=img._mem_prod;
     _cache_prod=img._cache_prod;
     _ex_lat=img._cc-img._ec;
+    _serialBefore=img._serialBefore;
+    _serialAfter=img._serialAfter;
+    _nonSpec=img._nonSpec;
+    _st_lat=img._xc-img._wc;
+    _pc=img._pc;
+    _upc=img._upc;
+    _floating=img._floating;
+    _iscall=img._iscall;
   }
 
-  beret_inst() : dg_inst_base<T,E>() {}
+  BeretInst() : dg_inst_base<T,E>() {}
 
   T& operator[](const unsigned i) {
     assert(i < NumStages);
@@ -186,9 +209,9 @@ public:
    *  Beret Iteration State
    */
   unsigned beret_state;
-  std::map<Op*,beret_inst*> binstMap;
-  beret_inst* first_inst=NULL;
-  beret_inst* last_inst=NULL;
+  std::map<Op*,std::shared_ptr<BeretInst>> binstMap;
+  BeretInst* first_inst=NULL;
+  BeretInst* last_inst=NULL;
   LoopInfo* li;
   Op* curLoopHead;
   std::vector<std::pair<CP_NodeDiskImage,uint64_t>> replay_queue;
@@ -207,18 +230,22 @@ public:
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
-        beret_inst* b_inst = new beret_inst();
+        BeretInst* b_inst = new BeretInst();
 	if(first_inst==NULL) {
           first_inst=b_inst;
         }
 	last_inst=b_inst;
-        binstMap[op]=b_inst;
-        getCPDG()->insert_edge(*b_inst, beret_inst::SEBReady,
-                               *b_inst, beret_inst::Execute, 0, E_SEBE);
+
+        binstMap.emplace(std::piecewise_construct,
+                         std::forward_as_tuple(op),
+                         std::forward_as_tuple(b_inst));
+
+        getCPDG()->insert_edge(*b_inst, BeretInst::SEBReady,
+                               *b_inst, BeretInst::Execute, 0, E_SEBE);
 
 	b_inst->ex_edge = 
-	    getCPDG()->insert_edge(*b_inst, beret_inst::Execute,
-	                           *b_inst, beret_inst::Complete,op->avg_lat(), E_SEBC);
+	    getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
+	                           *b_inst, BeretInst::Complete,op->avg_lat(), E_SEBC);
 /*        std::cout << "X " << b_inst->cycleOfStage(0) << " "
                   << b_inst->cycleOfStage(1) << " "
                   << b_inst->cycleOfStage(2) << "\n";*/
@@ -232,27 +259,27 @@ public:
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
-        beret_inst* b_inst = binstMap[op];
+        std::shared_ptr<BeretInst> b_inst = binstMap[op];
         //add subgraph deps to previous subgraph
         if(prev_sg!=NULL) {
           for(auto si=prev_sg->op_begin(),se=prev_sg->op_end();si!=se;++si){
             Op* ps_op = *si;
-            beret_inst* ps_beret_inst = binstMap[ps_op];
-            getCPDG()->insert_edge(*ps_beret_inst, beret_inst::Complete,
-                                   *b_inst, beret_inst::SEBReady, 0, E_SEBA);
+            std::shared_ptr<BeretInst> ps_BeretInst = binstMap[ps_op];
+            getCPDG()->insert_edge(*ps_BeretInst, BeretInst::Complete,
+                                   *b_inst, BeretInst::SEBReady, 0, E_SEBA);
           } 
         } else {
           getCPDG()->insert_edge(*inst, eventInd,
-                                 *b_inst,beret_inst::SEBReady,0,E_SEBS);
+                                 *b_inst,BeretInst::SEBReady,0,E_SEBS);
           /*std::cout << inst->cycleOfStage(eventInd) << " "
-                    << b_inst->cycleOfStage(beret_inst::SEBReady) << "\n";*/
+                    << b_inst->cycleOfStage(BeretInst::SEBReady) << "\n";*/
         }
         for(auto di = op->d_begin(),de = op->d_end();di!=de;++di) {
           Op* dop = *di;
           if(li->dependenceInPath(op,dop)) {
-            beret_inst* dep_beret_inst = binstMap[dop];
-            getCPDG()->insert_edge(*dep_beret_inst, beret_inst::Complete,
-                       *b_inst, beret_inst::Execute, 0,E_SEBD);
+            std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
+            getCPDG()->insert_edge(*dep_BeretInst, BeretInst::Complete,
+                       *b_inst, BeretInst::Execute, 0,E_SEBD);
           }
         }
         b_inst->reCalculate();
@@ -265,13 +292,36 @@ public:
     }
   }
 
-  void reCalcBeretLoop() {
+  
+  void reCalcBeretLoop(bool commit_iter) {
+    //recalc loop, and get last cycle
+    uint64_t last_cycle=0;
     for(auto i =li->sg_begin(),e =li->sg_end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
-        beret_inst* b_inst = binstMap[op];
+        std::shared_ptr<BeretInst> b_inst = binstMap[op];
 	b_inst->reCalculate();
+
+        uint64_t cycle=b_inst->cycleOfStage(BeretInst::Complete);
+        if(last_cycle < cycle) {
+          last_cycle=cycle;
+        }
+      }
+    }
+
+    //write stores from store buffer
+    for(auto i = li->sg_begin(), e =li->sg_end(); i!=e; ++i) {
+      Subgraph* sg = *i;
+      for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
+        Op* op = *opi;
+        std::shared_ptr<BeretInst> b_inst = binstMap[op];
+        if(commit_iter && b_inst->_isstore) {
+          // stores must come after all computation is complete
+          checkNumMSHRs(b_inst, last_cycle); 
+        }
+        //done with this instruction
+        //getCPDG()->done(sh_inst);
       }
     }
   }
@@ -307,16 +357,15 @@ public:
         break;
       case BERET:
         if(op==curLoopHead) { //came back into beret
-	  //`beret_inst* binst = binstMap[op];
-          reCalcBeretLoop(); //get correct beret timing
-	  addLoopIteration(last_inst,beret_inst::Complete);
+          reCalcBeretLoop(true); //get correct beret timing
+	  addLoopIteration(last_inst,BeretInst::Complete);
 	} else if(op->bb_pos()==0) {
           if(li->getHotPath()[++whichBB]!=op->bb()) {
             beret_state = CPU;  //WRONG PATH - SWITCH TO CPU
-     	    //beret_inst* binst = binstMap[op];
-            beret_inst* binst = binstMap[li->getHotPath()[whichBB-1]->firstOp() ];
+            std::shared_ptr<BeretInst> binst = 
+                           binstMap[li->getHotPath()[whichBB-1]->firstOp() ];
 
-            reCalcBeretLoop(); //get correct beret wrong-path timing
+            reCalcBeretLoop(false); //get correct beret wrong-path timing
             //get timing for beret loop
             uint64_t endBeretCyc=binst->cycleOfStage(binst->eventComplete());
             totalBeretCycles+=endBeretCyc-curBeretStartCycle;
@@ -327,12 +376,12 @@ public:
 	      uint64_t& index = replay_queue[i].second;
               Inst_t* inst = new Inst_t(img,index);
 	      if(i==0) {
-                getCPDG()->insert_edge(*binst, beret_inst::Complete,
+                getCPDG()->insert_edge(*binst, BeretInst::Complete,
 	                               *inst, Inst_t::Fetch,0,E_BREP); 
 	      }
               std::shared_ptr<Inst_t> sh_inst(inst);
               getCPDG()->addInst(sh_inst,index);
-              addDeps(sh_inst);
+              addDeps(sh_inst); //regular add deps
               pushPipe(sh_inst);
               inserted(sh_inst);
 	    }
@@ -359,15 +408,20 @@ public:
         break;
       } case BERET: {
         //make beret instruction
-        /*beret_inst* b_inst = new beret_inst(img,index);
-        std::shared_ptr<beret_inst> sh_inst = std::shared_ptr<beret_inst>(inst);
+        /*BeretInst* b_inst = new BeretInst(img,index);
+        std::shared_ptr<BeretInst> sh_inst = std::shared_ptr<BeretInst>(inst);
         getCPDG()->addInst(sh_inst,index);
         addBeretDeps(*inst);*/
 
-	beret_inst* b_inst = binstMap[op];
+	std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
-	std::shared_ptr<beret_inst> sh_inst(b_inst);
+	std::shared_ptr<BeretInst> sh_inst(b_inst);
 	getCPDG()->addInst(sh_inst,index);
+
+        if(b_inst->_isload) {
+          //get the MSHR resource here!
+          checkNumMSHRs(sh_inst); 
+        }
 	b_inst->updateLat(img._cc-img._ec);
 	replay_queue.push_back(std::make_pair(img,index));
         break;
@@ -378,31 +432,78 @@ public:
   }
 
 private:
-  typedef std::vector<std::shared_ptr<beret_inst>> CCoresBB;
-  CCoresBB prev_bb,current_bb;
+
+  virtual void checkNumMSHRs(std::shared_ptr<BeretInst>& n, uint64_t minT=0) {
+    int mlat;
+    assert(n->_isload || n->_isstore);
+    if(n->_isload) {
+      mlat = n->_ex_lat;
+    } else {
+      mlat = n->_st_lat;
+    }
+    if(mlat <= Prof::get().dcache_hit_latency + 
+               Prof::get().dcache_response_latency+3) {
+      //We don't need an MSHR for non-missing loads/stores
+      return;
+    }
+
+    int reqDelayT  = Prof::get().dcache_hit_latency; // # cycles delayed before acquiring the MSHR
+    int respDelayT = Prof::get().dcache_response_latency; // # cycles delayed after releasing the MSHR
+    int mshrT = mlat - reqDelayT - respDelayT;  // the actual time of using the MSHR
+
+ 
+    assert(mshrT>0);
+    int rechecks=0;
+    uint64_t extraLat=0;
+
+    uint64_t access_time=reqDelayT + n->cycleOfStage(BeretInst::Complete);
+
+    if (minT > access_time) {
+      minT=access_time;
+    } 
+
+    if(n->_isload) {
+      BaseInst_t* min_node =
+           addMSHRResource(access_time, 
+                           mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
+      if(min_node) {
+          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+                         *n, BeretInst::Execute, mshrT+respDelayT, E_MSHR);
+      }
+    } else {
+      BaseInst_t* min_node =
+           addMSHRResource(access_time, 
+                           mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
+      if(min_node) {
+          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+                         *n, BeretInst::Execute, mshrT+respDelayT, E_MSHR);
+      }
+    }
+  }
+
 
 /*
-  virtual void addBeretDeps(beret_inst& inst) { 
+  virtual void addBeretDeps(BeretInst& inst) { 
     setSEBReadyCycle_beret(inst);
     setExecuteCycle_beret(inst);
     setCompleteCycle_beret(inst);
   }
 
   //This node when current SEB is active
-  virtual void setSEBReadyCycle_beret(beret_inst& inst) {
+  virtual void setSEBReadyCycle_beret(BeretInst& inst) {
     CCoresBB::iterator I,E;
     for(I=prev_bb.begin(),E=prev_bb.end();I!=E;++I) {
-        beret_inst* cc_inst= I->get(); 
-        getCPDG()->insert_edge(*cc_inst, beret_inst::Complete,
-                               inst, beret_inst::BBReady, 0);
+        BeretInst* cc_inst= I->get(); 
+        getCPDG()->insert_edge(*cc_inst, BeretInst::Complete,
+                               inst, BeretInst::BBReady, 0);
     }
   }
 
   //this node when current BB is about to execute 
   //(no need for ready, b/c it has dedicated resources)
-  virtual void setExecuteCycle_beret(beret_inst &inst) {
-    getCPDG()->insert_edge(inst, beret_inst::SEBReady,
-                           inst, beret_inst::Execute, 0, true);
+  virtual void setExecuteCycle_beret(BeretInst &inst) {
+    getCPDG()->insert_edge(inst, BeretInst::SEBReady,
+                           inst, BeretInst::Execute, 0, true);
     for (int i = 0; i < 7; ++i) {
       int prod = inst._prod[i];
       if (prod <= 0) {
@@ -440,9 +541,9 @@ private:
 
   }
 
-  virtual void setCompleteCycle_beret(beret_inst& inst) {
-    getCPDG()->insert_edge(inst, beret_inst::Execute,
-                           inst, beret_inst::Complete, inst._ex_lat);
+  virtual void setCompleteCycle_beret(BeretInst& inst) {
+    getCPDG()->insert_edge(inst, BeretInst::Execute,
+                           inst, BeretInst::Complete, inst._ex_lat);
   }
 */
   uint64_t numCycles() {

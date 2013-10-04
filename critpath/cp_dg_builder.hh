@@ -94,7 +94,7 @@ public:
       unsigned lae;
       if(laEdge) {
         lae = laEdge->type();
-        if(lae!=default_type1 && lae!=default_type2) {
+        if((lae!=default_type1 && lae!=default_type2) || laEdge->len()>1) {
           out << edge_name[lae]; 
           out << laEdge->len(); 
         }
@@ -182,9 +182,9 @@ protected:
   typedef std::vector<FuUsageMap> FuUsage;
  
   std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
-  std::map<uint64_t,std::shared_ptr<dg_inst_base<T,E>>> MSHRResp;
+  std::map<uint64_t,std::shared_ptr<BaseInst_t>> MSHRResp;
 
-  typedef typename std::map<uint64_t,dg_inst_base<T,E>*> NodeRespMap;
+  typedef typename std::map<uint64_t,BaseInst_t*> NodeRespMap;
   typedef typename std::vector<NodeRespMap> NodeResp;
 
   FuUsage fuUsage;
@@ -268,25 +268,35 @@ protected:
       }
     }
 
-    //MSHR Usage
-    for(auto i=++MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
+
+/*    //DEBUG MSHR Usage
+    for(auto i=MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
       uint64_t cycle = i->first;
-      assert(cycle!=0);
-      if (cycle + 50  < _curCycle) {
-        i = MSHRUseMap.erase(i);
-      } else {
-        //++i;
+     
+      if(cycle > 10000000) {
         break;
       }
+      std::cerr << i->first << " " << i->second.size() << ", ";
+      ++i;
     }
+    std::cerr << "(" << MSHRUseMap.size() << ")\n";*/
+
+
+    //delete irrelevent 
+    auto upperMSHRUse = --MSHRUseMap.upper_bound(_curCycle);
+    auto firstMSHRUse = MSHRUseMap.begin();
+
+    if(upperMSHRUse->first > firstMSHRUse->first) {
+      MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
+    }
+
 
     //delete irrelevent 
     auto upperMSHRResp = MSHRResp.upper_bound(_curCycle);
     MSHRResp.erase(MSHRResp.begin(),upperMSHRResp); 
 
 
-    for(typename NodeResp::iterator I=nodeResp.begin(),EE=nodeResp.end();
-                                                                 I!=EE;++I) {
+    for(auto I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
       NodeRespMap& respMap = *I;
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
@@ -318,8 +328,9 @@ protected:
   }
 
   //Adds a resource to the resource utilization map.
-  dg_inst_base<T,E>* addMSHRResource(uint64_t min_cycle, uint32_t duration, 
-		     std::shared_ptr<Inst_t>& cpnode,
+  BaseInst_t* addMSHRResource(uint64_t min_cycle, uint32_t duration, 
+                     std::shared_ptr<BaseInst_t> cpnode,
+                     uint64_t eff_addr,
                      int re_check_frequency,
                      int& rechecks,
                      uint64_t& extraLat) { 
@@ -334,7 +345,7 @@ protected:
     cur_cycle_iter = --MSHRUseMap.upper_bound(min_cycle);
 
     uint64_t filter_addr=(((uint64_t)-1)^(Prof::get().cache_line_size-1));
-    uint64_t addr = cpnode->_eff_addr & filter_addr;
+    uint64_t addr = eff_addr & filter_addr;
 
     //std::cout << addr << ", " << filter_addr << " (" << Prof::get().cache_line_size << "," << cpnode->_eff_addr << ")\n";
 
@@ -448,8 +459,8 @@ protected:
   }
 
   //Adds a resource to the resource utilization map.
-  dg_inst_base<T,E>* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
-                       dg_inst_base<T,E>* cpnode) { 
+  BaseInst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
+                       BaseInst_t* cpnode) { 
     return NULL;
 
     int fuIndex = fuPoolIdx(opclass);
@@ -711,7 +722,9 @@ protected:
   virtual void setCompleteCycle(Inst_t &inst, Op* op) {
     checkEP(inst);
     if (!_isInOrder) {
-      //checkPP(inst);
+      if(inst._isload) {
+        checkPP(inst);
+      }
       checkWriteBackWidth(inst);
 
       //Memory instructions can leave the IQ now!
@@ -777,6 +790,7 @@ protected:
         getCPDG()->insert_edge(*inst, Inst_t::Commit,
                                *inst, Inst_t::Writeback, 2+inst->_st_lat, E_WB);
         checkNumMSHRs(inst,true);
+        checkPP(*inst);
       }
     }
   }
@@ -803,7 +817,7 @@ protected:
       if(predict_taken && lat==0) {
         lat+=1;
       }
-
+      
 /*
       if(lat==0) { //fetch ends at a control inst
         Inst_t* depInst2 = getCPDG()->peekPipe(-2);
@@ -853,10 +867,10 @@ protected:
     }
 
     int length=1;
-    Inst_t* prevInst = getCPDG()->peekPipe(-1);
-    if(prevInst && !prevInst->_isctrl) {
-      length+=n._icache_lat;
-    }
+    //Inst_t* prevInst = getCPDG()->peekPipe(-1);
+    //if(prevInst && !prevInst->_isctrl) {
+    //  length+=n._icache_lat;
+    //}
 
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
                            n, Inst_t::Fetch, length, E_FBW); 
@@ -1096,7 +1110,7 @@ protected:
       if (prod <= 0 || prod >= n.index()) {
         continue;
       }
-      dg_inst_base<T,E>& depInst =
+      BaseInst_t& depInst =
             getCPDG()->queryNodes(n.index()-prod);
 
       getCPDG()->insert_edge(depInst, depInst.eventComplete(),
@@ -1106,7 +1120,7 @@ protected:
     //memory dependence
     if (n._mem_prod > 0 && n._mem_prod < n.index()) {
       
-      dg_inst_base<T,E>& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
+      BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
 
       if(dep_inst.isPipelineInst()) {
         Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
@@ -1221,33 +1235,70 @@ protected:
     return 4;
   }
 
-  //KNOWN_HOLE: SSE Issue Latency Missing
-  virtual unsigned getFUIssueLatency(Inst_t &n) {
-    switch(n._opclass) {
+  virtual unsigned getFUIssueLatency(int opclass) {
+    switch(opclass) {
     case 0: //No_OpClass
       return 1;
     case 1: //IntALU
-      return 1;
+      return Prof::get().int_alu_issueLat;
 
     case 2: //IntMult
-      return 1;
+      return Prof::get().mul_issueLat;
     case 3: //IntDiv
-      return 19;
+      return Prof::get().div_issueLat;
 
     case 4: //FloatAdd
+      return Prof::get().fadd_issueLat;
     case 5: //FloatCmp
+      return Prof::get().fcmp_issueLat;
     case 6: //FloatCvt
-      return 1;
+      return Prof::get().fcvt_issueLat;
     case 7: //FloatMult
-      return 1;
+      return Prof::get().fmul_issueLat;
     case 8: //FloatDiv
-      return 12;
+      return Prof::get().fdiv_issueLat;
     case 9: //FloatSqrt
-      return 24;
+      return Prof::get().fsqrt_issueLat;
     default:
       return 1;
     }
     return 1;
+  }
+
+  virtual unsigned getFUOpLatency(int opclass) {
+    switch(opclass) {
+    case 0: //No_OpClass
+      return 1;
+    case 1: //IntALU
+      return Prof::get().int_alu_opLat;
+
+    case 2: //IntMult
+      return Prof::get().mul_opLat;
+    case 3: //IntDiv
+      return Prof::get().div_opLat;
+
+    case 4: //FloatAdd
+      return Prof::get().fadd_opLat;
+    case 5: //FloatCmp
+      return Prof::get().fcmp_opLat;
+    case 6: //FloatCvt
+      return Prof::get().fcvt_opLat;
+    case 7: //FloatMult
+      return Prof::get().fmul_opLat;
+    case 8: //FloatDiv
+      return Prof::get().fdiv_opLat;
+    case 9: //FloatSqrt
+      return Prof::get().fsqrt_opLat;
+    default:
+      return 1;
+    }
+    return 1;
+  }
+
+
+  //KNOWN_HOLE: SSE Issue Latency Missing
+  virtual unsigned getFUIssueLatency(Inst_t &n) {
+    return getFUIssueLatency(n._opclass);
   }
 
   //Check Functional Units to see if they are full
@@ -1262,11 +1313,12 @@ protected:
       mult_ops++;
     }
 
-    Inst_t* min_node = static_cast<dg_inst_base<T,E>*>(
+    Inst_t* min_node = static_cast<Inst_t*>(
          addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
                                    getFUIssueLatency(n), &n));
 
     if(min_node) {
+      //TODO: check min->node start
       getCPDG()->insert_edge(min_node->index(), Inst_t::Execute,
                         n, Inst_t::Execute, getFUIssueLatency(*min_node),E_FU);
     }
@@ -1302,51 +1354,48 @@ protected:
       int squash_cycles = squashCycles(insts_to_squash);
       int recheck_cycles = squash_cycles + 4;
       
-      Inst_t* min_node = static_cast<Inst_t*>(
-           addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
-                           mshrT, n, recheck_cycles, rechecks, extraLat));
-	    if(rechecks==0) {
-        if(min_node) {
-          if(min_node->_isload) {
-            getCPDG()->insert_edge(*min_node, Inst_t::Complete,
-                                   *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
-          } else if(min_node->_isstore) {
-            getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
-                                   *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
-          } else {
-            assert(0 && "what is this doing here");
-          }
-          squashed_insts+=rechecks*insts_to_squash;
-        }
-	    } else { //rechecks > 0 -- time to refetch
-        n->reset_inst();
+      BaseInst_t* min_node =
+         addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
+              mshrT, n, n->_eff_addr, recheck_cycles, rechecks, extraLat);
+      if(rechecks==0) {
+        /*if(min_node) {
+          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+               *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
+        }*/
+        //don't do anything!
+
+      } else { //rechecks > 0 -- time to refetch
+        //create a copy of the instruction to serve as a dummy
+        Inst_t* dummy_inst = new Inst_t();
+        dummy_inst->copyEvents(n.get());
+        //Inst_t* dummy_inst = new Inst_t(*n);
+        std::shared_ptr<Inst_t> sh_dummy_inst(dummy_inst);
         
+
+        pushPipe(sh_dummy_inst);
+        assert(min_node); 
+
+        n->reset_inst();
         setFetchCycle(*n);
-        if(min_node->_isload) {
-          getCPDG()->insert_edge(*min_node, Inst_t::Complete,
-                                 *n, Inst_t::Fetch, rechecks*recheck_cycles, E_MSHR);
-        } else if(min_node->_isstore) {
-          getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
-                                 *n, Inst_t::Fetch, rechecks*recheck_cycles, E_MSHR);
-        }
+        /*getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+          *n, Inst_t::Fetch, rechecks*recheck_cycles, E_MSHR);*/
+
+        getCPDG()->insert_edge(*dummy_inst, Inst_t::Execute,
+          *n, Inst_t::Fetch, rechecks*recheck_cycles, E_MSHR);
+
         setDispatchCycle(*n);
         setReadyCycle(*n);
         checkRE(*n);        
-	    }
+
+        squashed_insts+=rechecks*insts_to_squash;
+      }
     } else { //if store
-       Inst_t* min_node = static_cast<Inst_t*>(
+       BaseInst_t* min_node =
            addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Commit), 
-                           mshrT, n, 1, rechecks, extraLat));
+                           mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
       if(min_node) {
-        if(min_node->_isload) {
-          getCPDG()->insert_edge(*min_node, Inst_t::Complete,
-                         *n, Inst_t::Writeback, mshrT+respDelayT, E_MSHR);
-        } else if(min_node->_isstore) {
-          getCPDG()->insert_edge(*min_node, Inst_t::Writeback,
-                         *n, Inst_t::Writeback, mshrT+respDelayT, E_MSHR);
-        } else {
-          assert(0 && "what is this doing here");
-        }
+        getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+                 *n, Inst_t::Writeback, mshrT+respDelayT, E_MSHR);
       }
     }
 
@@ -1427,9 +1476,25 @@ protected:
   //==========COMPLTE ==============
   //Complete After Execute
   virtual Inst_t &checkEP(Inst_t &n) {
-    getCPDG()->insert_edge(n, Inst_t::Execute,
-                           n, Inst_t::Complete, n._ex_lat,E_EP);
 
+    //Ok, so memory instructions bear their memory latency here.  If we have a cache
+    //producer, that means we should be in the cache, so drop the latency
+    int lat=0;
+
+    if(n._isload) {
+      if(n._cache_prod) {
+        lat = Prof::get().dcache_hit_latency + Prof::get().dcache_response_latency;
+      } else {
+        lat = n._ex_lat;
+      }
+    } else {
+      //don't want to use this dynamic latency
+      //lat = n._ex_lat;
+      lat = getFUOpLatency(n._opclass);
+    }
+
+    getCPDG()->insert_edge(n, Inst_t::Execute,
+                           n, Inst_t::Complete, lat, E_EP);
     return n;
   }
 
@@ -1456,13 +1521,18 @@ protected:
     return n;
   }
 
-  //Cache producer?  weird... check if this ever matters
+  //Cache Line Producer
   virtual Inst_t &checkPP(Inst_t &n) {
+    return n;
+   
+    //This edge doesn't work...
     uint64_t cache_prod = n._cache_prod;
 
     if (cache_prod > 0 && cache_prod < n.index()) {
-      getCPDG()->insert_edge(n.index()-cache_prod, Inst_t::Complete,
-                             n, Inst_t::Complete, 0,E_PP);
+      BaseInst_t& depInst = getCPDG()->queryNodes(n.index()-cache_prod);
+
+      getCPDG()->insert_edge(depInst, depInst.memComplete(),
+                             n, n.memComplete(), 0, E_PP);
     }
     return n;
   }
@@ -1625,4 +1695,43 @@ protected:
 };
 
 
+#endif
+
+
+
+
+
+
+
+
+
+
+#if 0
+  virtual unsigned getFUIssueLatency(int opclass) {
+    switch(opclass) {
+    case 0: //No_OpClass
+      return 1;
+    case 1: //IntALU
+      return 1;
+
+    case 2: //IntMult
+      return 1;
+    case 3: //IntDiv
+      return 19;
+
+    case 4: //FloatAdd
+    case 5: //FloatCmp
+    case 6: //FloatCvt
+      return 1;
+    case 7: //FloatMult
+      return 1;
+    case 8: //FloatDiv
+      return 12;
+    case 9: //FloatSqrt
+      return 24;
+    default:
+      return 1;
+    }
+    return 1;
+  }
 #endif

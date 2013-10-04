@@ -98,6 +98,11 @@ protected:
         out << "md(" << img._mem_prod << ")";
       }
 
+      if(img._cache_prod != 0) {
+        out << "cd(" << img._cache_prod << ")";
+      }
+
+
       if(img._icache_lat >0) {
         out << "I$" << img._icache_lat;
       }

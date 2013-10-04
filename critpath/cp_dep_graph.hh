@@ -61,7 +61,8 @@ X(SEBA, "SEBA", "Activate SEB")\
 X(SEBE, "SEBE", "SEB Execute")\
 X(SEBC, "SEBC", "SEB Execute to Complete")\
 X(SEBD, "SEBD", "SEB Data Dependence")\
-X(BREP, "BREP", "Beret Replay")
+X(BREP, "BREP", "Beret Replay")\
+X(CHT,  "CHT",  "cheat edge for super insts")
 
 #define X(a, b, c) E_ ## a,
 enum EDGE_TYPE {
@@ -115,9 +116,19 @@ template<typename T, typename E>
 class dg_inst_base {
 public:
   uint64_t _index;
+  bool done = false;
   virtual T &operator[](const unsigned i) =0;
   virtual ~dg_inst_base() {
     //std::cout << "del: " << _index << " " << this << "\n";
+/*
+    static int warning_count=0;
+    if(!done) {
+      if(warning_count < 20) {
+        std::cerr << "node never done-ed\n"
+        warning_count++;
+      }
+    }
+*/
   }
 
 protected:
@@ -139,6 +150,8 @@ public:
   virtual bool isPipelineInst() {return false;}
 
   virtual unsigned eventComplete() {return (unsigned)-1;} //return the index of when the node's data is ready
+  virtual unsigned memComplete() {return (unsigned)-1;} //return the index of when the memory operation is ready
+
   virtual unsigned eventCommit() {return numStages()-1;}
   
 };
@@ -174,6 +187,17 @@ public:
     }*/
   }
 
+  //Copy events from another Inst_t
+  virtual void copyEvents(dg_inst<T,E>* from) {
+    for (int i = 0; i < NumStages; ++i) {
+      for (auto pi=from->events[i].pebegin(), 
+                pe=from->events[i].peend(); pi!=pe; ++pi) {
+        E* old_edge = *pi;
+        E* edge = new E(old_edge->src(),&events[i], old_edge->len(), old_edge->type());
+        old_edge->src()->add_edge(edge);
+      }
+    }
+  }
 
   virtual unsigned numStages() {
     return NumStages;
@@ -184,6 +208,15 @@ public:
   }
   virtual unsigned eventComplete() {
     return Complete;
+  }
+  virtual unsigned memComplete() {
+    if(_isload) {
+      return Complete;
+    } else if (_isstore) {
+      return Writeback;
+    } else {
+      assert(0 && "no mem access allowed");
+    }
   }
   virtual unsigned eventCommit() {
     return Commit;
@@ -328,7 +361,7 @@ public:
 
   std::vector<EPtr> _edges; //forward edges
   //std::map<dg_event_base*, EPtr> _pred_edge_map;
-  std::vector<EPtr> _pred_edges; //predecessor edges???
+  std::vector<EPtr> _pred_edges; //predecessor edges
 
   dg_event_impl_t(): _index(0), _cycle(0), _ty(0), ff_edge(0),
                       _load(false), _store(0), _ctrl(false),
@@ -377,6 +410,8 @@ public:
 
   virtual void prop_changed(){}
 
+  typename std::vector<EPtr>::iterator pebegin() { return _pred_edges.begin(); }
+  typename std::vector<EPtr>::iterator peend() { return _pred_edges.end(); }
 
   virtual void add_edge(EPtr e) {
     _edges.push_back(e);
@@ -557,6 +592,8 @@ public:
 
   virtual Inst_t* peekPipe(int offset) = 0; 
   virtual void pushPipe(std::shared_ptr<Inst_t> dg) = 0;
+  virtual void done(std::shared_ptr<Inst_t> dg) = 0;
+
 
   virtual void commitNode(uint64_t index)  = 0;
   virtual void finish(uint64_t index) = 0;
@@ -566,7 +603,9 @@ public:
 
 // Implementation for the entire graph
 #define BSIZE 4096 //max number of insts to keep for data/mem dependence
-#define PSIZE 2048 //max number in-flight instructions, biggest ROB size
+#define PSIZE  512 //max number in-flight instructions, biggest ROB size
+#define DONE_SIZE 4096 //max number in-flight instructions, biggest ROB size
+
 template<typename Inst_t, typename T, typename E>
 class dep_graph_impl_t : public dep_graph_t<Inst_t,T,E> {
 public:
@@ -648,6 +687,11 @@ public:
     _pipe[_pipeLoc%PSIZE]=dg;
     _pipeLoc+=1;
   }
+
+  virtual void done(std::shared_ptr<Inst_t> dg) {
+    //call done on each event   
+  }
+
 
 
   //typedef typename std::vector<dg_inst<T,E> > KernelMarkerList;

@@ -4,7 +4,7 @@ import csv
 from itertools import *
 from array import *
 from numpy import *
-
+import sys
 from pprint import pprint
 import math
 bufsize=1024
@@ -19,9 +19,15 @@ def filterDiff(i,stage,filterLen,curVal,filterFactor):
   raw_diff = diff2 - diff1
   return raw_diff*filterFactor + curVal*(1-filterFactor)
    
+origname='ooo-orig.txt'
+basename='ooo-base.txt'
 
-csvfile1 = open('ooo-orig.txt', 'rb')
-csvfile2 = open('ooo-base.txt', 'rb')
+if len(sys.argv) == 3:
+  origname = sys.argv[1]
+  basename = sys.argv[2]
+
+csvfile1 = open(origname, 'rb')
+csvfile2 = open(basename, 'rb')
 
 reader1 = csv.reader(csvfile1, delimiter=' ')
 reader2 = csv.reader(csvfile2, delimiter=' ')
