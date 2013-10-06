@@ -50,16 +50,16 @@ namespace simd {
       return &cpdg;
     }
 
-    LoopInfo *CurLoop = 0;
     bool simd_state  = IN_SCALAR;
 
     LoopInfo *getLoop(Op *op) {
+      static LoopInfo *_cached_curloop = 0;
       // Is this instruction first in a basic block?
       if (op->bb_pos() == 0) {
         // is this bb starts an inner loop?
-        CurLoop = op->func()->getLoop(op->bb());
+        _cached_curloop = op->func()->getLoop(op->bb());
       }
-      return CurLoop;
+      return _cached_curloop;
     }
 
     std::map<Op*, unsigned> _op2Count;
@@ -70,7 +70,10 @@ namespace simd {
         return isVectorizableMap[li];
 
       bool shouldPrint =  !li_printed.count(li);
-      printLoop(li);
+      if (shouldPrint) {
+        li_printed[li] = true;
+        printLoop(li);
+      }
 
       bool canVectorize = true;
 
@@ -115,24 +118,23 @@ namespace simd {
       isVectorizableMap[li] = canVectorize;
       return canVectorize;
     }
-    unsigned getSIMDPos(InstPtr inst, Op *op, LoopInfo *li) {
+
+    bool canVectorize(LoopInfo *li)
+    {
       // No loop -- scalar
       if (!li)
-        return 0;
+        return false;
 
       // No inner loop -- scalar
       if (!li->isInnerLoop())
-        return 0;
+        return false;
 
-      // Not vectorizable -- scalar
-      if (!isVectorizable(li))
-        return 0;
+      return isVectorizable(li);
+    }
 
-      // Vectorizable
-      unsigned pos  = _op2Count[op];
-      _op2Count[op] = (pos+1)% _simd_len;
-
-      return pos;
+    unsigned getIterCnt(Op *op, LoopInfo *li) {
+      assert (canVectorize(li));
+      return _op2Count[op];
     }
 
     static std::map<LoopInfo*, bool> li_printed;
@@ -143,9 +145,6 @@ namespace simd {
     }
 
     void printLoop(LoopInfo *li) {
-      if (li_printed.count(li))
-        return;
-      li_printed[li] = true;
 
       std::cout << "======================================\n";
       std::cout << "================" << li << "==========\n";
@@ -156,6 +155,7 @@ namespace simd {
           uint64_t pc = op->cpc().first;
           int upc = op->cpc().second;
           std::cout << pc << "," <<upc << " : " <<
+            "[" << _op2Count[op] << "] " <<
             exec_profile::getDisasm(pc, upc) << "\n";
         }
         std::cout << "\n";
@@ -177,26 +177,60 @@ namespace simd {
       return stride == chkStride;
     }
 
+    std::vector<std::pair<Op*, InstPtr> > vecloop_InstTrace;
+    std::map<Op*, uint16_t> _cacheLat;
 
-    //
-    // Override insert_inst to transform to SIMD graph
-    //
-    void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
-                     Op *op) {
+    void trackSIMDLoop(LoopInfo *li, Op* op, InstPtr inst) {
+      vecloop_InstTrace.push_back(std::make_pair(op, inst));
+      ++ _op2Count[op];
+      //std::cout << "Executed: "  << _op2Count[op] << " times : ";
+      //printDisasm(op->cpc().first, op->cpc().second);
+      //std::cout << "\n";
 
-      LoopInfo *li = getLoop(op);
-      // Create the instruction
-      InstPtr inst = InstPtr(new Inst_t(img, index));
-      // Add to the graph to do memory management
-      getCPDG()->addInst(inst, index);
+      if (op->isLoad()) {
+        _cacheLat[op] = std::max(inst->_ex_lat, _cacheLat[op]);
+      } else if (op->isStore()) {
+        _cacheLat[op] = std::max(inst->_st_lat, _cacheLat[op]);
+      }
+    }
 
-      unsigned vecPos = getSIMDPos(inst, op, li);
-      if (vecPos == 0) {
-        // Add dependency to the instruction
+    void updateForSIMD(Op *op, InstPtr inst) {
+      if (op->isLoad()) {
+        inst->_ex_lat = std::max(inst->_ex_lat, _cacheLat[op]);
+      }
+      if (op->isStore()) {
+        inst->_st_lat = std::max(inst->_st_lat, _cacheLat[op]);
+      }
+    }
+
+    void completeSIMDLoop(LoopInfo *li, int CurLoopIter) {
+
+      //if (vecloop_InstTrace.size() != 0) {
+      // std::cout << "Completing SIMD Loop:" << li
+      //          << " with iterCnt: " << CurLoopIter << "\n";
+      //}
+      //if (li) {
+      //  printLoop(li);
+      //}
+      std::map<Op*, bool> emitted;
+      // Add trace to the pipe
+      for (auto I = vecloop_InstTrace.begin(), E = vecloop_InstTrace.end();
+           I != E; ++I) {
+        Op *op = I->first;
+
+        assert((int)_op2Count[op] == CurLoopIter
+               && "Different control path inside simd loop??");
+
+        if (emitted.count(op))
+          continue;
+        emitted.insert(std::make_pair(op, true));
+
+        InstPtr inst = I->second;
+        // update for SIMD
+        updateForSIMD(op, inst);
+
         addDeps(inst, op);
-        // and add to the pipe
         pushPipe(inst);
-
         // handle broadcast_loads
         //  load followed by shuffles ...
         if (op->isLoad() && isStrideAccess(op, 0)) {
@@ -205,53 +239,69 @@ namespace simd {
           pushPipe(inst);
         }
       }
-
-      // Keep track of the instruction..
-      inserted(inst);
-
+      // clear out instTrace, counts and cache latency
+      vecloop_InstTrace.clear();
+      _op2Count.clear();
+      _cacheLat.clear();
     }
 
-#if 0
-      // Is this instruction first in a basic block?
-      if (op->bb_pos() == 0) {
-        // is this bb starts an inner loop?
-        li = op->func()->getLoop(op->bb());
-        if (simd_state == IN_SIMD) {
-          if (CurLoop && CurLoop != li) {
-            // Switch back to scalar mode
-            // We are in a outer loop or not in a loop anymore.
-            CurLoop = 0;
-            simd_state = IN_SCALAR;
-          }
-        } else {
-          // We are in IN_SCALAR Mode
-          if (li && isVectorizable(li)) {
-            // We are in a inner Loop
-            // and vectorizable
-            CurLoop = li;
-            simd_state = IN_SIMD;
-          }
+    unsigned CurLoopIter = 0;
+    uint64_t global_loop_iter = 0;
+    //
+    // Override insert_inst to transform to SIMD graph
+    //
+    void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
+                     Op *op) {
+      static LoopInfo *CurLoop = 0;
+      bool insertSIMDInst = false;
+      LoopInfo *li = getLoop(op);
+      if (CurLoop != li) {
+        // We switched to a different loop, complete simd_loop
+        if (canVectorize(li)) {
+          completeSIMDLoop(CurLoop, CurLoopIter);
         }
+        CurLoop = li;
+        CurLoopIter = 0;
+        global_loop_iter = 0;
+      } else if (CurLoop) {
+        // Same Loop, incr iteration
+        if (op == op->bb()->lastOp() // last instruction in the bb
+            && CurLoop->isLatch(op->bb())) // Latch in the current loop)
+          {
+            // Increment loop counter that signals the trace
+            // completed "CurLoopIter" times
+            //
+            ++CurLoopIter;
+            ++global_loop_iter;
+          }
+        // set insertSIMDInstr if curloopiter is a multiple of _simd_len.
+        insertSIMDInst =  (canVectorize(CurLoop)
+                           && CurLoopIter && (CurLoopIter % _simd_len == 0));
       }
 
+      // Create the instruction
+      InstPtr inst = InstPtr(new Inst_t(img, index));
+      // Add to the graph to do memory management
+      // and get static dependence from original dependence graph...
+      //std::cout << "Adding instruction with index:: " << index << "\n";
+      getCPDG()->addInst(inst, index);
 
-      if (simd_state == IN_SIMD) {
-        if (shouldExecuteInPipe(inst, CurLoop) ) {
-          addDeps(inst, op);
-          pushPipe(inst);
-        } else {
-          // No, we already executed as part of existing instruction.
-        }
-      } else {
-        // Always execute in Pipe
+      if (!canVectorize(li)) {
         addDeps(inst, op);
         pushPipe(inst);
+      } else {
+        trackSIMDLoop(li, op, inst);
       }
+
       // Keep track of the instruction..
       inserted(inst);
+
+      if (insertSIMDInst) {
+        completeSIMDLoop(CurLoop, CurLoopIter);
+        CurLoopIter = 0; // reset loop counter..
+      }
     }
 
-#endif
   };
 
 } // SIMD namespace
