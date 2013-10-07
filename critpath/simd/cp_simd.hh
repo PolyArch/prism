@@ -38,6 +38,14 @@ namespace simd {
 
     virtual ~cp_simd() {}
 
+    InstPtr _lastInst = 0;
+    uint64_t numCycles() {
+      if (CurLoop) {
+        completeSIMDLoop(CurLoop, CurLoopIter);
+      }
+      return _lastInst->finalCycle();
+    }
+
     void handle_argument(const char *name, const char *optarg) {
       if (strcmp(name, "simd-len") == 0) {
         _simd_len = atoi(optarg);
@@ -146,6 +154,9 @@ namespace simd {
 
     void printLoop(LoopInfo *li) {
 
+      if (!exec_profile::hasProfile())
+        return;
+
       std::cout << "======================================\n";
       std::cout << "================" << li << "==========\n";
       for (auto BBI = li->body_begin(), BBE = li->body_end(); BBI != BBE; ++BBI) {
@@ -213,16 +224,18 @@ namespace simd {
       //  printLoop(li);
       //}
       std::map<Op*, bool> emitted;
+
       // Add trace to the pipe
       for (auto I = vecloop_InstTrace.begin(), E = vecloop_InstTrace.end();
            I != E; ++I) {
         Op *op = I->first;
 
-        assert((int)_op2Count[op] == CurLoopIter
-               && "Different control path inside simd loop??");
+        // assert((int)_op2Count[op] == CurLoopIter
+        //      && "Different control path inside simd loop??");
 
-        if (emitted.count(op))
+        if ((CurLoopIter == _simd_len) && emitted.count(op))
           continue;
+
         emitted.insert(std::make_pair(op, true));
 
         InstPtr inst = I->second;
@@ -231,6 +244,8 @@ namespace simd {
 
         addDeps(inst, op);
         pushPipe(inst);
+        inserted(inst);
+        _lastInst = inst;
         // handle broadcast_loads
         //  load followed by shuffles ...
         if (op->isLoad() && isStrideAccess(op, 0)) {
@@ -245,6 +260,7 @@ namespace simd {
       _cacheLat.clear();
     }
 
+    LoopInfo *CurLoop = 0;
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
     //
@@ -252,7 +268,7 @@ namespace simd {
     //
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
                      Op *op) {
-      static LoopInfo *CurLoop = 0;
+
       bool insertSIMDInst = false;
       LoopInfo *li = getLoop(op);
       if (CurLoop != li) {
@@ -289,12 +305,12 @@ namespace simd {
       if (!canVectorize(li)) {
         addDeps(inst, op);
         pushPipe(inst);
+        inserted(inst);
+        _lastInst = inst;
       } else {
         trackSIMDLoop(li, op, inst);
       }
 
-      // Keep track of the instruction..
-      inserted(inst);
 
       if (insertSIMDInst) {
         completeSIMDLoop(CurLoop, CurLoopIter);
