@@ -272,7 +272,7 @@ protected:
 /*    //DEBUG MSHR Usage
     for(auto i=MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
       uint64_t cycle = i->first;
-     
+
       if(cycle > 10000000) {
         break;
       }
@@ -282,7 +282,7 @@ protected:
     std::cerr << "(" << MSHRUseMap.size() << ")\n";*/
 
 
-    //delete irrelevent 
+    //delete irrelevent
     auto upperMSHRUse = --MSHRUseMap.upper_bound(_curCycle);
     auto firstMSHRUse = MSHRUseMap.begin();
 

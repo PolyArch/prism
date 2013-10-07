@@ -88,8 +88,8 @@ bool doLoopProfAnalysis(const char *trace_fname,
       if (count == max_inst) {
         break;
       }
-      if ( (count % 100000 == 0) && (count!=0) ) {
-        std::cout << "processed " << count << "\n";
+      if (count && (count % 10000000 == 0)) {
+        std::cout << "pass " << pass << " processed " << count << " instructions\n";
       }
     }
 

@@ -162,7 +162,7 @@ public:
     }
   }
 
-  virtual uint64_t numCycles()=0;
+  virtual uint64_t numCycles() = 0;
 
   virtual void printMcPATxml(const char* filename) {
     #include "mcpat-defaults.hh"

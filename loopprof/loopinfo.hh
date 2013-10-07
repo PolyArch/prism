@@ -176,14 +176,17 @@ public:
     return _subgraphSet.size()>0;
   }
 
-  BBset::iterator       body_begin()  {return _loopBody.begin();}
-  BBset::iterator       body_end()    {return _loopBody.end();}
-  PathMap::iterator     paths_begin() {return _pathMap.begin();}
-  PathMap::iterator     paths_end()   {return _pathMap.end();}
-  LoopDepSet::iterator  ld_begin()    {return _loopDepSet.begin();}
-  LoopDepSet::iterator  ld_end()      {return _loopDepSet.end();}
-  SubgraphSet::iterator ss_begin()    {return _subgraphSet.begin();}
-  SubgraphSet::iterator ss_end()      {return _subgraphSet.end();}
+  BBset::iterator       body_begin()  { return _loopBody.begin(); }
+  BBset::iterator       body_end()    { return _loopBody.end(); }
+  PathMap::iterator     paths_begin() { return _pathMap.begin(); }
+  PathMap::iterator     paths_end()   { return _pathMap.end(); }
+  LoopDepSet::iterator  ld_begin()    { return _loopDepSet.begin(); }
+  LoopDepSet::iterator  ld_end()      { return _loopDepSet.end(); }
+  SubgraphSet::iterator ss_begin()    { return _subgraphSet.begin(); }
+  SubgraphSet::iterator ss_end()      { return _subgraphSet.end(); }
+
+  BBset::iterator       rpo_begin()   { return _rpo.begin(); }
+  BBset::iterator       rpo_end()     { return _rpo.end(); }
 
   bool isInnerLoop() {
     return _immInnerLoops.size() == 0;
