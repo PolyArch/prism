@@ -80,6 +80,7 @@ int main(int argc, char *argv[])
       {"count", no_argument, 0, 't'},
       {"no-registry", no_argument, 0, 'n'},
       {"max-insts", required_argument, 0, 'm'},
+      {"loop-prof-max-insts", required_argument, 0, 'l'},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
       {"no-mcpat", no_argument, &noMcPAT, 1},
       {"inorder-width", required_argument, 0, 2},
@@ -95,6 +96,7 @@ int main(int argc, char *argv[])
 
 
   uint64_t max_inst = (uint64_t)-1;
+  uint64_t loop_prof_max_inst = max_inst;
   bool verbose =false;
   bool registry_off = false;
   bool count_nodes = false;
@@ -134,6 +136,7 @@ int main(int argc, char *argv[])
       return(0);
     case 'v': verbose = true; break;
     case 'm': max_inst = atoi(optarg); break;
+    case 'l': loop_prof_max_inst = atoi(optarg); break;
     case 'n': registry_off = true; break;
     case 't': count_nodes = true; break;
     case 'x':
@@ -155,38 +158,7 @@ int main(int argc, char *argv[])
       abort();
     }
   }
-#if 0
-  if (GPU_LD_Latency <= 0) {
-    GPU_LD_Latency = 0;
-  }
-  if (DySER_Concurrency == 0)
-    DySER_Concurrency = 8;
 
-  if (FETCH_WIDTH <= 0) {
-    FETCH_WIDTH = 4;
-  }
-  if (COMMIT_WIDTH <= 0) {
-    COMMIT_WIDTH = 4;
-  }
-  if (ROB_SIZE <= 0) {
-    ROB_SIZE = 192;
-  }
-  if (BR_MISS_PENALTY <= 0) {
-    BR_MISS_PENALTY = 6;
-  }
-  if (IQ_WIDTH <= 0) {
-    IQ_WIDTH = 64;
-  }
-  if (max_inst == 0) {
-    max_inst = (uint64_t)-1;
-  }
-  if (DySER_Size == 0) {
-    DySER_Size = 32;
-  }
-  if (CCA_Size == 0) {
-    CCA_Size = 3;
-  }
-#endif
   if (argc - optind != 1) {
     std::cerr << "Requires one argument.\n";
     return 1;
@@ -248,9 +220,14 @@ int main(int argc, char *argv[])
     Prof::init(prof_file);
     std::cout << "... done!\n";
   } else {
+
+    if (loop_prof_max_inst == (uint64_t)-1)
+      // use max_inst
+      loop_prof_max_inst = max_inst;
+
     std::cout << "Generating Loop Info from trace\n";
     std::cout.flush();
-    Prof::init_from_trace(argv[optind], max_inst);
+    Prof::init_from_trace(argv[optind], loop_prof_max_inst);
     std::cout << "... generating loop info ... done!!\n";
   }
 

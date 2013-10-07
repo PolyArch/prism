@@ -185,8 +185,8 @@ public:
   SubgraphSet::iterator ss_begin()    { return _subgraphSet.begin(); }
   SubgraphSet::iterator ss_end()      { return _subgraphSet.end(); }
 
-  BBset::iterator       rpo_begin()   { return _rpo.begin(); }
-  BBset::iterator       rpo_end()     { return _rpo.end(); }
+  BBvec::iterator       rpo_begin()   { return _rpo.begin(); }
+  BBvec::iterator       rpo_end()     { return _rpo.end(); }
 
   bool isInnerLoop() {
     return _immInnerLoops.size() == 0;
