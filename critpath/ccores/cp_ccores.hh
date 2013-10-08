@@ -9,7 +9,6 @@
 
 #include "cp_ccores_all.hh"
 
-extern int TraceOutputs;
 
 class cp_ccores : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
@@ -31,25 +30,26 @@ public:
 
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
-    if(TraceOutputs) {
-      dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);  
-      if(inst.isPipelineInst()) {
-        CP_DG_Builder::traceOut(index,img,op);
-      } else {  
-        out << index + Prof::get().skipInsts << ": ";
-        out << inst.cycleOfStage(0) << " ";
-        out << inst.cycleOfStage(1) << " ";
-        out << inst.cycleOfStage(2) << " ";
-        CriticalPath::traceOut(index,img,op);
-        out << "\n";
-      }
+    if (!getTraceOutputs())
+      return;
+
+    dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);
+    if (inst.isPipelineInst()) {
+      CP_DG_Builder::traceOut(index, img, op);
+    } else {
+      outs() << index + Prof::get().skipInsts << ": ";
+      outs() << inst.cycleOfStage(0) << " ";
+      outs() << inst.cycleOfStage(1) << " ";
+      outs() << inst.cycleOfStage(2) << " ";
+      CriticalPath::traceOut(index, img, op);
+      outs() << "\n";
     }
   }
 
   bool prevCall = false;
   bool prevRet = false;
   bool inCCore = false;
-  
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
 
     bool transitioned=false;
@@ -76,7 +76,7 @@ public:
         getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
                                *cur_bb_end, 8, E_CXFR);
       }
-  
+
       if(op->isBBHead() || op->isMem()) {
         //only one memory instruction per basic block
         prev_bb_end=cur_bb_end;

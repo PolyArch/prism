@@ -106,8 +106,7 @@ public:
       assert(0);
     }
     cpmap[fullname.c_str()] = cp;
-    std::string trace_out = std::string(fullname.c_str()) + ".txt";
-    cp->setupOutFile(trace_out.c_str());
+    cp->setName(fullname);
     cp2Enabled[fullname] = EnableByDefault;
 
     if (isBaseline) {

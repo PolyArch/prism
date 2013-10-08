@@ -89,68 +89,71 @@ public:
     return getCPDG()->getMaxCycles();
   }
 
-  void printEdgeDep(Inst_t& inst, int ind, unsigned default_type1, unsigned default_type2=E_NONE) {
-      E* laEdge = inst[ind].lastArrivingEdge();
-      unsigned lae;
-      if(laEdge) {
-        lae = laEdge->type();
-        if((lae!=default_type1 && lae!=default_type2) || laEdge->len()>1) {
-          out << edge_name[lae]; 
-          out << laEdge->len(); 
-        }
-      } 
-      out << ",";
-  }
-
-  virtual void traceOut(uint64_t index, 
-                        const CP_NodeDiskImage &img, Op* op) {
-    if(TraceOutputs) {
-      Inst_t& inst = 
-           static_cast<Inst_t&>(getCPDG()->queryNodes(index));  
-  
-      out << index + Prof::get().skipInsts << ": ";
-      out << inst.cycleOfStage(0) << " ";
-      out << inst.cycleOfStage(1) << " ";
-      out << inst.cycleOfStage(2) << " ";
-      out << inst.cycleOfStage(3) << " ";
-      out << inst.cycleOfStage(4) << " ";
-      out << inst.cycleOfStage(5) << " ";
-
-      if(img._isstore) {
-        out << inst.cycleOfStage(6) << " ";
+  void printEdgeDep(Inst_t& inst, int ind,
+                    unsigned default_type1, unsigned default_type2 = E_NONE)
+  {
+    if (!getTraceOutputs())
+      return;
+    E* laEdge = inst[ind].lastArrivingEdge();
+    unsigned lae;
+    if (laEdge) {
+      lae = laEdge->type();
+      if ((lae != default_type1 && lae!=default_type2) || laEdge->len()>1) {
+        outs() << edge_name[lae];
+        outs() << laEdge->len();
       }
-  
-      //out << (_isInOrder ? "io":"ooo");
-
-      printEdgeDep(inst,0,E_FF);
-      printEdgeDep(inst,1,E_FD);
-      printEdgeDep(inst,2,E_DR);
-      printEdgeDep(inst,3,E_RE);
-      printEdgeDep(inst,4,E_EP);
-      printEdgeDep(inst,5,E_PC,E_CC);
-
-      if(img._isstore) {
-        printEdgeDep(inst,6,E_WB);
-      }
-
-      out << " rs:" << rob_head_at_dispatch << "-" << (int)(rob_growth_rate*100);
-      out << " iq:" << InstQueue.size();
-
-      int lqSize = (lq_head_at_dispatch<=LQind) ? (LQind-lq_head_at_dispatch): 
-                                               (LQind-lq_head_at_dispatch+32);
-      out << " lq:" << lqSize;
- 
-      int sqSize = (sq_head_at_dispatch<=SQind) ? (SQind-sq_head_at_dispatch): 
-                                               (SQind-sq_head_at_dispatch+32);
-      out << " sq:" << sqSize;
-
-      //out << " " << (int)inst.regfile_reads << " " << (int)inst.regfile_freads;
-      //out << " " << (int)img._numSrcRegs;
-
-      //CriticalPath::traceOut(index,img,op);
-      out << "\n";
     }
+    outs() << ",";
   }
+
+  virtual void traceOut(uint64_t index,
+                        const CP_NodeDiskImage &img, Op* op) {
+    if (!getTraceOutputs())
+      return;
+
+    Inst_t& inst =
+      static_cast<Inst_t&>(getCPDG()->queryNodes(index));
+
+    outs() << index + Prof::get().skipInsts << ": ";
+    outs() << inst.cycleOfStage(0) << " ";
+    outs() << inst.cycleOfStage(1) << " ";
+    outs() << inst.cycleOfStage(2) << " ";
+    outs() << inst.cycleOfStage(3) << " ";
+    outs() << inst.cycleOfStage(4) << " ";
+    outs() << inst.cycleOfStage(5) << " ";
+
+    if (img._isstore) {
+      outs() << inst.cycleOfStage(6) << " ";
+    }
+
+    //outs() << (_isInOrder ? "io":"ooo");
+
+    printEdgeDep(inst,0,E_FF);
+    printEdgeDep(inst,1,E_FD);
+    printEdgeDep(inst,2,E_DR);
+    printEdgeDep(inst,3,E_RE);
+    printEdgeDep(inst,4,E_EP);
+    printEdgeDep(inst,5,E_PC,E_CC);
+
+    if (img._isstore) {
+      printEdgeDep(inst,6,E_WB);
+    }
+
+    outs() << " rs:" << rob_head_at_dispatch
+           << "-" << (int)(rob_growth_rate*100);
+    outs() << " iq:" << InstQueue.size();
+
+    int lqSize = (lq_head_at_dispatch<=LQind) ? (LQind-lq_head_at_dispatch):
+      (LQind-lq_head_at_dispatch+32);
+    outs() << " lq:" << lqSize;
+
+    int sqSize = (sq_head_at_dispatch<=SQind) ? (SQind-sq_head_at_dispatch):
+      (SQind-sq_head_at_dispatch+32);
+    outs() << " sq:" << sqSize;
+
+    outs() << "\n";
+  }
+
 
 protected:
 

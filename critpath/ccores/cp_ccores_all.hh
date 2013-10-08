@@ -7,7 +7,6 @@
 #include "cp_registry.hh"
 #include <memory>
 
-extern int TraceOutputs;
 
 class ccores_inst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
@@ -31,7 +30,7 @@ public:
  std::shared_ptr<T>   endBB;
  std::shared_ptr<T> startBB;
 
-  virtual ~ccores_inst() { 
+ virtual ~ccores_inst() {
     /*for (int i = 0; i < 3; ++i) {
       events[i].remove_all_edges();
     }
@@ -74,10 +73,10 @@ public:
   }
 
   virtual uint64_t cycleOfStage(const unsigned i) {
-    return events[i].cycle(); 
+    return events[i].cycle();
   }
   virtual unsigned eventComplete() {
-    return Complete; 
+    return Complete;
   }
 
 };
@@ -85,7 +84,7 @@ public:
 
 class cp_ccores_all : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
-  typedef dg_edge_impl_t<T> E;  
+  typedef dg_edge_impl_t<T> E;
 
   typedef dg_inst<T, E> Inst_t;
 
@@ -103,18 +102,20 @@ public:
 
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
-    if(TraceOutputs) {
-      dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);  
-  
-      out << index + Prof::get().skipInsts << ": ";
-      out << inst.cycleOfStage(0) << " ";
-      out << inst.cycleOfStage(1) << " ";
-      out << inst.cycleOfStage(2) << " ";
+    if (!getTraceOutputs())
+      return;
 
-      CriticalPath::traceOut(index,img,op);
-      out << "\n";
-    }
+    dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);
+
+    outs() << index + Prof::get().skipInsts << ": ";
+    outs() << inst.cycleOfStage(0) << " ";
+    outs() << inst.cycleOfStage(1) << " ";
+    outs() << inst.cycleOfStage(2) << " ";
+
+    CriticalPath::traceOut(index,img,op);
+    outs() << "\n";
   }
+
 
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
 /*    Inst_t* inst = new Inst_t(img,index);
@@ -127,13 +128,13 @@ public:
     std::shared_ptr<ccores_inst> sh_inst(cc_inst);
     getCPDG()->addInst(sh_inst,index);
 
-    
-    if(op->isBBHead() || op->isMem()) {
+
+    if (op->isBBHead() || op->isMem()) {
       //only one memory instruction per basic block
       prev_bb_end=cur_bb_end;
       T* event_ptr = new T();
       cur_bb_end.reset(event_ptr);
-    } 
+    }
     addDeps(*cc_inst,img);
   }
 

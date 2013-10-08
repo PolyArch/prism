@@ -52,27 +52,26 @@ protected:
   }
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
-    if(TraceOutputs) {
-      Inst_t& inst = static_cast<Inst_t&>(getCPDG()->queryNodes(index));  
-      out << index + Prof::get().skipInsts << "(" << img._seq <<  "): ";
-      out << inst.cycleOfStage(0) << " ";
-      out << inst.cycleOfStage(1) << " ";
-      out << inst.cycleOfStage(2) << " ";
-      out << inst.cycleOfStage(3) << " ";
-      out << inst.cycleOfStage(4) << " ";
-      out << inst.cycleOfStage(5) << " ";
+    if (!getTraceOutputs())
+      return;
 
-      if(img._isstore) {
-        out << inst.cycleOfStage(6) << " ";
-      }
-  
-      CriticalPath::traceOut(index,img,op);
- 
-      //out << " " << (int)img._regfile_read << " " << (int)img._regfile_fread;
- 
-      out << "\n";
+    Inst_t& inst = static_cast<Inst_t&>(getCPDG()->queryNodes(index));
+    outs() << index + Prof::get().skipInsts << "(" << img._seq <<  "): ";
+    outs() << inst.cycleOfStage(0) << " ";
+    outs() << inst.cycleOfStage(1) << " ";
+    outs() << inst.cycleOfStage(2) << " ";
+    outs() << inst.cycleOfStage(3) << " ";
+    outs() << inst.cycleOfStage(4) << " ";
+    outs() << inst.cycleOfStage(5) << " ";
+
+    if (img._isstore) {
+      outs() << inst.cycleOfStage(6) << " ";
     }
+
+    CriticalPath::traceOut(index,img,op);
+    outs() << "\n";
   }
+
 
   dep_graph_impl_t<orig_dg_inst,dg_event,dg_edge_impl_t<dg_event>>* getCPDG(){
     return &cpdg;

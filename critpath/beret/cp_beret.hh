@@ -7,8 +7,6 @@
 #include "cp_registry.hh"
 #include <memory>
 
-extern int TraceOutputs;
-
 class BeretInst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
@@ -185,20 +183,20 @@ public:
 
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
-    if(TraceOutputs) {
-      out << index + Prof::get().skipInsts << ": ";
-  
-      dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);  
-  
-      for(unsigned i = 0; i < inst.numStages();++i) { 
-        out << inst.cycleOfStage(i) << " ";
-      }
-  
-      CriticalPath::traceOut(index,img,op);
-  
-      out << "\n";
+    if (!getTraceOutputs())
+      return;
+
+    outs() << index + Prof::get().skipInsts << ": ";
+
+    dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);
+
+    for (unsigned i = 0; i < inst.numStages(); ++i) {
+      outs() << inst.cycleOfStage(i) << " ";
     }
+    CriticalPath::traceOut(index,img,op);
+    outs() << "\n";
   }
+  
 
   virtual void accelSpecificStats(std::ostream& out) {
     //out << "Beret Cycles = " << totalBeretCycles << "\n";
