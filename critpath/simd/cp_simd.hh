@@ -104,6 +104,11 @@ namespace simd {
             // Same -- broadcast load should handle this
             if (DepOp == (*I))
               continue;
+
+            // For now, check the pc
+            if (DepOp->cpc().first == (*I)->cpc().first)
+              continue;
+
             if (DepOp->isLoad() && (*I)->isLoad())
               continue;
             // Same memory touched by two ops in the same loop...
@@ -233,7 +238,7 @@ namespace simd {
         // assert((int)_op2Count[op] == CurLoopIter
         //      && "Different control path inside simd loop??");
 
-        if ((CurLoopIter == _simd_len) && emitted.count(op))
+        if ((CurLoopIter == (int)_simd_len) && emitted.count(op))
           continue;
 
         emitted.insert(std::make_pair(op, true));
