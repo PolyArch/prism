@@ -256,6 +256,10 @@ public:
     sa(core_node,"RAS_size", Prof::get().RASSize);
 
     //set stats:
+    if(isInOrder()) {
+      sa(core_node,"machine_type",1);
+    }
+
     sa(core_node,"total_instructions",Prof::get().totalInsts);
     sa(core_node,"int_instructions",Prof::get().intOps);
     sa(core_node,"fp_instructions",Prof::get().fpOps);
