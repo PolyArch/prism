@@ -239,7 +239,7 @@ int main(int argc, char *argv[])
   bool notused=false;
   CPC notusedCPC;
 
-  //this sets the prevCall/prevRet based on the information
+  //this sets the prevCall/prevRet based on the information 
   //stored in the profile.  Originally from the file containing
   //the stack.
   Prof::get().resetStack(notusedCPC,notused,prevCall,prevRet);
