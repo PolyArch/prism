@@ -312,16 +312,30 @@ void FunctionInfo::toDotFile(std::ostream& out) {
       BB& bb = *(bbi->second);
       out << "\"" << bb.head().first << "x" << bb.head().second << "\"" 
      
-          << "[label=\"" << bb.rpoNum()
-	//                 << "\\n" << bb.head().first << "_" << bb.tail().first
-	                 << "\"]\n;";
+          << "[label=\"" << bb.rpoNum();
+        //                 << "\\n" << bb.head().first << "_" << bb.tail().first
+
+      LoopInfo* smallest_li=NULL;
+      for(auto il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
+        LoopInfo* li = il->second;
+        if(li->inLoop(&bb)) {
+          if(smallest_li == NULL || smallest_li->loopSize() > li->loopSize()) {
+            smallest_li=li;
+          }
+        }
+      }
+      if(smallest_li) {
+        out << " L" << smallest_li->id();
+      }
+      
+      out << "\"]\n;";
 
       for(auto si=bb.succ_begin(),  se=bb.succ_end(); si!=se;++si) {
         BB* succ_bb = *si;
-	out << "\"" <<       bb.head().first << "x" <<       bb.head().second 
-	    << "\"->"
+        out << "\"" <<       bb.head().first << "x" <<       bb.head().second 
+            << "\"->"
             << "\"" << succ_bb->head().first << "x" << succ_bb->head().second 
-	    << "\" [label=\"";
+            << "\" [label=\"";
 
 /*
        for(auto il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
@@ -335,7 +349,7 @@ void FunctionInfo::toDotFile(std::ostream& out) {
 */
         out << bb.succCount[succ_bb]; 
 
-	out << "\"];\n";
+        out << "\"];\n";
       }
     }
 
@@ -345,15 +359,15 @@ void FunctionInfo::toDotFile(std::ostream& out) {
       out << "\"" << bb.head().first << "x" << bb.head().second << "S\"" 
      
           << "[label=\"" << bb.rpoNum()
-	                 << "\\n" << bb.head().first << "_" << bb.tail().first
-	                 << "\"]\n;";
+                         << "\\n" << bb.head().first << "_" << bb.tail().first
+                         << "\"]\n;";
       BB::BBvec::iterator si,se;
       for(si=bb.pred_begin(),se=bb.pred_end();si!=se;++si) {
         BB* pred_bb = *si;
-	out << "\"" << pred_bb->head().first << "x" << pred_bb->head().second 
-	    << "S\"->"
+        out << "\"" << pred_bb->head().first << "x" << pred_bb->head().second 
+            << "S\"->"
             << "\"" << bb.head().first << "x" << bb.head().second 
-	    << "S\";\n";
+            << "S\";\n";
       }
     }
 
@@ -377,7 +391,8 @@ void FunctionInfo::toDotFile(std::ostream& out) {
   
   
       out << "\"loop_" << li.loop_head()->head().first <<  "\" [label=\"";
-      out << "depth = " << li.depth() << ";\\n";
+      out << "L " << li.id(); 
+      out << " (depth = " << li.depth() << ");\\n";
       LoopInfo::BBset::iterator ib,eb;
       for(ib=li.body_begin(),eb=li.body_end();ib!=eb;++ib) {
         BB* bb = *ib;
@@ -511,19 +526,19 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
       Op::Deps::iterator di,de;
       for(di=op->d_begin(),de=op->d_end();di!=de;++di) {
         Op* dep_op = *di;
-	if(dep_op->func()==op->func()) {
+        if(dep_op->func()==op->func()) {
           out << "\"" << dep_op->cpc().first << "x" << dep_op->cpc().second << "\""
-	      << " -> "
+              << " -> "
               << "\"" << op->cpc().first << "x" << op->cpc().second 
-	      << "\"[";
+              << "\"[";
           if(!forwardDep(dep_op,op)) {
             out << "constraint=false color=red ";
-	  }
+          }
 
-	  out << "weight=0.5]\n";
-	} else {
+          out << "weight=0.5]\n";
+        } else {
           //input dependences
-	}
+        }
       }
     }   
 
@@ -555,7 +570,7 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
         out << "\"" << bb.lastOp()->cpc().first << "x" <<  bb.lastOp()->cpc().second
             << "\"->"
             << "\"" << succ_op->cpc().first << "x" 
-	          << succ_op->cpc().second  << "\" [label=\"";
+                  << succ_op->cpc().second  << "\" [label=\"";
 
         out << "\" ";
         
@@ -641,7 +656,7 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
       if(li->inLoop(&bb)) {
         if(loop_for_bb==NULL || li->loopSize() < loop_for_bb->loopSize()) {
           loop_for_bb=li;
-	}
+        }
       }
     }
 
@@ -681,9 +696,9 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
       if(op->isMem()&&loop_for_bb) {
         if(loop_for_bb->isStriding(op)) {
           out << " x" << loop_for_bb->stride(op);
-	} else {
+        } else {
           out << " x?";
-	}
+        }
       }
 
 
@@ -692,10 +707,10 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
       Op::Deps::iterator di,de;
       for(di=op->d_begin(),de=op->d_end();di!=de;++di) {
         Op* dep_op = *di;
-	if(dep_op->bb()==op->bb()) {
-	  out << dep_op->bb_pos() << " ";
+        if(dep_op->bb()==op->bb()) {
+          out << dep_op->bb_pos() << " ";
           //input dependences
-	}
+        }
       }
       out << ")";
     }
@@ -709,15 +724,15 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
       Op::Deps::iterator di,de;
       for(di=op->d_begin(),de=op->d_end();di!=de;++di) {
         Op* dep_op = *di;
-	if(op->bb() != dep_op->bb() && dep_op->func()==op->func()) {
+        if(op->bb() != dep_op->bb() && dep_op->func()==op->func()) {
           out << "bb" << dep_op->bb()->head().first  << "x" 
-	                << dep_op->bb()->head().second << ":" << dep_op->bb_pos() << ""
-	      << " -> "
+                        << dep_op->bb()->head().second << ":" << dep_op->bb_pos() << ""
+              << " -> "
               << "bb" << op->bb()->head().first << "x" 
-	                << op->bb()->head().second << ":" << op->bb_pos() << ""
+                        << op->bb()->head().second << ":" << op->bb_pos() << ""
 
-	      << " [";
-	  out << "weight=0.5]\n";
+              << " [";
+          out << "weight=0.5]\n";
         } 
       }
     }

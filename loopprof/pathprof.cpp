@@ -422,12 +422,19 @@ bool PathProf::adjustStack(CPC newCPC, bool isCall, bool isRet ) {
 
 void PathProf::processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet)
 {
-  if(prevCPC.first!=0) {
+  FunctionInfo* call_fi=NULL;
+
+  if(_prevHead.first!=0&&prevCPC.first!=0) {
+    call_fi=_callStack.back().funcInfo();
     _callStack.back().processBB_phase1(_prevHead,prevCPC); 
   }
   adjustStack(newCPC,isCall,isRet);
+
   if(isCall) {
     _callStack.back().funcInfo()->got_called();
+    if(call_fi) {
+      _callStack.back().funcInfo()->calledBy(call_fi);
+    }
   }
   _prevHead=newCPC;
 }
@@ -563,6 +570,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     return;
   }
   _op_buf[_dId%MAX_OPS]=op;
+  
 
   //check inst/execution statistics
   sf.funcInfo()->incInsts(sf.isLooping(),

@@ -26,12 +26,16 @@ public:
   typedef std::vector<BB*> BBvec;
   typedef std::vector<int> DOMvec;
   typedef std::map<BB*,LoopInfo*> LoopList;
+  typedef std::set<FunctionInfo*> FuncSet;
   static uint32_t _idcounter;
 
 private:
   uint32_t _id=-1;
   BBMap _bbMap; //lists all basic blocks inside function
   BBTailMap _bbTailMap; //lists all basic blocks inside function
+  FuncSet _calledBy;
+  FuncSet _calledTo;
+
   BB* _firstBB=0;
   CPC _loc;
 
@@ -41,7 +45,6 @@ private:
   uint64_t _insts=0;
 
   uint64_t _nonLoopInsts=0;
-
 
   uint64_t _directRecInsts=0;
   uint64_t _anyRecInsts=0;
@@ -59,6 +62,8 @@ template<class Archive>
     ar & _id;
     ar & _bbMap;
 //    ar & _bbTailMap; //not necessary?
+    ar & _calledBy;
+    ar & _calledTo;
     ar & _firstBB;
     ar & _loc;
     ar & _calls;
@@ -116,6 +121,10 @@ public:
   }
 
   void got_called() {_calls++;}
+  void calledBy(FunctionInfo* fi) {
+    _calledBy.insert(fi);
+    fi->_calledTo.insert(this);  
+  }
   int calls() {return _calls;}
 
   bool hasFuncCalls() {
