@@ -7,6 +7,8 @@
 #include "cp_registry.hh"
 #include <memory>
 
+#include "loopinfo.hh"
+
 class BeretInst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
@@ -23,6 +25,9 @@ public:
       Writeback = 3,
       NumStages
   };
+
+
+
 private:
   T events[NumStages];
 
@@ -109,7 +114,8 @@ public:
 
 
 // CP_BERET !!!
-class cp_beret : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
+class cp_beret : public ArgumentHandler,
+      public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
 
@@ -172,7 +178,6 @@ public:
     beret_state=CPU;
   }
 
-
   virtual ~cp_beret(){
   }
 
@@ -181,6 +186,91 @@ public:
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
 
+  std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
+  std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
+
+  unsigned _beret_max_size=6;
+  unsigned _beret_max_mem=2;
+
+
+  void handle_argument(const char *name, const char *optarg) {
+    if (strcmp(name, "beret-max-size") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_max_size = temp;
+      }
+    }
+    if (strcmp(name, "beret-max-mem") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_max_mem = temp;
+      }
+    }
+  }
+
+  virtual void setDefaultsFromProf() {
+    CP_DG_Builder::setDefaultsFromProf();
+    //set up the subgraphs
+    std::multimap<uint64_t,LoopInfo*> loops;
+    PathProf::FuncMap::iterator i,e;
+    for(i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
+      FunctionInfo& fi = *i->second;
+      FunctionInfo::LoopList::iterator li,le;
+      for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
+        LoopInfo* loopInfo = li->second;
+        loops.insert(std::make_pair(loopInfo->numInsts(),loopInfo));
+      }
+    } 
+ 
+
+    std::multimap<uint64_t,LoopInfo*>::reverse_iterator I;
+    for(I=loops.rbegin();I!=loops.rend();++I) {
+      LoopInfo* loopInfo = I->second;
+  
+      //generate this only for 
+      //1. Inner Loops
+      //2. >50% Loop-Back
+      //3. Executed >= 10 Times
+  
+      int hpi = loopInfo->getHotPathIndex();
+      std::cerr << "func: " << loopInfo->func()->nice_name() 
+           << "(" << loopInfo->func()->id() << ")"
+           << " loop: " << loopInfo->id()
+           << "(depth:" << loopInfo->depth() << " hpi:" << hpi
+           << "hp_len: " << loopInfo->instsOnPath(hpi)  
+           << (loopInfo->isInnerLoop() ? " inner " : " outer ")
+           << " lbr:" << loopInfo->getLoopBackRatio(hpi)
+           << " iters:" << loopInfo->getTotalIters()
+           << " insts:" << loopInfo->numInsts()
+           << ")";
+  
+      bool worked=false;
+  
+      if(loopInfo->isInnerLoop()
+         && hpi != -2 //no hot path
+         && loopInfo->getLoopBackRatio(hpi) >= 0.5
+         && loopInfo->getTotalIters() >= 5
+         ) {
+        std::stringstream part_gams_str;
+        part_gams_str << "partition." << loopInfo->id() << ".gams";
+  
+        bool gams_details=false;
+        bool no_gams=false;
+        std::cout << _beret_max_size << " " << _beret_max_mem << "\n";
+        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+            li2ssmap[loopInfo],li2sgmap[loopInfo],
+            gams_details,no_gams,_beret_max_size,_beret_max_mem);
+        if(worked) {
+          std::cerr << " -- Beretized\n";
+        } else {
+          std::cerr << " -- NOT Beretized (Func Calls)\n";
+        }
+      } else {
+        std::cerr << " -- NOT Beretized\n";
+      }
+    }
+    
+  }
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (!getTraceOutputs())
@@ -224,7 +314,7 @@ public:
     replay_queue.clear();
     whichBB=0;
     //create instruction for each SEB
-    for(auto i =li->sg_begin(),e =li->sg_end();i!=e;++i) {
+    for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -253,7 +343,7 @@ public:
 
     prev_sg=NULL;
     //Add Deps
-    for(auto i =li->sg_begin(),e =li->sg_end();i!=e;++i) {
+    for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -294,7 +384,7 @@ public:
   void reCalcBeretLoop(bool commit_iter) {
     //recalc loop, and get last cycle
     uint64_t last_cycle=0;
-    for(auto i =li->sg_begin(),e =li->sg_end();i!=e;++i) {
+    for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -309,7 +399,7 @@ public:
     }
 
     //write stores from store buffer
-    for(auto i = li->sg_begin(), e =li->sg_end(); i!=e; ++i) {
+    for(auto i = li2sgmap[li].begin(), e =li2sgmap[li].end(); i!=e; ++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -333,7 +423,7 @@ public:
           if(li) {
             //std::cout << "found a loop\n";
           }
-          if(li && li->hasSubgraphs()) {
+          if(li && li2sgmap.count(li)!=0) {
             //std::cout << " .. and it's beret-able!\n";
             curLoopHead=op;
             beret_state=BERET;

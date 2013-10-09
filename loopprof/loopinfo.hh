@@ -188,6 +188,9 @@ public:
   BBvec::iterator       rpo_begin()   { return _rpo.begin(); }
   BBvec::iterator       rpo_end()     { return _rpo.end(); }
 
+  bool isOuterLoop() {
+    return _immOuterLoop == NULL;
+  }
   bool isInnerLoop() {
     return _immInnerLoops.size() == 0;
   }
@@ -203,10 +206,17 @@ public:
   bool dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op);
 
   void printGamsPartitionText(std::ostream& out,int count,
-                              std::string resultfile, std::string fixes);
+                              std::string resultfile, 
+                              std::string fixes,int nMemDepOps,
+                              int max_beret_ops, int max_mem_ops);
 
-  bool printGamsPartitionProgram(std::string filename, bool gams_details,bool no_gams);
+  bool printGamsPartitionProgram(std::string filename, bool gams_details,
+                                bool no_gams, int max_beret_ops=6, int max_mem_ops=2);
 
+  bool printGamsPartitionProgram(std::string filename,
+     SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
+     bool gams_details,bool no_gams,
+     int max_beret_ops=6, int max_mem_ops=2);
 
   void printSubgraphDot(std::ostream& out);
 
@@ -273,6 +283,26 @@ public:
   void incInstr() {_numInsts++;}
   uint64_t numInsts() {return _numInsts;} 
  
+  int staticInsts() {
+    int static_insts=0;
+    for(auto i=_loopBody.begin(),e=_loopBody.end();i!=e;++i) {
+      BB* bb = *i;
+      static_insts+=bb->len();
+    }
+    return static_insts;
+  }
+
+  int myStaticInsts() {
+    int static_insts=staticInsts();
+    for(auto i=_immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
+      LoopInfo* li=*i;
+      static_insts-=li->staticInsts();
+    }
+    assert(static_insts>0);
+    return static_insts;
+  }
+
+
   void initializePathInfo(BB* bb, std::map<BB*,int>& numPaths);
   void initializePathInfo();
 

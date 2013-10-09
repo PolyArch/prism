@@ -67,7 +67,7 @@ private:
   int _bb_pos;
   uint64_t _totLat; //total latency accross all executions
   uint64_t _times;  //total number of times this instruction was executed
-  Subgraph* _subgraph;
+  //Subgraph* _subgraph;
   uint64_t _effAddr = 0;
   int stride = 0;
   enum stride_value_type { st_Unknown, st_Constant, st_Variable };
@@ -88,7 +88,7 @@ private:
     ar & _bb_pos;
     ar & _totLat;
     ar & _times;
-    ar & _subgraph;
+    //ar & _subgraph;
     _flags = std::bitset<8>(temp_flags);
 
     for(auto i=_deps.begin(),e=_deps.end();i!=e;++i) {
@@ -110,7 +110,7 @@ public:
   {
     
   }*/
-  Op (): _id(_idcounter++), _bb(NULL), _totLat(0), _times(0), _subgraph(NULL)  {
+  Op (): _id(_idcounter++), _bb(NULL), _totLat(0), _times(0) /*,_subgraph(NULL)*/  {
    
   }
   
@@ -125,8 +125,8 @@ public:
   bool isBBHead() {return _bb_pos==0; }
   BB*           bb()     {return _bb;}
   int           bb_pos() {return _bb_pos;}
-  Subgraph*     subgraph() {return _subgraph;}
-  void          setSubgraph(Subgraph* sg) {_subgraph=sg;}
+  //Subgraph*     subgraph() {return _subgraph;}
+  //void          setSubgraph(Subgraph* sg) {_subgraph=sg;}
 
   struct eainfo {
     uint64_t addr;

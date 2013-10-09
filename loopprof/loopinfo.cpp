@@ -6,7 +6,6 @@ using namespace std;
 uint32_t Subgraph::_idCounter=0;
 uint32_t LoopInfo::_idcounter=0;
 
-#define MAX_BERET_SIZE 6
 #define MAX_GAMS_SIZE 200
 
 void LoopInfo::initializePathInfo(BB* bb, map<BB*,int>& numPaths) {
@@ -224,14 +223,23 @@ void LoopInfo::opAddr(Op* op, uint64_t addr, uint8_t acc_size) {
 
 
 void LoopInfo::printGamsPartitionText(std::ostream& out,int count,
-                              std::string resultfile,std::string fixes) {
-  int maxSize = MAX_BERET_SIZE;
+                              std::string resultfile,std::string fixes,
+                              int nMemDepOps, int max_beret_size, int max_mem_ops) {
+  int maxSize = max_beret_size;
   int minSize = 2;
+ 
+  int maxSEBs =floor((((count+maxSize-1)/maxSize)*1.10+nMemDepOps));
+  //if(maxSEBs < cout+maxSize
+  
+  if(max_mem_ops==1) {
+    minSize=1;
+  }
 
   out << "scalar K/" << maxSize << "/;\n"
       << "scalar minK/" << minSize << "/;\n"
+      << "scalar maxM/" << max_mem_ops << "/;\n"
 
-      << "Set l/l1*l" << floor((((count+maxSize-1)/maxSize)*1.13)) <<"/;\n";
+      << "Set l/l1*l" << maxSEBs <<"/;\n";
 
 const char * text = R"HERE(
 
@@ -251,12 +259,12 @@ integer variable x(v),y(v,l);
 variable num_mapped(l);
 binary variable on(l);
 
-Equations one_part(v),calc_mapped(l),part_size(l),min_size(l),on_ok(l),order(l,l),order_on(l,l),interf_calc(u,v,l),obj;
+Equations one_part(v),calc_mapped(l),part_size(l),mem_size(l),min_size(l),on_ok(l),order(l,l),order_on(l,l),interf_calc(u,v,l),obj;
 one_part(v)..    sum(l,y(v,l)) =e= 1;
 calc_mapped(l).. num_mapped(l) =e= sum(v,y(v,l));
 part_size(l)..   num_mapped(l) =l= on(l) * K;
 min_size(l)..    num_mapped(l) =g= on(l) * minK;
-*part_size(l)..   num_mapped(l) =l= K;
+mem_size(l)..   sum(v$(M(v)),y(v,l)) =l= on(l) * maxM;
 
 on.fx(l)=1;
 
@@ -268,9 +276,12 @@ order(l1,l2)$(ORD(l1)+1=ORD(l2)).. num_mapped(l1) =g= num_mapped(l2);
 interf_calc(u,v,l)$(A(u,v)).. y(u,l) =l= y(v,l) + x(u);
 
 variable bucket(u);
-Equations calcBucket(u), straighten2(u,v);
+Equations calcBucket(u), straighten2(u,v), memdep(u,v);
 calcBucket(u).. bucket(u) =e= sum(l,ORD(l)*y(u,l));
 straighten2(u,v)$(A(u,v)).. bucket(u) =l= bucket(v);
+
+*prevent memdependencies
+memdep(u,v)$(D(u,v)).. bucket(u) + 1 =l= bucket(v);
 
 Equations interf_calc2(u,v);
 interf_calc2(u,v)$(A(u,v)).. bucket(u) + x(u)*CARD(l) =g= bucket(v);
@@ -316,7 +327,6 @@ de3(u,l).. descendantT(u,l) =l= sum(v$(A(u,v)),y(v,l)+descendantT(v,l));
 
 convexity(v,l).. ancestorT(v,l) + descendantT(v,l) - y(v,l) =l= 1;
 
-
 *obj.. interf_edges =e= sum(v, x(v))+sum(l,on(l))*1/100;
 *obj.. interf_edges =e= sum(v, x(v));
 obj.. interf_edges =e= sum(v,x(v)) + sum(l$(last_l(l)),ts(l))*1/100;
@@ -337,10 +347,13 @@ Model partition/one_part,calc_mapped,part_size,min_size,order_on,
 *convexity
 *straighten,
 interf_calc,
+memdep,
+mem_size,
 interf_calc2,
 calcBucket,
 straighten2,
 obj/;
+
 )HERE";
     out << text;
     out << fixes;
@@ -352,21 +365,33 @@ obj/;
     << "display x.l\n"
     << "display y.l\n";
   }
+bool LoopInfo::printGamsPartitionProgram(std::string filename,
+    bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops) {
+    
+    _subgraphSet.clear();
+    _subgraphVec.clear();
+    return LoopInfo::printGamsPartitionProgram(filename,
+      _subgraphSet, _subgraphVec,
+       gams_details, no_gams);
+}
 
-bool LoopInfo::printGamsPartitionProgram(std::string filename,bool gams_details,bool no_gams) {
+
+bool LoopInfo::printGamsPartitionProgram(std::string filename,
+     SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
+     bool gams_details,bool no_gams,
+     int max_beret_size, int max_mem_ops) {
 
   BBvec& hotPath = getHotPath();
-  BBvec::iterator i,e;
   std::set<Op*> instsInPath;
   std::map<uint32_t, Op*> intOpMap;
 
   std::stringstream ss;
 
-  ss << "set V/";
+  ss << "$ONEMPTY; \n set V/";
 
   int countElements=0;
   //find all instructions in path;
-  for(i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+  for(auto i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
     BB* bb= *i;
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
@@ -392,18 +417,19 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,bool gams_details,
   out << ss.str();
 
   out << "set A(v,v)/";
-  std::stringstream fixes;
+  std::stringstream fixes,streamD,streamM;
   countElements=0;
   int countOps=0;
+  int countElementsD=0,countElementsM=0;
+  int nMemDepOps=0;
   //print graph
-  for(i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+  for(auto i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
     BB* bb= *i;
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
       Op* op = *oi;
-      Op::Deps::iterator ui,ue; 
       countOps++;
-      for(ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
+      for(auto ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
         Op* uop = *ui;
         //Don't consider any irrelevant edges.
         if(!dependenceInPath(instsInPath,op,uop)) {
@@ -415,14 +441,47 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,bool gams_details,
         }
         out << op->id() << "." << uop->id();
       }
+      if(op->isMem()) {
+        if(countElementsD++ != 0) {
+          streamM <<",";
+        }
+        streamM<<op->id();
+        countElementsM++;
+      }
+
+      for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
+        Op* mop = *di;
+        if(dependenceInPath(instsInPath,mop,op)) {
+          if(countElementsD++ != 0) {
+            streamD <<",";
+          }
+          streamD << mop->id() << "." << op->id();
+          nMemDepOps++;
+        }
+      }
+
       if(op->numUses()==0) {
         fixes << "x.fx('" << op->id() << "')=0;\n"; //inst does not write reg
       }
     }
   }
   out << "/;\n"; 
+
+  out << "set D(v,v)/";
+  out << streamD.str();
+  out << "/;\n"; 
+  out << "set M(v)/";
+  out << streamM.str();
+  out << "/;\n"; 
+
   std::string resultfile=filename + ".out";
-  printGamsPartitionText(out,instsInPath.size(),resultfile,fixes.str());
+
+  if(nMemDepOps < countElementsM/max_mem_ops) {
+    nMemDepOps = countElementsM/max_mem_ops;
+  }
+
+  printGamsPartitionText(out,instsInPath.size(),resultfile,
+                         fixes.str(),nMemDepOps,max_beret_size,max_mem_ops);
 
   out.close(); 
 
@@ -452,13 +511,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,bool gams_details,
       for (const auto& t : tokens) {
         if(subgraph==NULL) {
           subgraph=new Subgraph();
-          _subgraphSet.insert(subgraph);
-          _subgraphVec.push_back(subgraph);
+          subgraphSet.insert(subgraph);
+          subgraphVec.push_back(subgraph);
         }
   
         uint32_t i = std::stoi(t);
         Op* op = intOpMap[i];
-        op->setSubgraph(subgraph);
+        //op->setSubgraph(subgraph);
         subgraph->insertOp(op);
         ops_in_a_subgraph++;
       }
@@ -478,62 +537,78 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,bool gams_details,
     std::cerr << "GAMS-FAILED";
     
 
-    for(i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+    int curOp=0;
+    for(auto i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
       BB* bb= *i;
       BB::OpVec::iterator oi,oe;
       for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
         Op* op = *oi;
+        curOp++;
 
         //try to find a good spot
-        Subgraph* latestSubgraph=NULL;
+        //first find earliest possible subgraph which is legal:
+        //it must come after all subgraphs with dependencies
         int latestSGInd=0;
         unsigned sg_ind =0;
-        for(auto sgi=_subgraphVec.begin(),sge=_subgraphVec.end();sgi!=sge;++sgi){
+        bool someDep=false;
+        for(auto sgi=subgraphVec.begin(),sge=subgraphVec.end();sgi!=sge;++sgi){
           Subgraph* sg = *sgi;
-          /*if(sg.size() == 6) {
-            continue; 
-          }*/
           for(auto dsi=op->d_begin(),dse=op->d_end();dsi!=dse;++dsi) {
             Op* dep_op = *dsi;
-            if(dependenceInPath(instsInPath,dep_op,op) && sg->hasOp(dep_op)) {
-              latestSubgraph=sg;
+            if(/*dependenceInPath(instsInPath,dep_op,op) &&*/ sg->hasOp(dep_op)) {
               latestSGInd=sg_ind;
+              someDep = true;
+            }
+          }
+          for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
+            Op* mem_op = *di;
+            if(sg->hasOp(mem_op)) {
+              latestSGInd=sg_ind+1;
             }
           }
           sg_ind++;
         }
 
         //find earliest position to put it in
-        if(latestSubgraph || op->numUses()==0 ) {
+        if(someDep || op->numUses()==0 || curOp + max_beret_size > countOps) {
           Subgraph* subgraphFound=NULL;
-          for(sg_ind=latestSGInd; sg_ind < _subgraphVec.size(); ++sg_ind) {
-             if(_subgraphVec[sg_ind]->size() < MAX_BERET_SIZE) {
-               subgraphFound=_subgraphVec[sg_ind];
-               break;
-             }
+          for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) {
+            if(subgraphVec[sg_ind]->size() < (unsigned)max_beret_size) {
+              Subgraph* sg = subgraphVec[sg_ind];
+              int mopsPerSubgraph=0;
+              for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
+                Op* sg_op = *oi;
+                if(sg_op->isMem()) {
+                  mopsPerSubgraph++;
+                }
+              }
+              //cout << mopsPerSubgraph << " " << max_mem_ops << "\n";
+              if(!op->isMem() || mopsPerSubgraph < max_mem_ops) {
+                subgraphFound=subgraphVec[sg_ind];
+                break;
+              }
+            }
           }
           if(subgraphFound) {
             subgraphFound->insertOp(op);
-            op->setSubgraph(subgraphFound);
-            continue;
+            //op->setSubgraph(subgraphFound);
+            continue; //go to next op
           }
         }
 
         //couldn't find any spots
         subgraph=new Subgraph();
-        _subgraphSet.insert(subgraph);
-        _subgraphVec.push_back(subgraph);
-        op->setSubgraph(subgraph);
+        subgraphSet.insert(subgraph);
+        subgraphVec.push_back(subgraph);
+        //op->setSubgraph(subgraph);
         subgraph->insertOp(op);
-
       }
     }
-   
 
   }
   
   //assert(_subgraphVec.size() >= 0);
-  serializeSubgraphs();
+  //serializeSubgraphs();
 
   return true;
 }

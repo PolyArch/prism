@@ -138,23 +138,22 @@ public:
     _name = name;
   }
 
-
-  void setDefaultsFromProf() {
-   FETCH_WIDTH = Prof::get().fetchWidth;
-   D_WIDTH = Prof::get().dispatchWidth;
-   ISSUE_WIDTH = Prof::get().issueWidth;
-   WRITEBACK_WIDTH = Prof::get().wbWidth;
-   COMMIT_WIDTH = Prof::get().commitWidth;
-   SQUASH_WIDTH = Prof::get().squashWidth;
-
-   IQ_WIDTH = Prof::get().numIQEntries;
-   ROB_SIZE = Prof::get().numROBEntries;
-   LQ_SIZE =  Prof::get().LQEntries;
-   SQ_SIZE =  Prof::get().SQEntries;
-
-   FETCH_TO_DISPATCH_STAGES = Prof::get().fetchToDecodeDelay +
-                                  Prof::get().decodeToRenameDelay +
-                                  Prof::get().renameToIEWDelay;
+  virtual void setDefaultsFromProf() {
+    FETCH_WIDTH = Prof::get().fetchWidth;
+    D_WIDTH = Prof::get().dispatchWidth;
+    ISSUE_WIDTH = Prof::get().issueWidth;
+    WRITEBACK_WIDTH = Prof::get().wbWidth;
+    COMMIT_WIDTH = Prof::get().commitWidth;
+    SQUASH_WIDTH = Prof::get().squashWidth;
+  
+    IQ_WIDTH = Prof::get().numIQEntries;
+    ROB_SIZE = Prof::get().numROBEntries;
+    LQ_SIZE =  Prof::get().LQEntries;
+    SQ_SIZE =  Prof::get().SQEntries;
+  
+    FETCH_TO_DISPATCH_STAGES = Prof::get().fetchToDecodeDelay +
+                                   Prof::get().decodeToRenameDelay +
+                                   Prof::get().renameToIEWDelay;
   }
 
   virtual ~CriticalPath() {

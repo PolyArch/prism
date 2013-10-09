@@ -25,6 +25,9 @@ ccores:
 beret:
 	+make -C critpath/beret
 
+super:
+	+make -C critpath/super
+
 clean:
 	+make -C loopprof clean
 	+make -C critpath clean
@@ -32,3 +35,4 @@ clean:
 	+make -C critpath/dyser clean
 	+make -C critpath/ccores clean
 	+make -C critpath/beret clean
+	+make -C critpath/super clean

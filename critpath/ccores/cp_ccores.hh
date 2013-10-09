@@ -8,9 +8,14 @@
 #include <memory>
 
 #include "cp_ccores_all.hh"
+#include "pathprof.hh"
+//#include "functioninfo.hh"
+//#include "loopinfo.hh"
+#include "mutable_queue.hh"
 
 
-class cp_ccores : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
+class cp_ccores : public ArgumentHandler,
+                public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
 
@@ -28,6 +33,77 @@ public:
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
 
+  unsigned _ccores_num_mem=1, _ccores_bb_runahead=1, _ccores_max_ops=1000;
+  void handle_argument(const char *name, const char *optarg) {
+    if (strcmp(name, "ccores-num-mem") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _ccores_num_mem = temp;
+      } else {
+        std::cerr << "ERROR: ccores-num-mem arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+    if (strcmp(name, "ccores-bb-runahead") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _ccores_bb_runahead = temp;
+      } else {
+        std::cerr << "ERROR: ccores-bb-runahead arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+    if (strcmp(name, "ccores-max-ops") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _ccores_max_ops = temp;
+      } else {
+        std::cerr << "ERROR: ccores-max-ops arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+
+  }
+
+  class CTarget {
+    double computeValue();
+    std::set<LoopInfo*> lichildren;
+    std::set<FunctionInfo*> fichildren;
+  };
+
+  class CTargetFunc {
+    FunctionInfo* fi;
+    double computeValue() {
+      return 0; 
+    }
+  };
+
+  class CTargetLoop {
+    LoopInfo* li;
+    double computeValue() {
+         return 0;
+    }
+
+  };
+
+
+
+  std::map<LoopInfo*,bool> liAccel;
+  std::map<FunctionInfo*,bool> fiAccel;
+
+  virtual void setDefaultsFromProf() {
+    CP_DG_Builder::setDefaultsFromProf();
+
+    //set up the subgraphs
+    std::multimap<uint64_t,LoopInfo*> loops;
+    PathProf::FuncMap::iterator i,e;
+    for(i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
+      FunctionInfo& fi = *i->second;
+      FunctionInfo::LoopList::iterator li,le;
+      for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
+        //LoopInfo* loopInfo = li->second;
+        //loops.insert(std::make_pair(loopInfo->numInsts(),loopInfo));
+      }
+    } 
+  }
+ 
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (!getTraceOutputs())
@@ -64,8 +140,8 @@ public:
     }
 
     if(inCCore) {
-      ccores_inst* cc_inst = new ccores_inst(img,index);
-      std::shared_ptr<ccores_inst> sh_inst(cc_inst);
+      CCoresInst* cc_inst = new CCoresInst(img,index);
+      std::shared_ptr<CCoresInst> sh_inst(cc_inst);
       getCPDG()->addInst(sh_inst,index);
 
       if(transitioned) {
@@ -76,8 +152,8 @@ public:
         getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
                                *cur_bb_end, 8, E_CXFR);
       }
-
-      if(op->isBBHead() || op->isMem()) {
+  
+      if(endOfBB(op,img)) {
         //only one memory instruction per basic block
         prev_bb_end=cur_bb_end;
         T* event_ptr = new T();
@@ -107,36 +183,36 @@ public:
   }
 
 private:
-  typedef std::vector<std::shared_ptr<ccores_inst>> CCoresBB;
+  typedef std::vector<std::shared_ptr<CCoresInst>> CCoresBB;
   std::shared_ptr<T> prev_bb_end, cur_bb_end;
 
 
-  virtual void addCCoreDeps(ccores_inst& inst,const CP_NodeDiskImage &img) { 
+  virtual void addCCoreDeps(CCoresInst& inst,const CP_NodeDiskImage &img) { 
     setBBReadyCycle_cc(inst,img);
     setExecuteCycle_cc(inst,img);
     setCompleteCycle_cc(inst,img);
   }
 
   //This node when current ccores BB is active
-  virtual void setBBReadyCycle_cc(ccores_inst& inst, const CP_NodeDiskImage &img) {
+  virtual void setBBReadyCycle_cc(CCoresInst& inst, const CP_NodeDiskImage &img) {
     CCoresBB::iterator I,E;
     /*for(I=prev_bb.begin(),E=prev_bb.end();I!=E;++I) {
-        ccores_inst* cc_inst= I->get(); 
-        getCPDG()->insert_edge(*cc_inst, ccores_inst::Complete,
-                               inst, ccores_inst::BBReady, 0);
+        CCoresInst* cc_inst= I->get(); 
+        getCPDG()->insert_edge(*cc_inst, CCoresInst::Complete,
+                               inst, CCoresInst::BBReady, 0);
     }*/
     if(prev_bb_end) {
       inst.startBB=prev_bb_end;
       getCPDG()->insert_edge(*prev_bb_end,
-                               inst, ccores_inst::BBReady, 0);
+                               inst, CCoresInst::BBReady, 0);
     }
   }
 
   //this node when current BB is about to execute 
   //(no need for ready, b/c it has dedicated resources)
-  virtual void setExecuteCycle_cc(ccores_inst &inst, const CP_NodeDiskImage &img) {
-    getCPDG()->insert_edge(inst, ccores_inst::BBReady,
-                           inst, ccores_inst::Execute, 0, true);
+  virtual void setExecuteCycle_cc(CCoresInst &inst, const CP_NodeDiskImage &img) {
+    getCPDG()->insert_edge(inst, CCoresInst::BBReady,
+                           inst, CCoresInst::Execute, 0, true);
 
     for (int i = 0; i < 7; ++i) {
       unsigned prod = inst._prod[i];
@@ -145,44 +221,42 @@ private:
       }
       dg_inst_base<T,E>& dep_inst = getCPDG()->queryNodes(inst.index()-prod);
       getCPDG()->insert_edge(dep_inst, dep_inst.eventComplete(),
-                             inst, ccores_inst::Execute, 0, true);
+                             inst, CCoresInst::Execute, 0, true);
     }
 
+    //Memory dependence enforced by BB ordering, in the restricted case
+    //when when bb-runahead is on, or num-mem is >1, then we should enforce this
+    //of course, this means that CCORES would need dependence resolution hardware
 
-/*
-
-    //Memory dependence enforced by BB ordering -- if this is going to be
-    //relaxed, then go ahead and implement mem dependence
     //memory dependence
-    if (n._mem_prod > 0) {
+     //memory dependence
+    if (inst._mem_prod > 0) {
       Inst_t& prev_node = static_cast<Inst_t&>( 
-                          getCPDG()->queryNodes(n.index()-n._mem_prod));
+                          getCPDG()->queryNodes(inst.index()-inst._mem_prod));
 
-      if (prev_node._isstore && n._isload) {
+      if (prev_node._isstore && inst._isload) {
         //data dependence
-        getCPDG()->insert_edge(prev_node.index(), dg_inst::Complete,
-                                  n, dg_inst::Ready, 0, true);
-      } else if (prev_node._isstore && n._isstore) {
+        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
+                                  inst, CCoresInst::Execute, 0, true);
+      } else if (prev_node._isstore && inst._isstore) {
         //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node.index(), dg_inst::Complete,
-                                  n, dg_inst::Complete, 0, true);
-      } else if (prev_node._isload && n._isstore) {
+        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
+                                  inst, CCoresInst::Complete, 0, true);
+      } else if (prev_node._isload && inst._isstore) {
         //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node.index(), dg_inst::Complete,
-                                  n, dg_inst::Complete, 0, true);
+        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
+                                  inst, CCoresInst::Complete, 0, true);
       }
     }
-*/
   }
 
-
-  virtual void setCompleteCycle_cc(ccores_inst& inst, const CP_NodeDiskImage &img) {
-    getCPDG()->insert_edge(inst, ccores_inst::Execute,
-                           inst, ccores_inst::Complete, inst._ex_lat);
+  virtual void setCompleteCycle_cc(CCoresInst& inst, const CP_NodeDiskImage &img) {
+    getCPDG()->insert_edge(inst, CCoresInst::Execute,
+                           inst, CCoresInst::Complete, inst._ex_lat);
 
     if(cur_bb_end) {
       inst.endBB = cur_bb_end; // have instruction keep
-      getCPDG()->insert_edge(inst, ccores_inst::Complete,
+      getCPDG()->insert_edge(inst, CCoresInst::Complete,
                                *cur_bb_end, 0);
     }
 

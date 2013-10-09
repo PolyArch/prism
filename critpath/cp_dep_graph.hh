@@ -232,6 +232,7 @@ public:
   uint16_t _prod[7] = {0,0,0,0,0,0,0};
   uint16_t _mem_prod = 0;
   uint16_t _cache_prod = 0;
+  uint64_t _true_cache_prod=false;
   uint16_t _ex_lat = 0;
   bool _serialBefore = false;
   bool _serialAfter = false;
@@ -273,6 +274,7 @@ public:
     std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
     _mem_prod=img._mem_prod;
     _cache_prod=img._cache_prod;
+    _true_cache_prod=img._true_cache_prod;
     _ex_lat=img._cc-img._ec;
     _serialBefore=img._serialBefore;
     _serialAfter=img._serialAfter;

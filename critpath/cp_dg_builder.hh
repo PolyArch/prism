@@ -46,6 +46,8 @@ public:
      }
      MSHRUseMap[0];
      MSHRUseMap[(uint64_t)-1000];
+     MSHRResp[0];
+     MSHRResp[(uint64_t)-1000];
      LQ.resize(LQ_SIZE);
      SQ.resize(SQ_SIZE);
      rob_head_at_dispatch=0;
@@ -272,8 +274,8 @@ protected:
     }
 
 
-/*    //DEBUG MSHR Usage
-    for(auto i=MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
+    //DEBUG MSHR Usage
+/*    for(auto i=MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
       uint64_t cycle = i->first;
 
       if(cycle > 10000000) {
@@ -288,15 +290,16 @@ protected:
     //delete irrelevent
     auto upperMSHRUse = --MSHRUseMap.upper_bound(_curCycle);
     auto firstMSHRUse = MSHRUseMap.begin();
-
     if(upperMSHRUse->first > firstMSHRUse->first) {
       MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
     }
 
-
     //delete irrelevent 
-    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle);
-    MSHRResp.erase(MSHRResp.begin(),upperMSHRResp); 
+    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle-100);
+    auto firstMSHRResp = MSHRResp.begin();
+    if(upperMSHRResp->first > firstMSHRResp->first) {
+      MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
+    }
 
 
     for(auto I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
@@ -336,7 +339,8 @@ protected:
                      uint64_t eff_addr,
                      int re_check_frequency,
                      int& rechecks,
-                     uint64_t& extraLat) { 
+                     uint64_t& extraLat,
+                     bool not_coalescable=false) { 
 
     int maxUnits = Prof::get().dcache_mshrs;
     rechecks=0; 
@@ -356,7 +360,9 @@ protected:
     //keep going until we find a spot .. this is gauranteed
     while(true) {
       assert(cur_cycle_iter->second.size() <= maxUnits);
-      if(cur_cycle_iter->second.count(addr)) {
+
+      if(cur_cycle_iter->second.size() < maxUnits && //max means cache-blocked
+         cur_cycle_iter->second.count(addr)) {
         //return NULL; //just add myself to some other MSHR, and return
         //we found a match... iterate until addr is gone
         while(true) {
@@ -556,6 +562,7 @@ protected:
     checkPipeStalls(inst);
     checkControlMispeculate(inst);
     checkFF(inst);
+    checkSerializing(inst);
 
     //-----FETCH ENERGY-------
     //Need to get ICACHE accesses somehow
@@ -580,7 +587,6 @@ protected:
     checkFD(inst);
     checkDD(inst);
     checkDBW(inst);
-    checkSerializing(inst);
 
     if(_isInOrder) {
       //nothing
@@ -643,7 +649,7 @@ protected:
       if(!depInst) {
         break;
       }
-      if(depInst->cycleOfStage(Inst_t::Complete) < dispatch_cycle ) {
+      if(depInst->cycleOfStage(Inst_t::Commit) < dispatch_cycle ) {
         lq_head_at_dispatch+=1;
         lq_head_at_dispatch%=LQ_SIZE; 
       } else {
@@ -830,7 +836,6 @@ protected:
       }
 */
     }
-        
 
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
                            n, Inst_t::Fetch,lat,E_FF);
@@ -845,7 +850,7 @@ protected:
 
     if(n._serialBefore || depInst->_serialAfter) {
       getCPDG()->insert_edge(*depInst, Inst_t::Commit,
-                             n, Inst_t::Dispatch, 4,E_SER);
+                             n, Inst_t::Fetch, 1,E_SER);
     }
     return n;
   }
@@ -870,10 +875,10 @@ protected:
     }
 
     int length=1;
-    //Inst_t* prevInst = getCPDG()->peekPipe(-1);
-    //if(prevInst && !prevInst->_isctrl) {
-    //  length+=n._icache_lat;
-    //}
+    Inst_t* prevInst = getCPDG()->peekPipe(-1);
+    if(prevInst && !prevInst->_isctrl) {
+      length+=n._icache_lat;
+    }
 
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
                            n, Inst_t::Fetch, length, E_FBW); 
@@ -1355,7 +1360,7 @@ protected:
       //have to wait this long before each event
       int insts_to_squash=instsToSquash();
       int squash_cycles = squashCycles(insts_to_squash);
-      int recheck_cycles = squash_cycles + 4;
+      int recheck_cycles = squash_cycles-1;
       
       BaseInst_t* min_node =
          addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
@@ -1376,7 +1381,9 @@ protected:
         
 
         pushPipe(sh_dummy_inst);
-        assert(min_node); 
+        //assert(min_node); 
+        if(!min_node) {
+        }
 
         n->reset_inst();
         setFetchCycle(*n);
@@ -1485,7 +1492,7 @@ protected:
     int lat=0;
 
     if(n._isload) {
-      if(n._cache_prod) {
+      if(n._cache_prod && n._true_cache_prod) {
         lat = Prof::get().dcache_hit_latency + Prof::get().dcache_response_latency;
       } else {
         lat = n._ex_lat;

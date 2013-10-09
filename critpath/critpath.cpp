@@ -174,6 +174,30 @@ int main(int argc, char *argv[])
   std::string prof_file(argv[optind]);
   size_t start_pos = prof_file.find_last_of("/");
 
+  //open prof file
+  if (!gen_loop_prof) {
+    size_t dot_pos =  prof_file.find(".", start_pos);
+    prof_file = ((dot_pos == string::npos)
+                 ? prof_file
+                 : prof_file.substr(0, dot_pos));
+    prof_file += string(".prof");
+
+    std::cout << "reading prof file: " << prof_file;
+    std::cout.flush();
+    Prof::init(prof_file);
+    std::cout << "... done!\n";
+  } else {
+    if (loop_prof_max_inst == (uint64_t)-1)
+      // use max_inst
+      loop_prof_max_inst = max_inst;
+
+    std::cout << "Generating Loop Info from trace\n";
+    std::cout.flush();
+    Prof::init_from_trace(argv[optind], loop_prof_max_inst);
+    std::cout << "... generating loop info ... done!!\n";
+  }
+
+
   //Process m5out/stats.txt for events
   string statsfile;
   if(start_pos != string::npos) {
@@ -206,30 +230,6 @@ int main(int argc, char *argv[])
     CPRegistry::get()->setWidth(oooWidth, false);
   }
   CPRegistry::get()->setTraceOutputs(traceOutputs);
-
-  //open prof file
-  if (!gen_loop_prof) {
-    size_t dot_pos =  prof_file.find(".", start_pos);
-    prof_file = ((dot_pos == string::npos)
-                 ? prof_file
-                 : prof_file.substr(0, dot_pos));
-    prof_file += string(".prof");
-
-    std::cout << "reading prof file: " << prof_file;
-    std::cout.flush();
-    Prof::init(prof_file);
-    std::cout << "... done!\n";
-  } else {
-
-    if (loop_prof_max_inst == (uint64_t)-1)
-      // use max_inst
-      loop_prof_max_inst = max_inst;
-
-    std::cout << "Generating Loop Info from trace\n";
-    std::cout.flush();
-    Prof::init_from_trace(argv[optind], loop_prof_max_inst);
-    std::cout << "... generating loop info ... done!!\n";
-  }
 
   uint64_t count = 0;
   uint64_t numCycles =  0;

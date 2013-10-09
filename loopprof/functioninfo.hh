@@ -168,6 +168,28 @@ public:
   uint64_t nonLoopDirectRecInsts() {return _nonLoopDirectRecInsts;}
   uint64_t nonLoopAnyRecInsts() {return _nonLoopAnyRecInsts;}
   
+  int staticInsts() {
+    int static_insts=0;
+    for(auto i=_bbMap.begin(),e=_bbMap.end();i!=e;++i) {
+      BB* bb = i->second;
+      static_insts+=bb->len();
+    }
+    return static_insts;
+  }
+
+  int myStaticInsts() {
+    int static_insts=staticInsts();
+    for(auto i=_loopList.begin(),e=_loopList.end();i!=e;++i) {
+      LoopInfo* li = i->second;
+      if(li->isOuterLoop()) {
+        static_insts-=li->staticInsts();
+      }
+      assert(static_insts>0);
+    }
+    assert(static_insts>0);
+    return static_insts;
+  }
+
 
   BB* getBB(CPC cpc);
   BB* addBB(BB* prevBB, CPC headCPC, CPC tailCPC);
