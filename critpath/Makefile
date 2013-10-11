@@ -1,7 +1,8 @@
 
 LEVEL = ./
 
-SRC := critpath.cpp gzstream.cpp prof.cpp plugin.cpp origcp.cpp
+SRC := critpath.cpp gzstream.cpp prof.cpp plugin.cpp origcp.cpp exec_profile.cpp
+
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 
 LIBS := -lz -L../loopprof/. -lloopprof -lboost_serialization -ldl

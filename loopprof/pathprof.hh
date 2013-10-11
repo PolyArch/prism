@@ -20,7 +20,7 @@
 #include <assert.h>
 
 #include "cpu/crtpath/crtpathnode.hh"
-#define MAX_OPS 1000
+#define MAX_OPS 2048
 
 #include "op.hh"
 #include "bb.hh"

@@ -264,5 +264,4 @@ struct RegisterCP
   }
 };
 
-
 #endif

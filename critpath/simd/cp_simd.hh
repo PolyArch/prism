@@ -62,11 +62,31 @@ namespace simd {
 
     LoopInfo *getLoop(Op *op) {
       static LoopInfo *_cached_curloop = 0;
-      // Is this instruction first in a basic block?
-      if (op->bb_pos() == 0) {
-        // is this bb starts an inner loop?
-        _cached_curloop = op->func()->getLoop(op->bb());
+      // not a first instruction.
+      if (op->bb_pos() != 0)
+        return _cached_curloop;
+
+      //std::cout << "BB<<" << op->bb() << "> ::";
+
+      // is this bb starts another loop
+      // is this bb starts an another loop?
+      LoopInfo *next_loop = op->func()->getLoop(op->bb());
+
+      if (next_loop) {
+        _cached_curloop = next_loop;
+        //std::cout << "\tLoop<" << next_loop << "> <<<< Head <<<<<\n";
+        return _cached_curloop;
       }
+
+      // is in current loop itself
+      if (_cached_curloop && _cached_curloop->inLoop(op->bb())) {
+        //std::cout << "\tLoop<" << _cached_curloop << "> <<<< BODY <<<<<\n";
+        return _cached_curloop;
+      }
+
+      // it is not in the loop
+      _cached_curloop = 0;
+      //std::cout << "\tLoop<0> <<<<<<<<<\n";
       return _cached_curloop;
     }
 
@@ -92,7 +112,7 @@ namespace simd {
           int stride = 0;
           if (!(*I)->getStride(&stride)) {
             if (shouldPrint) {
-              printDisasm((*I)->cpc().first, (*I)->cpc().second);
+              printDisasm(*I);
               std::cout << "    stride is not constant or unknown\n";
               (*I)->printEffAddrs();
               std::cout << "\n";
@@ -101,6 +121,7 @@ namespace simd {
           }
           for (auto DI = (*I)->m_begin(), DE = (*I)->m_end(); DI != DE; ++DI) {
             Op *DepOp = *DI;
+            assert(DepOp->isLoad() || DepOp->isStore());
             // Same -- broadcast load should handle this
             if (DepOp == (*I))
               continue;
@@ -114,12 +135,12 @@ namespace simd {
             // Same memory touched by two ops in the same loop...
             if (li == DepOp->func()->getLoop(DepOp->bb())) {
               if (shouldPrint) {
-                printDisasm((*I)->cpc().first, (*I)->cpc().second);
+                printDisasm(*I);
                 (*I)->printEffAddrs();
                 std::cout << "\n";
 
                 std::cout << " conflicts with \n";
-                printDisasm(DepOp->cpc().first,  DepOp->cpc().second);
+                printDisasm(DepOp);
                 DepOp->printEffAddrs();
                 std::cout << "\n";
               }
@@ -145,34 +166,46 @@ namespace simd {
       return isVectorizable(li);
     }
 
-    unsigned getIterCnt(Op *op, LoopInfo *li) {
-      assert (canVectorize(li));
-      return _op2Count[op];
-    }
-
     static std::map<LoopInfo*, bool> li_printed;
 
     void printDisasm(uint64_t pc, int upc) {
       std::cout << pc << "," << upc << " : "
-                << exec_profile::getDisasm(pc, upc) << "\n";
+                << ExecProfile::getDisasm(pc, upc) << "\n";
+    }
+    void printDisasm(Op *op) {
+      std::cout << "<" << op << ">: ";
+      printDisasm(op->cpc().first, op->cpc().second);
     }
 
     void printLoop(LoopInfo *li) {
 
-      if (!exec_profile::hasProfile())
+      if (!ExecProfile::hasProfile())
         return;
 
       std::cout << "======================================\n";
       std::cout << "================" << li << "==========\n";
       for (auto BBI = li->body_begin(), BBE = li->body_end(); BBI != BBE; ++BBI) {
-        std::cout << "BB::" << *BBI << "\n";
+        std::cout << "BB<" << *BBI << "> "
+                  << ((li->loop_head() == *BBI)?" Head ":"")
+                  << ((li->isLatch(*BBI))?" Latch ":"") << "\n";
+        std::cout << "Pred::";
+        for (auto PI = (*BBI)->pred_begin(), PE = (*BBI)->pred_end(); PI != PE; ++PI) {
+          std::cout << " BB<" << *PI << ">";
+        }
+        std::cout << "\n";
+        std::cout << "Succ::";
+        for (auto PI = (*BBI)->succ_begin(), PE = (*BBI)->succ_end(); PI != PE; ++PI) {
+          std::cout << " BB<" << *PI << ">";
+        }
+        std::cout << "\n";
         for (auto I = (*BBI)->op_begin(), E = (*BBI)->op_end(); I != E; ++I) {
           Op *op = *I;
           uint64_t pc = op->cpc().first;
           int upc = op->cpc().second;
-          std::cout << pc << "," <<upc << " : " <<
-            "[" << _op2Count[op] << "] " <<
-            exec_profile::getDisasm(pc, upc) << "\n";
+          std::cout << pc << "," <<upc << " : "
+                    << "<" << op << "> "
+                    << ((op == (*BBI)->lastOp())?" L ": "  ")
+                    << ExecProfile::getDisasm(pc, upc) << "\n";
         }
         std::cout << "\n";
       }
@@ -276,15 +309,39 @@ namespace simd {
 
       bool insertSIMDInst = false;
       LoopInfo *li = getLoop(op);
+#define TRACE_INST
       if (CurLoop != li) {
+        #ifdef TRACE_INST
         // We switched to a different loop, complete simd_loop
-        if (canVectorize(li)) {
+        std::cout << "DiffLoop<" << li << ">:: ";
+        printDisasm(op);
+        if (op == op->bb()->lastOp()) {
+          std::cout << "\n";
+        }
+        #endif
+        if (CurLoop && canVectorize(CurLoop)) {
           completeSIMDLoop(CurLoop, CurLoopIter);
         }
         CurLoop = li;
         CurLoopIter = 0;
         global_loop_iter = 0;
+      } else if (!CurLoop) {
+
+        #ifdef TRACE_INST
+        std::cout << "SameLoop<" << CurLoop << ">:: ";
+        printDisasm(op);
+        if (op == op->bb()->lastOp()) {
+          std::cout << "\n";
+        }
+        #endif
       } else if (CurLoop) {
+        #ifdef TRACE_INST
+        std::cout << "SameLoop<" << CurLoop << ">:: ";
+        printDisasm(op);
+        if (op == op->bb()->lastOp()) {
+          std::cout << "\n";
+        }
+        #endif
         // Same Loop, incr iteration
         if (op == op->bb()->lastOp() // last instruction in the bb
             && CurLoop->isLatch(op->bb())) // Latch in the current loop)
@@ -294,6 +351,11 @@ namespace simd {
             //
             ++CurLoopIter;
             ++global_loop_iter;
+            #if 0
+            std::cout << "Loop: " << CurLoop
+                      << " executed " << global_loop_iter
+                      << "[ " << CurLoopIter << " ] times\n";
+            #endif
           }
         // set insertSIMDInstr if curloopiter is a multiple of _simd_len.
         insertSIMDInst =  (canVectorize(CurLoop)

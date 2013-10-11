@@ -222,6 +222,12 @@ public:
   void detectLoops();
   void loopNestAnalysis();
 
+  void printAllLoops() {
+    std::cout << "Func<" << this << ">::\n";
+    for (auto I = _loopList.begin(), E = _loopList.end(); I != E; ++I) {
+      std::cout << "\tBB<" << I->first << "> : Loop<" << I->second << ">\n";
+    }
+  }
   LoopInfo* getLoop(BB* bb) {
     LoopList::iterator i = _loopList.find(bb);
     if(i==_loopList.end()) {

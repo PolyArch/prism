@@ -4,6 +4,7 @@
 
 #include "lpanalysis.hh"
 #include "gzstream.hh"
+#include "exec_profile.hh"
 
 #include <iostream>
 #include <utility>
@@ -52,6 +53,13 @@ bool doLoopProfAnalysis(const char *trace_fname,
                                cp_array[ind]._upc);
       ++count;
 
+      #if 0
+      if (pass == 2) {
+        std::cout << cpc.first << "," << cpc.second << " : "
+                  << ExecProfile::getDisasm(cpc.first, cpc.second) << "\n";
+      }
+      #endif
+
       if (verbose && pass == 2) {
         std::cout << count << ":  ";
         img.write_to_stream(std::cout);
@@ -67,7 +75,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
             skipInsts = -1;
           }
           //Only pass control instructions to phase 1
-          pathProf.processOpPhase1(prevCPC,cpc,prevCall,prevRet);
+          pathProf.processOpPhase1(prevCPC, cpc, prevCall, prevRet);
         } else if (skipInsts != -1) {
           skipInsts++;
         }

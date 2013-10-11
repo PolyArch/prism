@@ -70,7 +70,8 @@ private:
   //Subgraph* _subgraph;
   uint64_t _effAddr = 0;
   int stride = 0;
-  enum stride_value_type { st_Unknown, st_Constant, st_Variable };
+  int strideCycleDist = 0;
+  enum stride_value_type { st_Unknown, st_Constant, st_Variable, st_Cycle };
   enum stride_value_type stride_ty = st_Unknown;
   friend class boost::serialization::access;
 
@@ -146,7 +147,8 @@ public:
       std::cout << I->addr << ":" << I->itercnt << ":"
                 << ((I->sty == st_Constant)?"C"
                     : (I->sty == st_Unknown)?"U"
-                    : "V") << ":" << I->stride << " ";
+                    : (I->sty == st_Variable)?"V"
+                    : "y") << ":" << I->stride << " ";
       if ( (++i) % 8 == 0)
         std::cout << "\n";
     }
@@ -157,7 +159,7 @@ public:
     _effAddr = addr;
     _size = size;
   }
-  void          computeStride(uint64_t addr, int iterCnt) {
+  void computeStride(uint64_t addr, int iterCnt) {
 
     if (_effAddr == 0) {
       _effAddr = addr;
@@ -167,17 +169,24 @@ public:
       stride_ty = st_Constant;
       stride = ((int64_t)addr - (int64_t)_effAddr);
       _effAddr = addr;
-    } else if (stride_ty == st_Constant) {
+    } else if (stride_ty == st_Constant || stride_ty == st_Cycle) {
       int new_stride = (addr - _effAddr);
       _effAddr = addr;
-      if ( new_stride != stride) {
-        stride_ty = st_Variable;
+      if (new_stride != stride) {
+        // can this be cycle through the address location...
+        if (effAddrAccessed.begin()->addr != addr) {
+          stride_ty = st_Variable;
+        } else {
+          // Are we cycling through the address? I guess so -- a case in radar.
+          // FIXME:: check the cycle stride as well...
+          stride_ty = st_Cycle;
+        }
       }
     }
     effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
   }
   bool getStride(int *strideLen) const {
-    if (stride_ty == st_Constant) {
+    if (stride_ty == st_Constant || stride_ty == st_Cycle) {
       if (strideLen)
         *strideLen = stride;
       return true;
@@ -220,7 +229,11 @@ public:
     _deps.insert(op);
     op->addUse(this);
   }
-  void addMemDep(Op* op) {_memDeps.insert(op);}
+  void addMemDep(Op* op) {
+    assert(op->isLoad() || op->isStore());
+    _memDeps.insert(op);
+  }
+
   void addCacheDep(Op* op) {_cacheDeps.insert(op);}
   void addCtrlDep(Op* op) {_ctrlDeps.insert(op);}
 

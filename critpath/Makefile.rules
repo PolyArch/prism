@@ -11,9 +11,9 @@ OPT = -O3
 # By default gcc-4.8.1 generated debug information in dwarf-4
 # g3 generates include extra information (about macro definition etc.,)
 DEBUG_FLAGS = -gdwarf-3 -g3 -ggdb
-WARN_FLAGS = -Wall -Werror -pedantic -Wno-unused-local-typedefs 
+WARN_FLAGS = -Wall -Werror -pedantic -Wno-unused-local-typedefs
 
-INCLUDES = -I. -I$(LEVEL)/ -I$(GEM5_DIR)/src -I$(LEVEL)/../loopprof -I/s/boost-1.54.0/include
+INCLUDES = -I. -I$(LEVEL)/ -I$(LEVEL)../include  -I$(GEM5_DIR)/src -I$(LEVEL)/../loopprof -I/s/boost-1.54.0/include
 
 CFLAGS = -std=c++11 $(OPT) $(DEBUG_FLAGS) $(WARN_FLAGS) $(INCLUDES) -fPIC $(EXTRA_FLAGS)
 
