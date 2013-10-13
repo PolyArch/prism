@@ -314,6 +314,8 @@ public:
     replay_queue.clear();
     whichBB=0;
     //create instruction for each SEB
+    
+    assert(li2sgmap[li].size()>0);
     for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
@@ -423,7 +425,7 @@ public:
           if(li) {
             //std::cout << "found a loop\n";
           }
-          if(li && li2sgmap.count(li)!=0) {
+          if(li && li2sgmap.count(li)!=0 && li2sgmap[li].size()!=0) {
             //std::cout << " .. and it's beret-able!\n";
             curLoopHead=op;
             beret_state=BERET;

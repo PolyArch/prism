@@ -106,14 +106,21 @@ public:
     return _funcInfo;
   }
 
+  Op* getOp(CPC cpc);
+
   void processBB_phase1(CPC headCPC, CPC tailCPC) {
     _prevBB=_funcInfo->addBB(_prevBB,headCPC,tailCPC);
   }
 
-  void setRecursing(bool b) {_isRecursing=b;}
+  void setRecursing(bool b) {
+    _isRecursing=b;
+  }
+
   bool isRecursing() {return _isRecursing;}
 
-  void setDirectRecursing(bool b) {_isDirectRecursing=b;}
+  void setDirectRecursing(bool b) {
+    _isDirectRecursing=b;
+  }
   bool isDirectRecursing() {return _isDirectRecursing;}
 
   void dyn_dep(Op* op, uint32_t ind, bool isMem);
@@ -123,7 +130,7 @@ public:
   void processBB_phase2(uint32_t dId, BB* bb,bool profile=true);
 
   Op* processOp_phase3(uint32_t dId, CPC cpc);
-
+  
 };
 
 
@@ -382,6 +389,31 @@ public:
   FuncMap::iterator fbegin() {return _funcMap.begin();}
   FuncMap::iterator fend() {return _funcMap.end();}
 
+  //look up the stack, see if f
+  std::pair<LoopInfo*,FunctionInfo*> findEntry(Op* op,
+                                            std::set<FunctionInfo*>& fiSet, 
+                                            std::set<LoopInfo*>& liSet) {
+    for(auto i=_callStack.begin(),e=_callStack.end();i!=e;++i) {
+      StackFrame& sf = *i;
+      FunctionInfo* fi = sf.funcInfo();
+      //first check loops
+      for(auto ii = fi->li_begin(), ee = fi->li_end(); ii!=ee; ++ii) {
+        LoopInfo* li = ii->second;
+        if(liSet.count(li)) {
+          return std::make_pair(li,(FunctionInfo*)NULL);
+        }
+      } 
+   
+      //then check functions
+      if(fiSet.count(fi)) {
+        return std::make_pair((LoopInfo*) NULL,fi);
+      }
+    }
+
+    return std::make_pair((LoopInfo*) NULL, (FunctionInfo*)NULL);
+  }
+
+
   //void initCPC(CPC cpc) {_prevHead=cpc;}
   void printInfo();
   void printCFGs(std::string& dir) {
@@ -425,6 +457,7 @@ public:
       }
     }
   }
+
 
   void resetStack(CPC& prevCPC, bool& prevCtrl, bool& prevCall, bool& prevRet) {
     _callStack.clear();

@@ -301,12 +301,36 @@ void FunctionInfo::toDotFile(std::ostream& out) {
    
     out << "labelloc=\"t\";\n";
     if(_sym!=0) {
-      out <<  "label=\"" << ELF_parser::demangle(_sym->name.c_str()) << "\";\n";
+      out <<  "label=\"" << ELF_parser::demangle(_sym->name.c_str());
     } else {
-      out <<  "label=\"Func Name Not Known\";\n";
+      out <<  "label=\"Func Name Not Known";
     }
 
- 
+    out << "\\n";
+    if(_canRecurse) {
+      out << "can-recurse";
+    } else if(_callsRecursiveFunc){
+      out << "calls-recurisve";
+    } else if(isLeaf()) {
+      out << "pure";
+    } else {
+      out << "calls-funcs";
+    }
+
+    if(cantFullyInline()) {
+      out << ",cant-inline";
+    } else {
+      out << ",can-inline";
+    }
+
+
+    out << "\\nst<" << myStaticInsts() 
+        << "," << staticInsts()
+        << "," << inlinedStaticInsts() << ">\\n";
+    out << "dy<" << insts() << "," << totalDynamicInlinedInsts() << ">"; 
+
+    out << "\";\n"; //end label
+
     BBMap::iterator bbi,bbe;
     for(bbi=_bbMap.begin(),bbe=_bbMap.end();bbi!=bbe;++bbi) {
       BB& bb = *(bbi->second);
@@ -336,7 +360,7 @@ void FunctionInfo::toDotFile(std::ostream& out) {
             << "\"->"
             << "\"" << succ_bb->head().first << "x" << succ_bb->head().second 
             << "\" [label=\"";
-
+        
 /*
        for(auto il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
          LoopInfo& li =*(il->second);
@@ -391,8 +415,27 @@ void FunctionInfo::toDotFile(std::ostream& out) {
   
   
       out << "\"loop_" << li.loop_head()->head().first <<  "\" [label=\"";
-      out << "L " << li.id(); 
-      out << " (depth = " << li.depth() << ");\\n";
+      out << "L" << li.id(); 
+      out << " (depth = " << li.depth() << ",";
+      if(li.callsRecursiveFunc()) {
+        out << ",calls-rec";
+      } else if(li.containsCallReturn()){
+        out << ",calls-funcs";
+      } else {
+        out << ",pure";
+      }
+      if(li.cantFullyInline()) {
+        out << ",cant-inline";
+      } else {
+        out << ",can-inline";
+      }
+
+      out << ")\\nst<" << li.myStaticInsts() 
+          << "," << li.staticInsts()
+          << "," << li.inlinedStaticInsts() << ">"
+          << "\\ndy<" << li.numInsts() << "," << li.totalDynamicInlinedInsts() << ">"
+
+          << ";\\n";
       LoopInfo::BBset::iterator ib,eb;
       for(ib=li.body_begin(),eb=li.body_end();ib!=eb;++ib) {
         BB* bb = *ib;
@@ -649,17 +692,7 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
     BB& bb = *(bbi->second);
 
     //Find loop with Smallest size which contains BB
-    LoopInfo* loop_for_bb=NULL;
-    LoopList::iterator il,el;
-    for(il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
-      LoopInfo* li = il->second;
-      if(li->inLoop(&bb)) {
-        if(loop_for_bb==NULL || li->loopSize() < loop_for_bb->loopSize()) {
-          loop_for_bb=li;
-        }
-      }
-    }
-
+    LoopInfo* loop_for_bb=innermostLoopFor(&bb);
 
     out << "bb" << bb.head().first << "x" << bb.head().second << " [" 
    

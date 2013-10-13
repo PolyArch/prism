@@ -12,7 +12,7 @@
 //#include "functioninfo.hh"
 //#include "loopinfo.hh"
 #include "mutable_queue.hh"
-
+#include "ccores_inst.hh"
 
 class cp_ccores : public ArgumentHandler,
                 public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
@@ -61,14 +61,16 @@ public:
     }
 
   }
-
+#if 0
   class CTarget {
+  public:
     double computeValue();
-    std::set<LoopInfo*> lichildren;
-    std::set<FunctionInfo*> fichildren;
+    std::map<LoopInfo*,int> lichildren;
+    std::map<FunctionInfo*,int> fichildren;
   };
 
   class CTargetFunc {
+  public:
     FunctionInfo* fi;
     double computeValue() {
       return 0; 
@@ -76,34 +78,148 @@ public:
   };
 
   class CTargetLoop {
+  public:
     LoopInfo* li;
     double computeValue() {
          return 0;
     }
-
   };
+#endif
 
-
-
-  std::map<LoopInfo*,bool> liAccel;
-  std::map<FunctionInfo*,bool> fiAccel;
+  int totalOpsUsed=0;
+  std::set<LoopInfo*> _li_ccores;
+  std::set<FunctionInfo*> _fi_ccores;
 
   virtual void setDefaultsFromProf() {
     CP_DG_Builder::setDefaultsFromProf();
 
-    //set up the subgraphs
-    std::multimap<uint64_t,LoopInfo*> loops;
-    PathProf::FuncMap::iterator i,e;
-    for(i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
-      FunctionInfo& fi = *i->second;
-      FunctionInfo::LoopList::iterator li,le;
-      for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
-        //LoopInfo* loopInfo = li->second;
-        //loops.insert(std::make_pair(loopInfo->numInsts(),loopInfo));
+    mutable_priority_queue<float, LoopInfo*> PQL;
+    mutable_priority_queue<float, FunctionInfo*> PQF;
+    //std::priority_queue<
+
+    for(auto i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
+      FunctionInfo* fi = i->second;
+      for(auto i=fi->li_begin(),e=fi->li_end();i!=e;++i) {
+        LoopInfo* li = i->second;
+        if(!li->cantFullyInline()) {
+          float inlineValue=inline_value(li); 
+          std::cout << "->" << li->nice_name() << " --- " << inlineValue << "\n";
+          PQL.push(li,inlineValue);
+        } else {
+          //std::cout << "can't inline " << li->nice_name() << "\n";
+        }
+
+      }
+      if(!fi->cantFullyInline()) {
+        float inlineValue = inline_value(fi);
+        std::cout << "->" << fi->nice_name() << " === " << inlineValue << "\n";
+        PQF.push(fi,inlineValue);
+      } else {
+        //std::cout << "can't inline " << fi->nice_name() << "\n";
       }
     } 
+
+  ///  std::set<FunctionInfo*> funcsTouched;
+//    std::set<LoopInfo*> loopsTouched;
+
+    //get some blocks!
+    int total;
+    while( (total=totalInstsUsed()) < (int)_ccores_max_ops) {
+      float func_queue_v=0, loop_queue_v=0;
+      
+      if(PQF.size()) {
+        func_queue_v = PQF.begin()->first;
+      }
+      if(PQL.size()) {
+        loop_queue_v = PQL.begin()->first;
+      }
+
+      //if both queues are empty, stop trying to add stuff
+      if(func_queue_v == 0 && loop_queue_v == 0) {
+        break;
+      }
+
+      if(loop_queue_v > func_queue_v) { //add a loop
+        
+        LoopInfo* li=PQL.begin()->second;
+          float inlineValue=PQL.begin()->first; 
+          std::cout << "pick: " << li->func()->nice_name() << "_" << li->id()
+                    << " === " << inlineValue << "\n";
+
+        PQL.erase(li);
+        if(total + li->inlinedStaticInsts() < (int)_ccores_max_ops) {
+          _li_ccores.insert(li);
+        }
+        //get list of all loops and all functions inlined, and remove them
+        //li->getInlinedFuncs(funcsTouched,loopsTouched);
+
+      } else { //add a func
+        FunctionInfo* fi=PQF.begin()->second;
+           float inlineValue = PQF.begin()->first;
+           std::cout << "pick: " << fi->nice_name() << " === " << inlineValue << "\n";
+
+        PQF.erase(fi);
+        if(total + fi->inlinedStaticInsts() < (int)_ccores_max_ops) {
+          _fi_ccores.insert(fi);
+        }
+        //get list of all loops and all functions inlined, and remove them
+
+      }
+    }
   }
- 
+
+
+  int totalInstsUsed() {
+    //first check 
+    int totalUsed=0;
+    uint64_t totalDynamicInsts=0;
+
+    std::cout << "Funcs: ";
+    for(auto i=_fi_ccores.begin(),e=_fi_ccores.end();i!=e;) {
+      FunctionInfo* fi = *i;
+      bool redundant = fi->calledOnlyFrom(_fi_ccores,_li_ccores);
+      if(redundant) {
+        _fi_ccores.erase(i++);
+
+      } else {
+        totalUsed+=fi->inlinedStaticInsts();
+        totalDynamicInsts+=fi->totalDynamicInlinedInsts();
+        std::cout << fi->nice_name() 
+                  << "(" << fi->inlinedStaticInsts()
+                  << "," << fi->totalDynamicInlinedInsts() << ") ";
+        ++i;
+      }
+    }
+    std::cout << "\nLoops: ";
+    for(auto i=_li_ccores.begin(),e=_li_ccores.end();i!=e;) {
+      LoopInfo* li = *i;
+      bool redundant = li->calledOnlyFrom(_fi_ccores,_li_ccores);
+      if(redundant) {
+        _li_ccores.erase(i++);
+      } else {
+        totalUsed+=li->inlinedStaticInsts();
+        totalDynamicInsts+=li->totalDynamicInlinedInsts();
+        std::cout << li->nice_name()
+                  << "(" << li->inlinedStaticInsts()
+                  << "," << li->totalDynamicInlinedInsts() << ") ";
+        ++i;
+      }
+    }
+    std::cout<< "\n";
+    std::cout << "--- total used = " << totalUsed 
+               << ", total insts" << totalDynamicInsts << "---\n";
+    return totalUsed;
+  }
+
+  float inline_value(LoopInfo* li) {
+    return (double)li->totalDynamicInlinedInsts()/
+           ((double)li->inlinedStaticInsts());
+  }
+
+  float inline_value(FunctionInfo* fi) {
+    return (double)fi->totalDynamicInlinedInsts()/
+           ((double)fi->inlinedStaticInsts());
+  }
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (!getTraceOutputs())
@@ -122,24 +238,89 @@ public:
     }
   }
 
-  bool prevCall = false;
-  bool prevRet = false;
-  bool inCCore = false;
+
+  bool first_op = true;
+
+  LoopInfo* _li_ccore=NULL;
+  FunctionInfo* _fi_ccore=NULL;
+
+  bool inCCore() {
+    return _li_ccore || _fi_ccore;
+  }
+
+  FunctionInfo* _prevFunc=NULL;
+  //FunctionInfo* _prevBB=NULL;
 
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
-
-    bool transitioned=false;
-
-    if(!inCCore) {
-      if((prevCall) && !op->func()->hasFuncCalls()) {
-        inCCore=true;
-        transitioned=true;
+    
+    if(first_op) {
+      first_op=false;
+      auto p = Prof::get().findEntry(op,_fi_ccores,_li_ccores);
+      _li_ccore=p.first;
+      _fi_ccore=p.second;
+      //if(p.first==NULL && p.second==NULL) {
+      //}
+      if(_fi_ccore) {
+        _prevFunc=op->func();
       }
-
-      prevCall = op->isCall();
     }
 
-    if(inCCore) {
+    assert(!(_li_ccore && _fi_ccore));
+
+    bool transitioned=false;
+    if(!inCCore()) {
+      //check if this op entered a function ccore
+      FunctionInfo* fi = op->func();
+      if(_prevFunc!=fi && _fi_ccores.count(fi)) {
+        _fi_ccore=fi;
+        transitioned=true;
+      } else if(op->bb_pos()==0) {
+        //check if this op entered a loop ccore
+        LoopInfo* li = fi->innermostLoopFor(op->bb());
+        if(li && _li_ccores.count(li)) {
+          _li_ccore=li;
+          transitioned=true;
+        }
+      }
+    } else {
+      //check if we should exit the ccore
+
+       //loop should have first dibs on catching
+      if(_li_ccore) {  
+        if(op->bb_pos()==0) {
+          FunctionInfo* fi = op->func();
+          LoopInfo* li = fi->innermostLoopFor(op->bb());
+
+          //difficult to do this test,        
+          if(li && li->isParentOf(_li_ccore)) {
+            transitioned=true; //broke because returned into next loop
+          } else if (fi->callsFunc(_li_ccore->func())) {
+            transitioned=true; //broke because of return from loop
+          } else if (fi==_li_ccore->func() && !_li_ccore->inLoop(op->bb())) {
+            transitioned=true; //we exited the loop into the current func
+            //or we predicted the wrong loop, w/e
+          }
+        }
+      } else {
+        assert(_fi_ccore);
+        FunctionInfo* fi = op->func();
+        if(fi==_fi_ccore && op->isReturn()) {
+          transitioned=true;
+        }
+          /*
+          if(li->callsFunc(_fi_ccore)) {     
+            transition=true;
+          } else if (fi->calls(_fi_ccore)) {  
+            transition=true;
+          }*/
+      }
+      if(transitioned) {
+        _li_ccore=NULL;
+        _fi_ccore=NULL;
+      } 
+    }
+
+    if(inCCore()) {
       CCoresInst* cc_inst = new CCoresInst(img,index);
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
       getCPDG()->addInst(sh_inst,index);
@@ -161,17 +342,15 @@ public:
       }
       addCCoreDeps(*cc_inst,img);
 
-      prevRet = op->isReturn();
+/*      prevRet = op->isReturn();
       if(prevRet) {
         inCCore=false;
-      }
+      }*/
     } else {
-
-
       Inst_t* inst = new Inst_t(img,index);
       std::shared_ptr<Inst_t> sh_inst(inst);
       getCPDG()->addInst(sh_inst,index);
-      if(prevRet) {
+      if(transitioned) {
         getCPDG()->insert_edge(*cur_bb_end,
                                *inst, Inst_t::Fetch, 2, E_CXFR);
       }
@@ -228,7 +407,9 @@ private:
     //when when bb-runahead is on, or num-mem is >1, then we should enforce this
     //of course, this means that CCORES would need dependence resolution hardware
 
-    //memory dependence
+      //p[op]=this;                                                 |      BB* bb = i->second;                                                     |    op->setIsCtrl(img._isctrl);
+      // 
+      //memoy dependence
      //memory dependence
     if (inst._mem_prod > 0) {
       Inst_t& prev_node = static_cast<Inst_t&>( 

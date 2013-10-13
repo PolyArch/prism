@@ -759,6 +759,87 @@ void LoopInfo::printSubgraphDot(std::ostream& out) {
   }
   out << "}\n";
 }
+
+bool LoopInfo::calledOnlyFrom(std::set<FunctionInfo*>& fiSet,
+                              std::set<LoopInfo*>& liSet, 
+                              bool first) {
+  //if we made it to a recursive function, don't keep going,
+  //or we might go forever. just return that it can't be eliminated
+  if(cantFullyInline()) {
+    return false;
+  }
+
+  //if this loop is contained, then we're done
+  if(!first && liSet.count(this)) {
+    return true;
+  }
+
+  //check the next outer loop
+  if(_immOuterLoop) {
+    return _immOuterLoop->calledOnlyFrom(fiSet,liSet,false);
+  } else { //try the function
+    return _funcInfo->calledOnlyFrom(fiSet,liSet,false);
+  }
+}
+
+
+uint64_t LoopInfo::totalDynamicInlinedInsts() {
+  if(cantFullyInline()) {
+    return 0; //zero means recursive
+  }
+  uint64_t total = numInsts();
+  for(auto i = _immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
+    LoopInfo* li = *i;
+    total += li->totalDynamicInlinedInsts();
+  }
+
+  for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+    FunctionInfo* fi = i->first.second;
+    float ratio = i->second / fi->calls();  //divide dynamic insts up by calls
+    total+=fi->totalDynamicInlinedInsts() * ratio;
+  }
+
+  return total;
+}
+
+
+int LoopInfo::inlinedOnlyStaticInsts() {
+  int static_insts=0;
+  for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+    FunctionInfo* fi = i->first.second;
+    static_insts+=fi->inlinedStaticInsts();
+  }
+  for(auto i=_immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
+    LoopInfo* li=*i;
+    static_insts+=li->inlinedOnlyStaticInsts();
+  }
+  return static_insts;
+}
+
+std::string LoopInfo::nice_name() {
+  stringstream ss;
+  ss <<  func()->nice_name() << "_" << id();
+  return ss.str();
+}
+
+bool LoopInfo::callsRecursiveFunc() {
+  // pair<pair<Op, FunctionInfo*>,int>
+  for(auto i=_calledToMap.begin(), e=_calledToMap.end();i!=e; ++i) {
+    FunctionInfo* fi = i->first.second;
+    if(fi->callsRecursiveFunc()) {
+      return true;
+    }
+  }
+  for(auto i=_immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
+    LoopInfo* li=*i;
+    if(li->callsRecursiveFunc()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Here -1 means "not set yet"
 // and -2 means "no not path index"
 int LoopInfo::getHotPathIndex() {

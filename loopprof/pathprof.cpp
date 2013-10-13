@@ -23,6 +23,13 @@ Op* StackFrame::processOp_phase3(uint32_t dId, CPC cpc) {
   return op;
 }
 
+Op* StackFrame::getOp(CPC cpc) {
+  if(_prevBB) {
+    return _prevBB->getOp(cpc);
+  } else {
+    return NULL;
+  }
+}
 
 
 //Process op, determine if it is a bb or not
@@ -381,25 +388,42 @@ void PathProf::checkRecursion() {
    ++iter; //skip this guy before starting search
 
    StackFrame& second = *iter;
-   if(second.isRecursing()) {
-     top.setRecursing(true);
-     if(top.funcInfo() == second.funcInfo()) {
-       top.setDirectRecursing(true);
-     } 
-     return;
+
+   //if the same, direct recursing
+   if(top.funcInfo() == second.funcInfo()) {
+     top.setDirectRecursing(true);
    }
 
+   //the previousis recursing, so am i
+   if(second.isRecursing()) {
+     top.setRecursing(true);
+   }
+
+
+   bool found=false;
    for(auto end_iter = _callStack.rend();iter!=end_iter;++iter) {
      StackFrame& next = *iter;
-     assert(!next.isRecursing());
      if(next.funcInfo() == top.funcInfo()) {
         top.setRecursing(true);
-        return;
+        found=true;
+        break;
+     }
+   }
+
+   if(found) {
+     //std::cout << "marking recursion at \"" << iter->funcInfo()->nice_name() << "\"\n";
+     auto fwd_iter = (++iter).base();
+     for(auto end_iter = _callStack.end(); fwd_iter!=end_iter;++fwd_iter) {
+     //std::cout << " --> " << fwd_iter->funcInfo()->nice_name() << "\n";
+
+       StackFrame& next = *fwd_iter;
+       next.funcInfo()->setCanRecurse(true);
      }
    }
 
    return;
 }
+
 
 
 bool PathProf::adjustStack(CPC newCPC, bool isCall, bool isRet ) {
@@ -430,12 +454,27 @@ void PathProf::processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet)
   }
   adjustStack(newCPC,isCall,isRet);
 
+  /* //print the stack 
+  if(isCall || isRet) {
+    for(auto i = _callStack.begin(), e= _callStack.end();i!=e;++i) {
+      FunctionInfo* fi = i->funcInfo();
+      cout << fi->nice_name() << ",";
+    }
+    cout << "\n";
+  }*/
+
+
   if(isCall) {
     _callStack.back().funcInfo()->got_called();
     if(call_fi) {
       _callStack.back().funcInfo()->calledBy(call_fi);
     }
+  } else if(isRet) {
+    if(call_fi) {
+      call_fi->calledBy(_callStack.back().funcInfo());
+    }
   }
+
   _prevHead=newCPC;
 }
 
@@ -458,7 +497,13 @@ void PathProf::runAnalysis() {
         }
       }
     }
-  } 
+  }
+  for(i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
+    FunctionInfo& fi = *i->second;
+    if(fi.nBBs() != 0) {
+      fi.propogateCallsRecursiveFunc(false);
+    }
+  }
 }
 
 void PathProf::runAnalysis2(bool no_gams, bool gams_details) {
@@ -469,6 +514,10 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details) {
   for(i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
     FunctionInfo::LoopList::iterator li,le;
+
+    // loop calls recursive func an
+    //fi->figureOutIfLoopsCallRecursiveFunctions();
+
     for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
       LoopInfo* loopInfo = li->second;
       loops.insert(std::make_pair(loopInfo->numInsts(),loopInfo));
@@ -558,6 +607,15 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details) {
 
 
 void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet, CP_NodeDiskImage& img) {
+
+  FunctionInfo* call_fi = NULL;
+  Op* call_op = NULL;
+
+  if(isCall && _callStack.size()>0) {
+    call_op = _callStack.back().getOp(prevCPC);
+    call_fi = _callStack.back().funcInfo();
+  }
+
   adjustStack(newCPC,isCall,isRet);
   /*if(isChanged) {
     //cout << "WOOO!\n";
@@ -570,7 +628,11 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     return;
   }
   _op_buf[_dId%MAX_OPS]=op;
-  
+ 
+  if(isCall && call_fi && call_op) {
+    sf.funcInfo()->calledByOp(call_fi,call_op);
+  }
+ 
 
   //check inst/execution statistics
   sf.funcInfo()->incInsts(sf.isLooping(),

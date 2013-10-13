@@ -40,7 +40,6 @@ template<class Archive>
   uint32_t id() {return _id;}
 };
 
-class FunctionInfo;
 class LoopInfo {
 public:
   typedef std::vector<BB*> BBvec;
@@ -62,6 +61,9 @@ public:
   typedef std::vector<Subgraph*> SubgraphVec;
 
   typedef std::set<Op*> OpSet;
+
+  typedef std::map<std::pair<Op*,FunctionInfo*>,int> CallToMap;   
+  typedef std::set<FunctionInfo*> CallToSet;   
 
 static uint32_t _idcounter;
 
@@ -95,7 +97,7 @@ private:
   OpInt  _opStride;
 
   LoopDepSet _loopDepSet; //set of dependent loop iterations, specified relatively
-  std::set<FunctionInfo*> _funcsCalled; //functions called, not yet used
+  //std::set<FunctionInfo*> _funcsCalled; //functions called, not yet used
   char _depth=-1;
 
   //Stuff for hot-path and beret
@@ -103,6 +105,10 @@ private:
   int _hotPathIndex=-1;
   SubgraphSet _subgraphSet;
   SubgraphVec _subgraphVec;
+
+  //which op did the call, how many times
+  CallToMap _calledToMap;
+  CallToSet _calledTo;
 
 friend class boost::serialization::access;
 template<class Archive>
@@ -133,6 +139,7 @@ template<class Archive>
     ar & _hotPathIndex;
     ar & _subgraphSet;
     ar & _subgraphVec;
+    ar & _calledToMap;
   }
 
 
@@ -170,6 +177,7 @@ public:
     _loopLatches.insert(latch);
   }
 
+  std::string nice_name();
 
   void setFuncInfo(FunctionInfo* f) {_funcInfo=f;}
   bool hasSubgraphs() {
@@ -220,6 +228,24 @@ public:
 
   void printSubgraphDot(std::ostream& out);
 
+  void calledTo(Op* op, FunctionInfo* fi) {
+    _calledToMap[std::make_pair(op,fi)]++;
+    _calledTo.insert(fi);
+  }
+
+
+  // does this loop call any recursive function?
+  bool cant_inline_first_time=true;
+  bool cant_inline_saved_answer=false;
+  bool cantFullyInline(bool redo=false) {
+    if(cant_inline_first_time || redo) {
+      cant_inline_first_time=false;
+      cant_inline_saved_answer = callsRecursiveFunc();
+    }
+    return cant_inline_saved_answer;
+  }
+  bool callsRecursiveFunc(); 
+
   int getHotPathIndex();
   BBvec& getHotPath();
   float getLoopBackRatio(int i){
@@ -235,18 +261,23 @@ public:
     return sumInsts;
   }
 
+  bool isParentOf(LoopInfo* li) {
+    return _immInnerLoops.count(li);
+  }
+
+  bool callsFunc(FunctionInfo* fi) {
+    return _calledTo.count(fi);
+  }
+
   int dynamicInstsOnPath(int i) {
     return instsOnPath(i) * _iterCount[i];
   }
 
-  int instsInAllInnerLoops() {
-    uint64_t total = numInsts();
-    for(auto i = _immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
-      LoopInfo* li = *i;
-      total += li->instsInAllInnerLoops();
-    }
-    return total;
-  }
+  bool calledOnlyFrom(std::set<FunctionInfo*>& fiSet,
+                      std::set<LoopInfo*>& liSet,
+                      bool first=true);
+
+  uint64_t totalDynamicInlinedInsts();
 
   void printLoopBody(std::ostream& out) {
       out << loop_head()->rpoNum() << ": (";
@@ -255,7 +286,6 @@ public:
       }
       out << ")\n";
   }
-
 
   int numPaths() { return _iterCount.size(); } 
   BBvec& getPath(int path_index) { return _pathMap[path_index]; } 
@@ -300,6 +330,16 @@ public:
     }
     assert(static_insts>0);
     return static_insts;
+  }
+
+  int inlinedOnlyStaticInsts();
+
+  //the whole thing, with inlining
+  int inlinedStaticInsts() {
+    if(cantFullyInline()) {
+      return -1;
+    }
+    return staticInsts() + inlinedOnlyStaticInsts();
   }
 
 
