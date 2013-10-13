@@ -7,12 +7,13 @@
 #include "cp_registry.hh"
 #include <memory>
 
-#include "cp_ccores_all.hh"
+//#include "cp_ccores_all.hh"
 #include "pathprof.hh"
 //#include "functioninfo.hh"
 //#include "loopinfo.hh"
 #include "mutable_queue.hh"
 #include "ccores_inst.hh"
+
 
 class cp_ccores : public ArgumentHandler,
                 public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
@@ -32,6 +33,15 @@ public:
     return &cpdg;
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
+
+  uint64_t _curCCoresStartCycle=0, _curCCoresStartInst=0;
+  uint64_t _totalCCoresCycles=0, _totalCCoresInsts=0;
+
+  virtual void accelSpecificStats(std::ostream& out) {
+    out << " (ccores-only " << _totalCCoresCycles
+        << " ccores-insts " << _totalCCoresInsts
+       << ")";
+  }
 
   unsigned _ccores_num_mem=1, _ccores_bb_runahead=1, _ccores_max_ops=1000;
   void handle_argument(const char *name, const char *optarg) {
@@ -251,6 +261,7 @@ public:
   FunctionInfo* _prevFunc=NULL;
   //FunctionInfo* _prevBB=NULL;
 
+  uint64_t _startCCoresCycle=0;
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
     
     if(first_op) {
@@ -325,6 +336,8 @@ public:
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
       getCPDG()->addInst(sh_inst,index);
 
+      _totalCCoresInsts++;
+
       if(transitioned) {
         Inst_t* prevInst = getCPDG()->peekPipe(-1);
         assert(prevInst);
@@ -332,6 +345,7 @@ public:
         cur_bb_end.reset(event_ptr);
         getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
                                *cur_bb_end, 8, E_CXFR);
+         _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
       }
   
       if(endOfBB(op,img)) {
@@ -340,7 +354,7 @@ public:
         T* event_ptr = new T();
         cur_bb_end.reset(event_ptr);
       }
-      addCCoreDeps(*cc_inst,img);
+      addCCoreDeps(sh_inst,img);
 
 /*      prevRet = op->isReturn();
       if(prevRet) {
@@ -352,7 +366,10 @@ public:
       getCPDG()->addInst(sh_inst,index);
       if(transitioned) {
         getCPDG()->insert_edge(*cur_bb_end,
-                               *inst, Inst_t::Fetch, 2, E_CXFR);
+                               *inst, Inst_t::Fetch, 8, E_CXFR);
+
+        uint64_t endCCoresCycle=cur_bb_end->cycle();
+        _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
       }
       addDeps(sh_inst);
       pushPipe(sh_inst);
@@ -366,10 +383,25 @@ private:
   std::shared_ptr<T> prev_bb_end, cur_bb_end;
 
 
-  virtual void addCCoreDeps(CCoresInst& inst,const CP_NodeDiskImage &img) { 
-    setBBReadyCycle_cc(inst,img);
+  unsigned numMem=0;
+  bool endOfBB(Op* op, const CP_NodeDiskImage& img) {
+    if(op->isMem()) {
+      numMem+=1;
+    } 
+    if(img._serialBefore || img._serialAfter || 
+       op->isBBHead() || numMem==_ccores_num_mem) {
+      numMem=0;
+      return true;
+    }
+    return false;
+  }
+
+
+  virtual void addCCoreDeps(std::shared_ptr<CCoresInst>& inst,
+                            const CP_NodeDiskImage &img) { 
+    setBBReadyCycle_cc(*inst,img);
     setExecuteCycle_cc(inst,img);
-    setCompleteCycle_cc(inst,img);
+    setCompleteCycle_cc(*inst,img);
   }
 
   //This node when current ccores BB is active
@@ -387,20 +419,20 @@ private:
     }
   }
 
-  //this node when current BB is about to execute 
+  //"Execute" represents when current BB is about to execute 
   //(no need for ready, b/c it has dedicated resources)
-  virtual void setExecuteCycle_cc(CCoresInst &inst, const CP_NodeDiskImage &img) {
-    getCPDG()->insert_edge(inst, CCoresInst::BBReady,
-                           inst, CCoresInst::Execute, 0, true);
+  virtual void setExecuteCycle_cc(std::shared_ptr<CCoresInst>& inst, const CP_NodeDiskImage &img) {
+    getCPDG()->insert_edge(*inst, CCoresInst::BBReady,
+                           *inst, CCoresInst::Execute, 0, true);
 
     for (int i = 0; i < 7; ++i) {
-      unsigned prod = inst._prod[i];
-      if (prod <= 0 || prod >= inst.index()) {
+      unsigned prod = inst->_prod[i];
+      if (prod <= 0 || prod >= inst->index()) {
         continue;
       }
-      dg_inst_base<T,E>& dep_inst = getCPDG()->queryNodes(inst.index()-prod);
+      dg_inst_base<T,E>& dep_inst = getCPDG()->queryNodes(inst->index()-prod);
       getCPDG()->insert_edge(dep_inst, dep_inst.eventComplete(),
-                             inst, CCoresInst::Execute, 0, true);
+                             *inst, CCoresInst::Execute, 0, true);
     }
 
     //Memory dependence enforced by BB ordering, in the restricted case
@@ -411,29 +443,39 @@ private:
       // 
       //memoy dependence
      //memory dependence
-    if (inst._mem_prod > 0) {
+    if (inst->_mem_prod > 0) {
       Inst_t& prev_node = static_cast<Inst_t&>( 
-                          getCPDG()->queryNodes(inst.index()-inst._mem_prod));
+                          getCPDG()->queryNodes(inst->index()-inst->_mem_prod));
 
-      if (prev_node._isstore && inst._isload) {
+      if (prev_node._isstore && inst->_isload) {
         //data dependence
         getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  inst, CCoresInst::Execute, 0, true);
-      } else if (prev_node._isstore && inst._isstore) {
+                                  *inst, CCoresInst::Execute, 0, true);
+      } else if (prev_node._isstore && inst->_isstore) {
         //anti dependence (output-dep)
         getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  inst, CCoresInst::Complete, 0, true);
-      } else if (prev_node._isload && inst._isstore) {
+                                  *inst, CCoresInst::Execute, 0, true);
+      } else if (prev_node._isload && inst->_isstore) {
         //anti dependence (load-store)
         getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  inst, CCoresInst::Complete, 0, true);
+                                  *inst, CCoresInst::Execute, 0, true);
       }
     }
+
+    //check to make sure that L1 cache bandwidth is satisfied
+    checkNumMSHRs(inst);
   }
 
+
+
+  
+
   virtual void setCompleteCycle_cc(CCoresInst& inst, const CP_NodeDiskImage &img) {
+    int lat=epLat(inst._ex_lat,inst._opclass,inst._isload,
+                  inst._isstore,inst._cache_prod,inst._true_cache_prod);
+
     getCPDG()->insert_edge(inst, CCoresInst::Execute,
-                           inst, CCoresInst::Complete, inst._ex_lat);
+                           inst, CCoresInst::Complete, lat);
 
     if(cur_bb_end) {
       inst.endBB = cur_bb_end; // have instruction keep
@@ -443,16 +485,64 @@ private:
 
   }
 
-
-
   uint64_t numCycles() {
     getCPDG()->finish(maxIndex);
     return getCPDG()->getMaxCycles();
   }
 
+  virtual void checkNumMSHRs(std::shared_ptr<CCoresInst>& n,uint64_t minT=0) {
+    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+                  n->_cache_prod,n->_true_cache_prod);
 
+    int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+                  mlat,reqDelayT,respDelayT,mshrT)) {
+      return;
+    } 
+
+    int rechecks=0;
+    uint64_t extraLat=0;
+
+    uint64_t access_time=reqDelayT + n->cycleOfStage(CCoresInst::Complete);
+
+    if (minT > access_time) {
+      minT=access_time;
+    } 
+
+    if(n->_isload) {
+      BaseInst_t* min_node =
+           addMSHRResource(access_time, 
+                           mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
+      if(min_node) {
+          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+                         *n, CCoresInst::Execute, mshrT+respDelayT, E_MSHR);
+      }
+    } else {
+      BaseInst_t* min_node =
+           addMSHRResource(access_time, 
+                           mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
+      if(min_node) {
+          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+                         *n, CCoresInst::Execute, mshrT+respDelayT, E_MSHR);
+        }
+    }
+  }
 
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

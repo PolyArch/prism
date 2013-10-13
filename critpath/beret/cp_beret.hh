@@ -47,6 +47,7 @@ public:
   uint16_t _prod[7]={0,0,0,0,0,0,0};
   uint16_t _mem_prod=0;
   uint16_t _cache_prod=0;
+  uint64_t _true_cache_prod=false;
   uint16_t _ex_lat=0;
   bool _serialBefore=0;
   bool _serialAfter=0;
@@ -57,9 +58,6 @@ public:
   uint64_t _eff_addr;
   bool _floating=false;
   bool _iscall=false;
-
-
-
   E* ex_edge;
 
   BeretInst(const CP_NodeDiskImage &img, uint64_t index):
@@ -73,6 +71,7 @@ public:
     std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
     _mem_prod=img._mem_prod;
     _cache_prod=img._cache_prod;
+    _true_cache_prod=img._true_cache_prod;
     _ex_lat=img._cc-img._ec;
     _serialBefore=img._serialBefore;
     _serialAfter=img._serialAfter;
@@ -189,23 +188,37 @@ public:
   std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
   std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
 
-  unsigned _beret_max_size=6;
-  unsigned _beret_max_mem=2;
+  unsigned _beret_max_seb=6,_beret_max_mem=2,_beret_max_ops=80;
 
 
   void handle_argument(const char *name, const char *optarg) {
-    if (strcmp(name, "beret-max-size") == 0) {
+    if (strcmp(name, "beret-max-seb") == 0) {
       unsigned temp = atoi(optarg);
       if (temp != 0) {
-        _beret_max_size = temp;
+        _beret_max_seb = temp;
       }
+    } else {
+        std::cerr << "ERROR: \"" << name << "\" arg value\"" << optarg << "\" is invalid\n";
     }
+
+
     if (strcmp(name, "beret-max-mem") == 0) {
       unsigned temp = atoi(optarg);
       if (temp != 0) {
         _beret_max_mem = temp;
+      } else {
+        std::cerr << "ERROR: \"" << name << "\" arg value\"" << optarg << "\" is invalid\n";
       }
     }
+    if (strcmp(name, "beret-max-ops") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_max_ops = temp;
+      } else {
+        std::cerr << "ERROR: beret-max-ops arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+
   }
 
   virtual void setDefaultsFromProf() {
@@ -248,25 +261,26 @@ public:
   
       if(loopInfo->isInnerLoop()
          && hpi != -2 //no hot path
-         && loopInfo->getLoopBackRatio(hpi) >= 0.5
-         && loopInfo->getTotalIters() >= 5
+         && loopInfo->getLoopBackRatio(hpi) >= 0.51
+         && loopInfo->getTotalIters() >= 2
+         && loopInfo->instsOnPath(hpi) <= (int)_beret_max_ops
          ) {
         std::stringstream part_gams_str;
         part_gams_str << "partition." << loopInfo->id() << ".gams";
   
         bool gams_details=false;
         bool no_gams=false;
-        std::cout << _beret_max_size << " " << _beret_max_mem << "\n";
+        std::cout << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
             li2ssmap[loopInfo],li2sgmap[loopInfo],
-            gams_details,no_gams,_beret_max_size,_beret_max_mem);
+            gams_details,no_gams,_beret_max_seb,_beret_max_mem);
         if(worked) {
           std::cerr << " -- Beretized\n";
         } else {
-          std::cerr << " -- NOT Beretized (Func Calls)\n";
+          std::cerr << " -- NOT Beretized (Probably had Func Calls)\n";
         }
       } else {
-        std::cerr << " -- NOT Beretized\n";
+        std::cerr << " -- NOT Beretized -- did not satisfy criteria\n";
       }
     }
     
@@ -289,8 +303,10 @@ public:
   
 
   virtual void accelSpecificStats(std::ostream& out) {
-    //out << "Beret Cycles = " << totalBeretCycles << "\n";
-    out << " (beret-only " << totalBeretCycles << ")";
+    //out << "Beret Cycles = " << _totalBeretCycles << "\n";
+    out << " (beret-only " << _totalBeretCycles 
+        << " beret-insts " << _totalBeretInsts
+       << ")";
   }
 
   /*
@@ -303,16 +319,16 @@ public:
   LoopInfo* li;
   Op* curLoopHead;
   std::vector<std::pair<CP_NodeDiskImage,uint64_t>> replay_queue;
-  unsigned whichBB;
-  uint64_t curBeretStartCycle;
-  uint64_t totalBeretCycles;
+  unsigned _whichBB;
+  uint64_t _curBeretStartCycle=0, _curBeretStartInst=0;
+  uint64_t _totalBeretCycles=0, _totalBeretInsts=0;
 
   void addLoopIteration(dg_inst_base<T,E>* inst, unsigned eventInd) {
     Subgraph* prev_sg=NULL;
     first_inst=NULL;
     binstMap.clear();
     replay_queue.clear();
-    whichBB=0;
+    _whichBB=0;
     //create instruction for each SEB
     
     assert(li2sgmap[li].size()>0);
@@ -392,6 +408,11 @@ public:
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
 	b_inst->reCalculate();
+        if(b_inst->_isload) {
+          //get the MSHR resource here!
+          checkNumMSHRs(b_inst); 
+        }
+	b_inst->reCalculate();  //TODO: check this! : 
 
         uint64_t cycle=b_inst->cycleOfStage(BeretInst::Complete);
         if(last_cycle < cycle) {
@@ -433,14 +454,15 @@ public:
 
             //This instruction is created to simulate transfering live inputs
             //like loop constants, initial values for induction vars, etc
-            inst->set_ex_lat(5);
+            inst->set_ex_lat(8);
             std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
             addDeps(sh_inst);
             pushPipe(sh_inst);
             inserted(sh_inst);
             //inserted(inst,img);
 
-            curBeretStartCycle=inst->cycleOfStage(inst->eventComplete());
+            _curBeretStartCycle=inst->cycleOfStage(inst->eventComplete());
+            _curBeretStartInst=index;
 	    addLoopIteration(inst,Inst_t::Commit);
           }
         }
@@ -450,15 +472,16 @@ public:
           reCalcBeretLoop(true); //get correct beret timing
 	  addLoopIteration(last_inst,BeretInst::Complete);
 	} else if(op->bb_pos()==0) {
-          if(li->getHotPath()[++whichBB]!=op->bb()) {
+          if(li->getHotPath()[++_whichBB]!=op->bb()) {
             beret_state = CPU;  //WRONG PATH - SWITCH TO CPU
             std::shared_ptr<BeretInst> binst = 
-                           binstMap[li->getHotPath()[whichBB-1]->firstOp() ];
+                           binstMap[li->getHotPath()[_whichBB-1]->firstOp() ];
 
             reCalcBeretLoop(false); //get correct beret wrong-path timing
             //get timing for beret loop
             uint64_t endBeretCyc=binst->cycleOfStage(binst->eventComplete());
-            totalBeretCycles+=endBeretCyc-curBeretStartCycle;
+            _totalBeretCycles+=endBeretCyc-_curBeretStartCycle;
+            _totalBeretInsts+=index-_curBeretStartInst;
 
 	    //Replay BERET on CPU
 	    for(unsigned i=0; i < replay_queue.size();++i) {
@@ -508,11 +531,11 @@ public:
 	std::shared_ptr<BeretInst> sh_inst(b_inst);
 	getCPDG()->addInst(sh_inst,index);
 
-        if(b_inst->_isload) {
-          //get the MSHR resource here!
-          checkNumMSHRs(sh_inst); 
-        }
-	b_inst->updateLat(img._cc-img._ec);
+        //this sets the latency for a beret instruction
+        int lat=epLat(b_inst->_ex_lat,b_inst->_opclass,b_inst->_isload,
+               b_inst->_isstore,b_inst->_cache_prod,b_inst->_true_cache_prod);
+        b_inst->updateLat(lat);
+
 	replay_queue.push_back(std::make_pair(img,index));
         break;
       } default:
@@ -524,25 +547,15 @@ public:
 private:
 
   virtual void checkNumMSHRs(std::shared_ptr<BeretInst>& n, uint64_t minT=0) {
-    int mlat;
-    assert(n->_isload || n->_isstore);
-    if(n->_isload) {
-      mlat = n->_ex_lat;
-    } else {
-      mlat = n->_st_lat;
-    }
-    if(mlat <= Prof::get().dcache_hit_latency + 
-               Prof::get().dcache_response_latency+3) {
-      //We don't need an MSHR for non-missing loads/stores
+    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+                  n->_cache_prod,n->_true_cache_prod);
+
+    int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+                  mlat,reqDelayT,respDelayT,mshrT)) {
       return;
-    }
+    } 
 
-    int reqDelayT  = Prof::get().dcache_hit_latency; // # cycles delayed before acquiring the MSHR
-    int respDelayT = Prof::get().dcache_response_latency; // # cycles delayed after releasing the MSHR
-    int mshrT = mlat - reqDelayT - respDelayT;  // the actual time of using the MSHR
-
- 
-    assert(mshrT>0);
     int rechecks=0;
     uint64_t extraLat=0;
 
@@ -567,6 +580,7 @@ private:
       if(min_node) {
           getCPDG()->insert_edge(*min_node, min_node->memComplete(),
                          *n, BeretInst::Execute, mshrT+respDelayT, E_MSHR);
+          //TODO: Execute is the wrong stage here.... need to add a node here for writeback...
       }
     }
   }

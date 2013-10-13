@@ -1273,7 +1273,7 @@ protected:
     return 1;
   }
 
-  virtual unsigned getFUOpLatency(int opclass) {
+  static unsigned getFUOpLatency(int opclass) {
     switch(opclass) {
     case 0: //No_OpClass
       return 1;
@@ -1333,26 +1333,39 @@ protected:
     return n;
   }
 
-  //check MSHRs to see if they are full
-  virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
-    int mlat;
-    assert(n->_isload || n->_isstore);
-    if(n->_isload) {
-      mlat = n->_ex_lat;
+  virtual bool l1dTiming(bool isload, bool isstore, int ex_lat, int st_lat,
+                 int& mlat, int& reqDelayT, int& respDelayT, int& mshrT){
+    assert(isload || isstore);
+    if(isload) {
+      mlat = ex_lat;
     } else {
-      mlat = n->_st_lat;
+      mlat = st_lat;
     }
     if(mlat <= Prof::get().dcache_hit_latency + 
                Prof::get().dcache_response_latency+3) {
       //We don't need an MSHR for non-missing loads/stores
-      return;
+      return false;
     }
 
-    int reqDelayT  = Prof::get().dcache_hit_latency; // # cycles delayed before acquiring the MSHR
-    int respDelayT = Prof::get().dcache_response_latency; // # cycles delayed after releasing the MSHR
-    int mshrT = mlat - reqDelayT - respDelayT;  // the actual time of using the MSHR
- 
+    reqDelayT =Prof::get().dcache_hit_latency; // # cyc before MSHR
+    respDelayT=Prof::get().dcache_response_latency; // # cyc MSHR release
+    mshrT = mlat - reqDelayT - respDelayT;  // actual MSHR time
     assert(mshrT>0);
+    return true;
+  }
+
+
+  //check MSHRs to see if they are full
+  virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
+    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+                  n->_cache_prod,n->_true_cache_prod);
+
+    int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+                  mlat,reqDelayT,respDelayT,mshrT)) {
+      return;
+    } 
+
     int rechecks=0;
     uint64_t extraLat=0;
     if(!store) { //if load
@@ -1475,7 +1488,7 @@ protected:
     if(!depInst) {
       return n;
     }
-    if(depInst->isMem() && depInst->_ex_lat> 8) {
+    if(depInst->isMem() && depInst->_ex_lat > 8) {
       getCPDG()->insert_edge(*depInst, Inst_t::Complete,
                               n, Inst_t::Ready, -8,E_EPip);
     }
@@ -1483,26 +1496,34 @@ protected:
     return n;
   }
 
-  //==========COMPLTE ==============
-  //Complete After Execute
-  virtual Inst_t &checkEP(Inst_t &n) {
+  //logic to determine ep latency based on information in the trace
+  static int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
+                   bool cache_prod, bool true_cache_prod) {
 
-    //Ok, so memory instructions bear their memory latency here.  If we have a cache
+    //memory instructions bear their memory latency here.  If we have a cache
     //producer, that means we should be in the cache, so drop the latency
-    int lat=0;
-
-    if(n._isload) {
-      if(n._cache_prod && n._true_cache_prod) {
-        lat = Prof::get().dcache_hit_latency + Prof::get().dcache_response_latency;
+    int lat;
+    if(isload) {
+      if(cache_prod && true_cache_prod) {
+        lat = Prof::get().dcache_hit_latency + 
+              Prof::get().dcache_response_latency;
       } else {
-        lat = n._ex_lat;
+        lat = ex_lat;
       }
     } else {
       //don't want to use this dynamic latency
       //lat = n._ex_lat;
-      lat = getFUOpLatency(n._opclass);
+      lat = getFUOpLatency(opclass);
     }
+    return lat;
+  }
 
+  //==========COMPLTE ==============
+  //Complete After Execute
+  virtual Inst_t &checkEP(Inst_t &n) {
+
+    int lat=epLat(n._ex_lat,n._opclass,n._isload,
+                  n._isstore,n._cache_prod,n._true_cache_prod);
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Complete, lat, E_EP);
     return n;

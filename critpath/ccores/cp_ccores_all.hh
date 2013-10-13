@@ -9,10 +9,6 @@
 #include "ccores_inst.hh"
 
 
-static bool endOfBB(Op* op, const CP_NodeDiskImage& img) {
-  return img._serialBefore || img._serialAfter || 
-      op->isBBHead()|| op->isMem();
-}
 
 
 class cp_ccores_all : public ArgumentHandler,
