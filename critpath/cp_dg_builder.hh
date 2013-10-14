@@ -70,6 +70,7 @@ public:
     SQUASH_WIDTH = i;
   }
 
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     Inst_t* inst = new Inst_t(img,index);
     std::shared_ptr<Inst_t> sh_inst(inst);
@@ -601,18 +602,16 @@ protected:
       } else {
         iw_writes++;
       }
+    }
 
-      //rename_fwrites+=inst._numFPDestRegs;
-      //rename_writes+=inst._numIntDestRegs;
-
-      if(inst._floating) {
-        rename_freads+=inst._numSrcRegs;
-        rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
-      } else {
-        rename_reads+=inst._numSrcRegs;
-        rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
-      }
-
+    //rename_fwrites+=inst._numFPDestRegs;
+    //rename_writes+=inst._numIntDestRegs;
+    if(inst._floating) {
+      rename_freads+=inst._numSrcRegs;
+      rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
+    } else {
+      rename_reads+=inst._numSrcRegs;
+      rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
     }
 
     //HANDLE ROB STUFF
@@ -641,6 +640,7 @@ protected:
     }
 
     prev_rob_head_at_dispatch=rob_head_at_dispatch;
+
 
     //HANDLE LSQ HEADS
     //Loads leave at complete
@@ -706,21 +706,25 @@ protected:
       checkEE(*inst); //issue in order
       checkInorderIssueWidth(*inst); //in order issue width
     } else {
+      //TODO: below two things should be merged
       checkIssueWidth(*inst);
       checkFuncUnits(*inst);
+    }
 
-      if(inst->_isload) {
-        //loads acquire MSHR at execute
-        checkNumMSHRs(inst,false);
-      }
+    if(inst->_isload) {
+      //loads acquire MSHR at execute
+      checkNumMSHRs(inst,false);
+    }
 
+    if(!_isInOrder) {
       //Non memory instructions can leave the IQ now!
       //Push onto the IQ by cycle that we leave IQ (execute cycle)
       if(!inst->isMem()) {
         InstQueue.insert(
-               std::make_pair(inst->cycleOfStage(Inst_t::Execute),inst.get()));
+          std::make_pair(inst->cycleOfStage(Inst_t::Execute),inst.get()));
       }
     }
+
     if(inst->_floating) {
       iw_freads+=2;
     } else {
@@ -742,13 +746,13 @@ protected:
         InstQueue.insert(
                std::make_pair(inst.cycleOfStage(Inst_t::Complete),&inst));
       }
-    } else {
-      //checkExecutePipeline
-    }
+    } /*else {
+      checkInorderComplete
+    }*/
 
     //Energy Events
     if(op && op->numUses()>0) {
-      if( inst._floating) {
+      if(inst._floating) {
         //regfile_fwrites++;
       } else {
         //regfile_writes++;
@@ -767,22 +771,26 @@ protected:
  
     getCPDG()->commitNode(inst.index());
 
-    //Energy
-    rob_writes+=2;
-    rob_reads++;
-
-    //Calculate extra rob_reads due to the pipeline checking extra instructions
-    //before it fills up the commit width
-    Inst_t* prevInst = getCPDG()->peekPipe(-1); 
-    Inst_t* widthInst = getCPDG()->peekPipe(-COMMIT_WIDTH); 
-    if(prevInst && widthInst) {
-      uint64_t widthCycle = widthInst->cycleOfStage(Inst_t::Commit);
-      uint64_t prevCycle = prevInst->cycleOfStage(Inst_t::Commit);
-      uint64_t curCycle = inst.cycleOfStage(Inst_t::Commit);
-      if(prevCycle!=curCycle && widthCycle + 1 != curCycle) {
-        rob_reads+=curCycle-prevCycle;
+    if(!_isInOrder) {
+      //Energy
+      rob_writes+=2;
+      rob_reads++;
+      //Calculate extra rob_reads due to the pipeline checking extra instructions
+      //before it fills up the commit width
+      Inst_t* prevInst = getCPDG()->peekPipe(-1); 
+      Inst_t* widthInst = getCPDG()->peekPipe(-COMMIT_WIDTH); 
+      if(prevInst && widthInst) {
+        uint64_t widthCycle = widthInst->cycleOfStage(Inst_t::Commit);
+        uint64_t prevCycle = prevInst->cycleOfStage(Inst_t::Commit);
+        uint64_t curCycle = inst.cycleOfStage(Inst_t::Commit);
+        if(prevCycle!=curCycle && widthCycle + 1 != curCycle) {
+          rob_reads+=curCycle-prevCycle;
+        }
       }
+
+
     }
+
 
     committed_insts++;
     committed_int_insts+=!inst._floating;
@@ -1451,8 +1459,8 @@ protected:
     if(!depInst) {
       return n;
     }
-    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
-                          n, Inst_t::Commit, 1,E_IBW);
+    getCPDG()->insert_edge(*depInst, Inst_t::Execute,
+                          n, Inst_t::Execute, 1,E_IBW);
     return n;
   }
 
@@ -1488,17 +1496,27 @@ protected:
     if(!depInst) {
       return n;
     }
-    if(depInst->isMem() && depInst->_ex_lat > 8) {
+  
+    int lat=epLat(n._ex_lat,n._opclass,n._isload,
+                  n._isstore,n._cache_prod,n._true_cache_prod,
+                  true,INORDER_EX_DEPTH);
+
+    getCPDG()->insert_edge(*depInst, Inst_t::Execute,
+                           n, Inst_t::Ready, lat-INORDER_EX_DEPTH,E_EPip);
+
+/*
+    if(depInst->isMem() && lat > 8) { //
       getCPDG()->insert_edge(*depInst, Inst_t::Complete,
-                              n, Inst_t::Ready, -8,E_EPip);
-    }
+                              n, Inst_t::Ready, 0,E_EPip);
+    }*/
 
     return n;
   }
 
   //logic to determine ep latency based on information in the trace
   static int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
-                   bool cache_prod, bool true_cache_prod) {
+                   bool cache_prod, bool true_cache_prod, 
+                   bool inorder_pipeline=false, int inorderExDepth=0) {
 
     //memory instructions bear their memory latency here.  If we have a cache
     //producer, that means we should be in the cache, so drop the latency
@@ -1515,15 +1533,19 @@ protected:
       //lat = n._ex_lat;
       lat = getFUOpLatency(opclass);
     }
+
+    if(inorder_pipeline && lat < inorderExDepth ) {
+      lat = inorderExDepth;
+    }
     return lat;
   }
 
   //==========COMPLTE ==============
   //Complete After Execute
   virtual Inst_t &checkEP(Inst_t &n) {
-
     int lat=epLat(n._ex_lat,n._opclass,n._isload,
-                  n._isstore,n._cache_prod,n._true_cache_prod);
+                  n._isstore,n._cache_prod,n._true_cache_prod,
+                  _isInOrder,INORDER_EX_DEPTH);
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Complete, lat, E_EP);
     return n;

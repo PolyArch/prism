@@ -37,6 +37,7 @@ protected:
   int SQ_SIZE = 32;
 
   int FETCH_TO_DISPATCH_STAGES = 4;
+  int INORDER_EX_DEPTH = 4; 
 
   //------- energy events -----------
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
