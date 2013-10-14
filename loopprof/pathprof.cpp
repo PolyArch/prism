@@ -37,6 +37,7 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
                                  uint64_t addr, uint8_t acc_size) {
   //get the bb for newCPC -- if this isn't a basic block head, return;
   BB* newBB = _funcInfo->getBB(cpc);
+  
 
   //new I'm not in a basic block, then just get out... this only happens
   //during initializiation
@@ -44,7 +45,12 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
     return NULL;
   }
 
+
   if(newBB!=NULL) {
+    //cout << "\nBB" << newBB->rpoNum();
+    //cout << "\nBB" << newBB->head().first << "." << newBB->head().second;
+
+
     processBB_phase2(dId, newBB);
 
     //Check if the CFG is consistent
@@ -632,7 +638,6 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   if(isCall && call_fi && call_op) {
     sf.funcInfo()->calledByOp(call_fi,call_op);
   }
- 
 
   //check inst/execution statistics
   sf.funcInfo()->incInsts(sf.isLooping(),
@@ -647,6 +652,10 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     op->setIsCall(img._iscall);
     op->setIsReturn(img._isreturn);
   }
+
+  //cout << "," << op->cpc().first << "." << op->cpc().second;
+  //cout << "," << op->id();
+
 
   op->executed(img._cc-img._ec);
 
