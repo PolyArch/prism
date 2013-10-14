@@ -472,7 +472,9 @@ private:
     }
 
     //check to make sure that L1 cache bandwidth is satisfied
-    checkNumMSHRs(inst);
+    if(inst->_isload || inst->_isstore) {
+      checkNumMSHRs(inst);
+    }
   }
 
 
