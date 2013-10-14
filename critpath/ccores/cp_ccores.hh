@@ -453,8 +453,7 @@ private:
       //memoy dependence
      //memory dependence
     if (inst->_mem_prod > 0) {
-      Inst_t& prev_node = static_cast<Inst_t&>( 
-                          getCPDG()->queryNodes(inst->index()-inst->_mem_prod));
+      BaseInst_t& prev_node = getCPDG()->queryNodes(inst->index()-inst->_mem_prod);
 
       if (prev_node._isstore && inst->_isload) {
         //data dependence

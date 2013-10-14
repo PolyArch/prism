@@ -117,7 +117,12 @@ class dg_inst_base {
 public:
   uint64_t _index;
   bool done = false;
+  uint16_t _opclass = 0;
+  bool _isload = false;
+  bool _isstore = false;
+
   virtual T &operator[](const unsigned i) =0;
+
   virtual ~dg_inst_base() {
     //std::cout << "del: " << _index << " " << this << "\n";
 /*
@@ -210,9 +215,9 @@ public:
     return Complete;
   }
   virtual unsigned memComplete() {
-    if(_isload) {
+    if(this->_isload) {
       return Complete;
-    } else if (_isstore) {
+    } else if (this->_isstore) {
       return Writeback;
     } else {
       assert(0 && "no mem access allowed");
@@ -223,9 +228,6 @@ public:
   }
 
   //Things from CP_Node image
-  uint16_t _opclass = 0;
-  bool _isload = false;
-  bool _isstore = false;
   bool _isctrl = false;
   bool _ctrl_miss = false;
   uint16_t _icache_lat = 0;
@@ -265,9 +267,9 @@ public:
 
   dg_inst(const CP_NodeDiskImage &img,uint64_t index):
     dg_inst_base<T,E>(index) {
-    _opclass=img._opclass;
-    _isload=img._isload;
-    _isstore=img._isstore;
+    this->_opclass=img._opclass;
+    this->_isload=img._isload;
+    this->_isstore=img._isstore;
     _isctrl=img._isctrl;
     _ctrl_miss=img._ctrl_miss;
     _icache_lat=img._icache_lat;
@@ -338,7 +340,7 @@ public:
     }
   }
   
-  bool isMem() {return _isload || _isstore;}
+  bool isMem() {return this->_isload || this->_isstore;}
 
 };
 

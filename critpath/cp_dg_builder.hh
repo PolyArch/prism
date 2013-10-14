@@ -1136,23 +1136,21 @@ protected:
     //memory dependence
     if (n._mem_prod > 0 && n._mem_prod < n.index()) {
       
-      BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
+      BaseInst_t& prev_node=getCPDG()->queryNodes(n.index()-n._mem_prod);
 
-      if(dep_inst.isPipelineInst()) {
-        Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
-        if (prev_node._isstore && n._isload) {
-          //data dependence
-          getCPDG()->insert_edge(prev_node.index(), Inst_t::Complete,
-                                    n, Inst_t::Ready, 0, E_MDep);
-        } else if (prev_node._isstore && n._isstore) {
-          //anti dependence (output-dep)
-          getCPDG()->insert_edge(prev_node.index(), Inst_t::Complete,
-                                    n, Inst_t::Complete, 0, E_MDep);
-        } else if (prev_node._isload && n._isstore) {
-          //anti dependence (load-store)
-          getCPDG()->insert_edge(prev_node.index(), Inst_t::Complete,
-                                    n, Inst_t::Complete, 0, E_MDep);
-        }
+      //Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
+      if (prev_node._isstore && n._isload) {
+        //data dependence
+        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
+                                  n, Inst_t::Ready, 0, E_MDep);
+      } else if (prev_node._isstore && n._isstore) {
+        //anti dependence (output-dep)
+        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
+                                  n, Inst_t::Complete, 0, E_MDep);
+      } else if (prev_node._isload && n._isstore) {
+        //anti dependence (load-store)
+        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
+                                  n, Inst_t::Complete, 0, E_MDep);
       }
     }
     return n;

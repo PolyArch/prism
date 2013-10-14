@@ -32,9 +32,6 @@ public:
   }
 
 
-  uint16_t _opclass=0;
-  bool _isload=0;
-  bool _isstore=0;
   bool _isctrl=0;
   bool _ctrl_miss=0;
   uint16_t _icache_lat=0;
@@ -94,6 +91,10 @@ public:
   virtual unsigned eventComplete() {
     return Complete;
   }
+  virtual unsigned memComplete() {
+    return Complete;
+  }
+
 
 };
 
