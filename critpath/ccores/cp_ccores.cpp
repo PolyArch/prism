@@ -15,15 +15,15 @@ static void init()
 {
   CPRegistry::get()->register_argument("ccores-num-mem", true, &OOO.cp_obj);
   CPRegistry::get()->register_argument("ccores-num-mem", true, &In.cp_obj);
-  //CPRegistry::get()->register_argument("ccores-num-mem", true, &All.cp_obj);
 
   CPRegistry::get()->register_argument("ccores-bb-runahead", true, &OOO.cp_obj);
   CPRegistry::get()->register_argument("ccores-bb-runahead", true, &In.cp_obj);
-  //CPRegistry::get()->register_argument("ccores-bb-runahead", true, &All.cp_obj);
   
   CPRegistry::get()->register_argument("ccores-max-ops", true, &OOO.cp_obj);
   CPRegistry::get()->register_argument("ccores-max-ops", true, &In.cp_obj);
-  //CPRegistry::get()->register_argument("ccores-bb-runahead", true, &All.cp_obj);
+
+  CPRegistry::get()->register_argument("ccores-iops", true, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("ccores-iops", true, &In.cp_obj);
 
 }
 
