@@ -196,12 +196,10 @@ public:
       unsigned temp = atoi(optarg);
       if (temp != 0) {
         _beret_max_seb = temp;
-      }
-    } else {
+      }  else {
         std::cerr << "ERROR: \"" << name << "\" arg value\"" << optarg << "\" is invalid\n";
+      }
     }
-
-
     if (strcmp(name, "beret-max-mem") == 0) {
       unsigned temp = atoi(optarg);
       if (temp != 0) {
@@ -215,7 +213,7 @@ public:
       if (temp != 0) {
         _beret_max_ops = temp;
       } else {
-        std::cerr << "ERROR: beret-max-ops arg\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
       }
     }
 
