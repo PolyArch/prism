@@ -43,7 +43,7 @@ public:
        << ")";
   }
 
-  unsigned _ccores_num_mem=1, _ccores_bb_runahead=1, _ccores_max_ops=1000;
+  unsigned _ccores_num_mem=1, _ccores_bb_runahead=1, _ccores_max_ops=1000,_ccores_iops=2;
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "ccores-num-mem") == 0) {
       unsigned temp = atoi(optarg);
@@ -69,6 +69,15 @@ public:
         std::cerr << "ERROR: ccores-max-ops arg\"" << optarg << "\" is invalid\n";
       }
     }
+    if (strcmp(name, "ccores-iops") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _ccores_iops = temp;
+      } else {
+        std::cerr << "ERROR: ccores-max-ops arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+
 
   }
 #if 0
@@ -344,7 +353,7 @@ public:
         T* event_ptr = new T();
         cur_bb_end.reset(event_ptr);
         getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
-                               *cur_bb_end, 8, E_CXFR);
+                               *cur_bb_end, 8/_ccores_iops, E_CXFR);
          _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
       }
   
@@ -366,7 +375,7 @@ public:
       getCPDG()->addInst(sh_inst,index);
       if(transitioned) {
         getCPDG()->insert_edge(*cur_bb_end,
-                               *inst, Inst_t::Fetch, 8, E_CXFR);
+                               *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
 
         uint64_t endCCoresCycle=cur_bb_end->cycle();
         _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
