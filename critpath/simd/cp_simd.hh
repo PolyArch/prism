@@ -132,8 +132,9 @@ namespace simd {
 
             if (DepOp->isLoad() && (*I)->isLoad())
               continue;
+
             // Same memory touched by two ops in the same loop...
-            if (li == DepOp->func()->getLoop(DepOp->bb())) {
+            if (li->inLoop(DepOp->bb())) {
               if (shouldPrint) {
                 printDisasm(*I);
                 (*I)->printEffAddrs();
@@ -309,7 +310,7 @@ namespace simd {
 
       bool insertSIMDInst = false;
       LoopInfo *li = getLoop(op);
-#define TRACE_INST
+
       if (CurLoop != li) {
         #ifdef TRACE_INST
         // We switched to a different loop, complete simd_loop

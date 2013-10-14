@@ -23,42 +23,6 @@ CPRegistry* CPRegistry::_registry = 0;
 
 using namespace std;
 
-#if 0
-int FETCH_WIDTH = 4;
-int D_WIDTH = 4;
-int ISSUE_WIDTH = 4;
-int FETCH_TO_DISPATCH_STAGES = 4;
-int WRITEBACK_WIDTH = 4;
-int COMMIT_WIDTH = 4;
-int SQUASH_WIDTH = 4;
-int IQ_WIDTH = 64;
-int ROB_SIZE = 192;
-int LQ_SIZE = 32;
-int SQ_SIZE = 32;
-
-int IN_ORDER_BR_MISS_PENALTY = (1 //squash width (rename+decode+fetch+dispatch)
-                       + 7 //restarting fetch
-                       );
-
-
-int BR_MISS_PENALTY = (1 //squash width (rename+decode+fetch+dispatch)
-                       + 4 //ROB squashing (16 instruction to squash)
-                       + 2 //restarting fetch
-                       );
-
-unsigned DySER_Size = 32;
-unsigned CCA_Size = 3;
-unsigned DySER_Concurrency = 8;
-int DySER_Loop  = 0;
-int CCA_Ctrl = 1;
-int DySER_LDOnly = 0;
-int TraceOutputs = 0;
-unsigned GPU_LD_Latency = 0;
-
-int HighBW = 0;
-#endif
-
-
 
 int main(int argc, char *argv[])
 {
@@ -163,12 +127,6 @@ int main(int argc, char *argv[])
     std::cerr << "Requires one argument.\n";
     return 1;
   }
-  igzstream inf(argv[optind], std::ios::in | std::ios::binary);
-
-  if (!inf.is_open()) {
-    std::cerr << "Cannot open file: \"" << argv[optind] << "\"\n";
-    return 1;
-  }
 
   //determine the prof file name
   std::string prof_file(argv[optind]);
@@ -222,7 +180,7 @@ int main(int argc, char *argv[])
     CPRegistry::get()->pruneCP(inorder_model, ooo_model);
   }
   CPRegistry::get()->setDefaults();
- 
+
   if(inorderWidth > 0) {
     CPRegistry::get()->setWidth(inorderWidth, true);
   }
@@ -239,7 +197,7 @@ int main(int argc, char *argv[])
   bool notused=false;
   CPC notusedCPC;
 
-  //this sets the prevCall/prevRet based on the information 
+  //this sets the prevCall/prevRet based on the information
   //stored in the profile.  Originally from the file containing
   //the stack.
   Prof::get().resetStack(notusedCPC,notused,prevCall,prevRet);
@@ -249,6 +207,13 @@ int main(int argc, char *argv[])
   gettimeofday(&start, 0);
 
   CP_NodeDiskImage img;
+  igzstream inf(argv[optind], std::ios::in | std::ios::binary);
+
+  if (!inf.is_open()) {
+    std::cerr << "Cannot open file: \"" << argv[optind] << "\"\n";
+    return 1;
+  }
+
   while (!inf.eof()) {
     CP_NodeDiskImage::read_from_file_into(inf,img);
     if (inf.eof()) {
