@@ -16,5 +16,11 @@ static void init()
   CPRegistry::get()->register_argument("beret-max-ops", true, &OOO.cp_obj);
   CPRegistry::get()->register_argument("beret-max-ops", true, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("beret-iops", true, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("beret-iops", true, &In.cp_obj);
+
+  CPRegistry::get()->register_argument("beret-config-time",true,&OOO.cp_obj);
+  CPRegistry::get()->register_argument("beret-config-time",true,&In.cp_obj);
+
 }
 

@@ -187,9 +187,10 @@ public:
 
   std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
   std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
+  LoopInfo* _prevLoop=NULL;
 
   unsigned _beret_max_seb=6,_beret_max_mem=2,_beret_max_ops=80;
-
+  unsigned _beret_config_time=1,_beret_iops=2;
 
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "beret-max-seb") == 0) {
@@ -216,6 +217,23 @@ public:
         std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
       }
     }
+    if (strcmp(name, "beret-config-time") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_config_time = temp;
+      } else {
+        std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+    if (strcmp(name, "beret-iops") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_iops = temp;
+      } else {
+        std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
+      }
+    }
+
 
   }
 
@@ -374,7 +392,7 @@ public:
           } 
         } else {
           getCPDG()->insert_edge(*inst, eventInd,
-                                 *b_inst,BeretInst::SEBReady,0,E_SEBS);
+                                 *b_inst,BeretInst::SEBReady,4/_beret_iops,E_SEBS);
           /*std::cout << inst->cycleOfStage(eventInd) << " "
                     << b_inst->cycleOfStage(BeretInst::SEBReady) << "\n";*/
         }
@@ -444,15 +462,19 @@ public:
           if(li) {
             //std::cout << "found a loop\n";
           }
+         
           if(li && li2sgmap.count(li)!=0 && li2sgmap[li].size()!=0) {
             //std::cout << " .. and it's beret-able!\n";
             curLoopHead=op;
             beret_state=BERET;
             Inst_t* inst = new Inst_t();
-
+            unsigned config_time = _beret_config_time*li2sgmap[li].size();
+            if(li==_prevLoop) {
+              config_time=0;
+            }
             //This instruction is created to simulate transfering live inputs
             //like loop constants, initial values for induction vars, etc
-            inst->set_ex_lat(8);
+            inst->set_ex_lat(8/_beret_iops + config_time); //TODO: make this real num vars
             std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
             addDeps(sh_inst);
             pushPipe(sh_inst);
@@ -462,6 +484,7 @@ public:
             _curBeretStartCycle=inst->cycleOfStage(inst->eventComplete());
             _curBeretStartInst=index;
 	    addLoopIteration(inst,Inst_t::Commit);
+            _prevLoop=li;
           }
         }
         break;
@@ -488,7 +511,7 @@ public:
               Inst_t* inst = new Inst_t(img,index);
 	      if(i==0) {
                 getCPDG()->insert_edge(*binst, BeretInst::Complete,
-	                               *inst, Inst_t::Fetch,0,E_BREP); 
+	                               *inst, Inst_t::Fetch,4/_beret_iops,E_BREP); 
 	      }
               std::shared_ptr<Inst_t> sh_inst(inst);
               getCPDG()->addInst(sh_inst,index);
