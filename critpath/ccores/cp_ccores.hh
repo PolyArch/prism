@@ -377,9 +377,9 @@ public:
         if(cur_bb_end) {
           getCPDG()->insert_edge(*cur_bb_end,
               *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
+          uint64_t endCCoresCycle=cur_bb_end->cycle();
+          _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
         }
-        uint64_t endCCoresCycle=cur_bb_end->cycle();
-        _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
       }
       addDeps(sh_inst);
       pushPipe(sh_inst);
