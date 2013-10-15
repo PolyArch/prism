@@ -147,7 +147,13 @@ protected:
 
 public:
   virtual uint64_t finalCycle() {
-    return cycleOfStage(eventCommit());
+    uint64_t max=0;
+    for(int i = 0; i < numStages(); ++i) {
+      if(max<cycleOfStage(i)) {
+        max=cycleOfStage(i);
+      }
+    }
+    return max;
   }
   virtual uint64_t cycleOfStage(const unsigned i) = 0;
   virtual unsigned numStages() =0;
