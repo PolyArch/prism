@@ -126,23 +126,21 @@ public:
   }
 
   void results() {
-    if(!baselineCP) {
+
+    if (!baselineCP && cpmap.size() > 0) {
       baselineCP = cpmap.begin()->second;
     }
-    double baseline = baselineCP->numCycles();
+    uint64_t baselineCycles = baselineCP ? baselineCP->numCycles() : 0;
 
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      std::cout << "Number of cycles [" << I->first << "]: "
-                << I->second->numCycles() << "  "
-                << (double)baseline/(double)I->second->numCycles();
-      I->second->accelSpecificStats(std::cout);
-      std::cout << "\n";
+      I->second->printResults(std::cout, I->first, baselineCycles);
     }
   }
+
   void printMcPATFiles() {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      I->second->printMcPATxml( (std::string("mcpat/") +
-                               I->first + std::string(".xml")).c_str() );
+      I->second->printMcPATxml((std::string("mcpat/") +
+                                I->first + std::string(".xml")).c_str() );
     }
   }
   void runMcPAT() {

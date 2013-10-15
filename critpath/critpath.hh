@@ -129,6 +129,21 @@ protected:
   }
 
 public:
+
+  virtual void printResults(std::ostream& out,
+                            std::string name,
+                            uint64_t baseline_cycles) {
+
+    uint64_t cycles = this->numCycles();
+    out << "Number of cycles [" << name << "]: " << cycles;
+
+    if (baseline_cycles != 0) {
+      out << " " << (double)cycles/(double)baseline_cycles;
+    }
+    accelSpecificStats(out);
+    out << "\n";
+  }
+
   virtual void accelSpecificStats(std::ostream& out) {
   }
 

@@ -9,7 +9,7 @@ private:
   static PathProf pathProf;
 
 public:
-  static void init(std::string& filename);
+  static bool init(std::string& filename);
   static void init_from_trace(const char *trace_fname,
                               uint64_t max_inst);
 

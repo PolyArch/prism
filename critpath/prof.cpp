@@ -13,23 +13,29 @@
 
 PathProf Prof::pathProf;
 
-void Prof::init(std::string& filename) {
+bool Prof::init(std::string& filename) {
   std::ifstream ifs(filename.c_str());
 
   if (!ifs.is_open()) {
-    std::cerr << "Cannot open file: \"" << filename << "\"\n";
-    exit(1);
+    return false;
   }
 
+  std::cout << "reading prof file: " << filename;
+  std::cout.flush();
   boost::archive::binary_iarchive bia(ifs);
-  //write class instance to archive
+  //write class instance from archive
   bia >> pathProf;
+  std::cout << "... done!\n";
+  return true;
 }
 
 void Prof::init_from_trace(const char *trace_fname,
                            uint64_t max_inst)
 {
   uint64_t count = 0;
+  std::cout << "Generating Loop Info from trace\n";
+  std::cout.flush();
+
   if (!doLoopProfAnalysis(trace_fname,
                           max_inst,
                           1024,  // winsize
@@ -41,6 +47,7 @@ void Prof::init_from_trace(const char *trace_fname,
     std::cerr << "Error Opening file: " << trace_fname << "\n";
     exit(-1);
   }
+  std::cout << "... generating loop info ... done!!\n";
 }
 
 

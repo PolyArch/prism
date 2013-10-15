@@ -40,8 +40,6 @@ int main(int argc, char *argv[])
   static struct option static_long_options[] =
     {
       {"help", no_argument, 0, 'h'},
-      {"verbose",no_argument, 0, 'v'},
-      {"count", no_argument, 0, 't'},
       {"no-registry", no_argument, 0, 'n'},
       {"max-insts", required_argument, 0, 'm'},
       {"loop-prof-max-insts", required_argument, 0, 'l'},
@@ -61,14 +59,13 @@ int main(int argc, char *argv[])
 
   uint64_t max_inst = (uint64_t)-1;
   uint64_t loop_prof_max_inst = max_inst;
-  bool verbose =false;
   bool registry_off = false;
-  bool count_nodes = false;
+
   while (1) {
     int option_index = 0;
 
     const struct option *longopts = &*long_options.begin();
-    int c = getopt_long(argc, argv, "hvtnm:x:",
+    int c = getopt_long(argc, argv, "hnm:x:",
                         longopts, &option_index);
     if (c == -1)
       break;
@@ -98,11 +95,9 @@ int main(int argc, char *argv[])
     case 'h':
       std::cout << argv[0] << " [options] file\n";
       return(0);
-    case 'v': verbose = true; break;
     case 'm': max_inst = atoi(optarg); break;
     case 'l': loop_prof_max_inst = atoi(optarg); break;
     case 'n': registry_off = true; break;
-    case 't': count_nodes = true; break;
     case 'x':
       if (strcmp(optarg, "inorder") == 0) {
         inorder_model = true;
@@ -133,6 +128,7 @@ int main(int argc, char *argv[])
   size_t start_pos = prof_file.find_last_of("/");
 
   //open prof file
+  bool hasLoopProfile = false;
   if (!gen_loop_prof) {
     size_t dot_pos =  prof_file.find(".", start_pos);
     prof_file = ((dot_pos == string::npos)
@@ -140,19 +136,15 @@ int main(int argc, char *argv[])
                  : prof_file.substr(0, dot_pos));
     prof_file += string(".prof");
 
-    std::cout << "reading prof file: " << prof_file;
-    std::cout.flush();
-    Prof::init(prof_file);
-    std::cout << "... done!\n";
-  } else {
+    hasLoopProfile = Prof::init(prof_file);
+  }
+  if (!hasLoopProfile) {
     if (loop_prof_max_inst == (uint64_t)-1)
       // use max_inst
       loop_prof_max_inst = max_inst;
 
-    std::cout << "Generating Loop Info from trace\n";
-    std::cout.flush();
     Prof::init_from_trace(argv[optind], loop_prof_max_inst);
-    std::cout << "... generating loop info ... done!!\n";
+    hasLoopProfile = true;
   }
 
 
@@ -223,29 +215,18 @@ int main(int argc, char *argv[])
       img._fc = 0;
     }
 
-    if (verbose) {
-      std::cout << count << ":  ";
-      img.write_to_stream(std::cout);
-      std::cout << "\n";
-    }
-    if (!count_nodes) {
-      CPC cpc = make_pair(img._pc,img._upc);
-      Op* op = Prof::get().processOpPhase3(cpc,prevCall,prevRet);
-      prevCall=img._iscall;
-      prevRet=img._isreturn;
+    CPC cpc = make_pair(img._pc,img._upc);
+    Op* op = Prof::get().processOpPhase3(cpc,prevCall,prevRet);
+    prevCall=img._iscall;
+    prevRet=img._isreturn;
 
-      if(op!=NULL) {
-        if (!registry_off) {
-          CPRegistry::get()->insert(img, count, op);
-        }
-
-        numCycles += img._fc;
-        ++count;
+    if(op!=NULL) {
+      if (!registry_off) {
+        CPRegistry::get()->insert(img, count, op);
       }
-    }
 
-    if (count_nodes) {
-      count++;
+      numCycles += img._fc;
+      ++count;
     }
 
     if (count == max_inst || count == Prof::get().stopInst) {
@@ -269,18 +250,17 @@ int main(int argc, char *argv[])
   inf.close();
   std::cout << "Num of records              :" << count << "\n";
 
-  if (!count_nodes) {
-    if (!registry_off) {
-      CPRegistry::get()->results();
 
+  if (!registry_off) {
+    CPRegistry::get()->results();
+
+    if(!noMcPAT) {
       system("mkdir -p mcpat/");
       CPRegistry::get()->printMcPATFiles();
-
-      if(!noMcPAT) {
-        CPRegistry::get()->runMcPAT();
-      }
+      CPRegistry::get()->runMcPAT();
     }
-    std::cout << "--------------------\n";
   }
+  std::cout << "--------------------\n";
+
   return 0;
 }
