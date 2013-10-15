@@ -42,12 +42,12 @@ public:
      nodeResp.resize(MAX_FU_POOLS);
      for(int i = 0; i < MAX_FU_POOLS; ++i) {
        fuUsage[i][0]=0; //begining usage is 0
-       fuUsage[i][(uint64_t)-1000]=0; //end usage is 0 too (1000 to prevent overflow)
+       fuUsage[i][(uint64_t)-10000]=0; //end usage is 0 too (1000 to prevent overflow)
      }
      MSHRUseMap[0];
-     MSHRUseMap[(uint64_t)-1000];
+     MSHRUseMap[(uint64_t)-10000];
      MSHRResp[0];
-     MSHRResp[(uint64_t)-1000];
+     MSHRResp[(uint64_t)-10000];
      LQ.resize(LQ_SIZE);
      SQ.resize(SQ_SIZE);
      rob_head_at_dispatch=0;
@@ -296,7 +296,7 @@ protected:
     }
 
     //delete irrelevent 
-    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle-100);
+    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle-200);
     auto firstMSHRResp = MSHRResp.begin();
     if(upperMSHRResp->first > firstMSHRResp->first) {
       MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
@@ -361,6 +361,7 @@ protected:
     //keep going until we find a spot .. this is gauranteed
     while(true) {
       assert(cur_cycle_iter->second.size() <= maxUnits);
+      assert(cur_cycle_iter->first < ((uint64_t)-20000));
 
       if(cur_cycle_iter->second.size() < maxUnits && //max means cache-blocked
          cur_cycle_iter->second.count(addr)) {
@@ -384,10 +385,12 @@ protected:
       if(cur_cycle_iter->second.size() == maxUnits) {
         if(re_check_frequency<=1) {
           ++cur_cycle_iter;
+          assert(cur_cycle_iter->first < ((uint64_t)-20000));
           cur_cycle=cur_cycle_iter->first;
         } else {
           cur_cycle+=re_check_frequency;
           cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
+          assert(cur_cycle_iter->first < ((uint64_t)-20000));
           rechecks++;
         }
         continue;
@@ -412,10 +415,12 @@ protected:
             ++next_cycle_iter;
             cur_cycle_iter=next_cycle_iter;
             cur_cycle=cur_cycle_iter->first;
+            assert(cur_cycle_iter->first < ((uint64_t)-20000));
           } else {
             cur_cycle+=re_check_frequency;
             cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
             rechecks++;
+            assert(cur_cycle_iter->first < ((uint64_t)-20000));
           }
           break;
         }

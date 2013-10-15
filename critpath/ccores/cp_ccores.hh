@@ -514,7 +514,7 @@ private:
     int rechecks=0;
     uint64_t extraLat=0;
 
-    uint64_t access_time=reqDelayT + n->cycleOfStage(CCoresInst::Complete);
+    uint64_t access_time=reqDelayT + n->cycleOfStage(CCoresInst::Execute);
 
     if (minT > access_time) {
       minT=access_time;
