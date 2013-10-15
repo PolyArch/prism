@@ -179,7 +179,7 @@ public:
   void calledBy(FunctionInfo* fi) {
     _calledBy.insert(fi);
     fi->_calledTo.insert(this);  
-    std::cout << fi->nice_name() << " called " << this->nice_name() << "\n";
+    //std::cout << fi->nice_name() << " called " << this->nice_name() << "\n";
   }
 
   void calledByOp(FunctionInfo* fi,Op* op) {

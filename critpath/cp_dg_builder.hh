@@ -1380,7 +1380,8 @@ protected:
       int insts_to_squash=instsToSquash();
       int squash_cycles = squashCycles(insts_to_squash);
       int recheck_cycles = squash_cycles-1;
-      
+
+      assert(recheck_cycles>=1); 
       BaseInst_t* min_node =
          addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
               mshrT, n, n->_eff_addr, recheck_cycles, rechecks, extraLat);
@@ -1495,8 +1496,9 @@ protected:
       return n;
     }
   
-    int lat=epLat(n._ex_lat,n._opclass,n._isload,
-                  n._isstore,n._cache_prod,n._true_cache_prod,
+    int lat=epLat(depInst->_ex_lat,depInst->_opclass,depInst->_isload,
+                  depInst->_isstore,depInst->_cache_prod,
+                  depInst->_true_cache_prod,
                   true,INORDER_EX_DEPTH);
 
     getCPDG()->insert_edge(*depInst, Inst_t::Execute,
@@ -1609,8 +1611,12 @@ protected:
   }
   
   int squashCycles(int insts_to_squash) {
-    return 1 +  insts_to_squash/SQUASH_WIDTH 
-             + (insts_to_squash%SQUASH_WIDTH!=0);
+    if(!_isInOrder) {
+      return 1 +  insts_to_squash/SQUASH_WIDTH 
+               + (insts_to_squash%SQUASH_WIDTH!=0);  
+    } else {
+      return 2;
+    }
   }
 
   virtual Inst_t &checkSquashPenalty(Inst_t &n) {

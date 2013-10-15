@@ -82,8 +82,9 @@ protected:
       sprintf(buf, "cp-trace-%p.txt", (void*)this);
       trace_out = std::string(buf);
     } else {
-      trace_out = _name = ".txt";
+      trace_out = _name + std::string(".txt");
     }
+    std::cout << "opening trace file: \"" << trace_out << "\"\n";
     out.open(trace_out.c_str(), std::ofstream::out | std::ofstream::trunc);
     if (!out.good()) {
       std::cerr << "Cannot open file: " << trace_out << "\n";
