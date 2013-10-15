@@ -374,9 +374,10 @@ public:
       std::shared_ptr<Inst_t> sh_inst(inst);
       getCPDG()->addInst(sh_inst,index);
       if(transitioned) {
-        getCPDG()->insert_edge(*cur_bb_end,
-                               *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
-
+        if(cur_bb_end) {
+          getCPDG()->insert_edge(*cur_bb_end,
+              *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
+        }
         uint64_t endCCoresCycle=cur_bb_end->cycle();
         _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
       }
