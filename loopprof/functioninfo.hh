@@ -285,9 +285,9 @@ public:
       if(li->isOuterLoop()) {
         static_insts-=li->staticInsts();
       }
-      assert(static_insts>0);
+      assert(static_insts>=0);
     }
-    assert(static_insts>0);
+    assert(static_insts>=0);
     return static_insts;
   }
 
