@@ -207,35 +207,35 @@ int main(int argc, char *argv[])
   }
 
   while (!inf.eof()) {
-    CP_NodeDiskImage::read_from_file_into(inf,img);
-    if (inf.eof()) {
+    CP_NodeDiskImage::read_from_file_into(inf, img);
+
+    if (inf.eof())
       break;
-    }
-    if (count == 0) {
+
+    if (count == 0)
       img._fc = 0;
-    }
 
-    CPC cpc = make_pair(img._pc,img._upc);
-    Op* op = Prof::get().processOpPhase3(cpc,prevCall,prevRet);
-    prevCall=img._iscall;
-    prevRet=img._isreturn;
+    CPC cpc = make_pair(img._pc, img._upc);
+    Op* op = Prof::get().processOpPhase3(cpc, prevCall, prevRet);
+    prevCall = img._iscall;
+    prevRet = img._isreturn;
 
-    if(op!=NULL) {
-      if (!registry_off) {
+    if (op != NULL) {
+      if (!registry_off)
         CPRegistry::get()->insert(img, count, op);
-      }
 
       numCycles += img._fc;
       ++count;
     }
 
-    if (count == max_inst || count == Prof::get().stopInst) {
+    if (count == max_inst || count == Prof::get().stopInst)
       break;
-    }
+
     if (count && count % 100000 == 0) {
       std::cout << "processed " << count << "\n";
     }
   }
+
   numCycles += img._cmpc;
 
   gettimeofday(&end, 0);
