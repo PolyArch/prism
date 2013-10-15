@@ -146,11 +146,17 @@ public:
     }
   }
   void runMcPAT() {
+    // look up env
+    const char *mcpat = getenv("MCPAT");
+    if (!mcpat)
+      mcpat = "mcpat";
+
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       std::cout << I->first << " Dynamic Power(W)... ";
       std::cout.flush();
 
-      std::string ms = std::string("mcpat -print_level 5 -infile mcpat/") + I->first +
+
+      std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile mcpat/") + I->first +
                        std::string(".xml 2>&1 > mcpat/") + I->first +
                        std::string(".out");
 

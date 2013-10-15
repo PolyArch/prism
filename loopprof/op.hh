@@ -10,6 +10,7 @@
 #include <vector>
 #include <iostream>
 
+#include "cpu/crtpath/crtpathnode.hh"
 class Op;
 class FunctionInfo;
 class BB;
@@ -52,6 +53,8 @@ class Op {
 public:
   typedef std::set<Op*> Deps;
   static uint32_t _idcounter;
+
+  CP_NodeDiskImage img;
 
 private:
   enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN };
@@ -136,6 +139,16 @@ public:
     int stride;
     eainfo(uint64_t a, int i, stride_value_type ty, int s):
       addr(a), itercnt(i), sty(ty), stride(s) {}
+
+    bool operator ==(const eainfo &that) const {
+      return (this->addr == that.addr
+              && this->itercnt == that.itercnt
+              && this->sty == that.sty
+              && this->stride == that.stride);
+    }
+    bool operator !=(const eainfo &that) const {
+      return !(*this == that);
+    }
   };
 
   std::vector<eainfo> effAddrAccessed;
@@ -159,8 +172,8 @@ public:
     _effAddr = addr;
     _size = size;
   }
-  void computeStride(uint64_t addr, int iterCnt) {
 
+  void computeStride(uint64_t addr, int iterCnt) {
     if (_effAddr == 0) {
       _effAddr = addr;
       return;
@@ -185,6 +198,18 @@ public:
     }
     effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
   }
+
+  bool isSameEffAddrAccessed(Op *Op) {
+    std::vector<eainfo> &That = Op->effAddrAccessed;
+    if (effAddrAccessed.size() != That.size())
+      return false;
+    for (unsigned i = 0, e = effAddrAccessed.size(); i != e; ++i) {
+      if (effAddrAccessed[i] != That[i])
+        return false;
+    }
+    return true;
+  }
+
   bool getStride(int *strideLen) const {
     if (stride_ty == st_Constant || stride_ty == st_Cycle) {
       if (strideLen)

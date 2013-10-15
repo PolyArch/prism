@@ -161,7 +161,7 @@ public:
 protected:
 
   //function to add dependences onto uarch event nodes -- for the pipeline
-  virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op=NULL) { 
+  virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op = NULL) {
     setFetchCycle(*inst);
     setDispatchCycle(*inst);
     setReadyCycle(*inst);
@@ -1126,39 +1126,57 @@ protected:
   //Data dependence
   virtual Inst_t &checkDataDep(Inst_t &n) {
     //register dependence
-    for (int i = 0; i < 7; ++i) {
+    checkRegisterDependence(n);
+
+    //memory dependence
+    return checkMemoryDependence(n);
+  }
+
+  // Register Data Dependence
+  virtual Inst_t &checkRegisterDependence(Inst_t &n) {
+    const int NumProducer = 7; // FIXME: X86 specific
+    for (int i = 0; i < NumProducer; ++i) {
       unsigned prod = n._prod[i];
       if (prod <= 0 || prod >= n.index()) {
         continue;
       }
       BaseInst_t& depInst =
-            getCPDG()->queryNodes(n.index()-prod);
+        getCPDG()->queryNodes(n.index()-prod);
 
       getCPDG()->insert_edge(depInst, depInst.eventComplete(),
-                             n, Inst_t::Ready, 0,E_RDep);
+                             n, Inst_t::Ready, 0, E_RDep);
     }
-
-    //memory dependence
+    return n;
+  }
+  // Memory Dependence
+  virtual Inst_t &checkMemoryDependence(Inst_t &n) {
     if (n._mem_prod > 0 && n._mem_prod < n.index()) {
-      
-      BaseInst_t& prev_node=getCPDG()->queryNodes(n.index()-n._mem_prod);
 
-      //Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
-      if (prev_node._isstore && n._isload) {
-        //data dependence
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  n, Inst_t::Ready, 0, E_MDep);
-      } else if (prev_node._isstore && n._isstore) {
-        //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  n, Inst_t::Complete, 0, E_MDep);
-      } else if (prev_node._isload && n._isstore) {
-        //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  n, Inst_t::Complete, 0, E_MDep);
+      BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
+
+      if(dep_inst.isPipelineInst()) {
+        Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
+        insert_mem_dep_edge(prev_node, n);
       }
     }
     return n;
+  }
+
+  virtual void insert_mem_dep_edge(Inst_t &prev_node, Inst_t &n)
+  {
+    if (prev_node._isstore && n._isload) {
+      // RAW true dependence
+      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
+                             n, Inst_t::Ready, 0, E_MDep);
+    } else if (prev_node._isstore && n._isstore) {
+      // WAW dependence (output-dep)
+      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
+                             n, Inst_t::Complete, 0, E_MDep);
+    } else if (prev_node._isload && n._isstore) {
+      // WAR dependence (load-store)
+      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
+                             n, Inst_t::Ready, 0, E_MDep);
+    }
   }
 
   //==========EXECUTION ==============
@@ -1420,7 +1438,7 @@ protected:
 
         setDispatchCycle(*n);
         setReadyCycle(*n);
-        checkRE(*n);        
+        checkRE(*n);
 
         squashed_insts+=rechecks*insts_to_squash;
       }

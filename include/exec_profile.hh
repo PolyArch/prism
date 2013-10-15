@@ -9,10 +9,14 @@
 
 namespace ExecProfile {
 
-  static inline bool hasProfile(void) {
-    return (getenv("EXEC_PROFILE") != 0);
-  }
+  __attribute__((__weak__))
+  bool _hasProfileInternal(void);
 
+  static inline bool hasProfile(void) {
+    if (_hasProfileInternal)
+      return _hasProfileInternal();
+    return false;
+  }
 
   __attribute__((__weak__))
   std::string _getDisasmInternal(uint64_t pc, int upc);
