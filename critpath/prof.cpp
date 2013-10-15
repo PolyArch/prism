@@ -72,6 +72,11 @@ void Prof::init_from_trace(const char *trace_fname,
   }
   std::cout << "... generating loop info ... done!!\n";
 
+#if 0
+
+  // IT DOES NOT WORK FOR SIMD, SINCE SOME INFO (eg. STRIDE) NOT
+  // STORED IN THE ARCHIVE YET.
+
   // cache the analysis
   std::string prof_filename = getLoopProfileFileName(trace_fname);
   std::cout << "Creating .prof file: \"" << prof_filename << "\"\n";
@@ -79,6 +84,7 @@ void Prof::init_from_trace(const char *trace_fname,
   boost::archive::binary_oarchive oa(ofs);
   // write class instance to archive
   oa << pathProf;
+#endif
 
 }
 
