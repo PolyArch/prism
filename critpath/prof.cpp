@@ -37,6 +37,15 @@ static std::string getCallStackTraceFileName(const std::string &traceFileName)
   return traceFileName.substr(0, start_pos) + std::string("/callstack.out");
 }
 
+static std::string getLoopProfileFileName(const std::string &traceFileName)
+{
+  size_t start_pos = traceFileName.find_last_of("/");
+  size_t dot_pos   = traceFileName.find(".", start_pos);
+  std::string filename = (traceFileName.substr(0, dot_pos)
+                          + std::string(".prof"));
+  return filename;
+}
+
 void Prof::init_from_trace(const char *trace_fname,
                            uint64_t max_inst)
 {
@@ -62,6 +71,15 @@ void Prof::init_from_trace(const char *trace_fname,
     exit(-1);
   }
   std::cout << "... generating loop info ... done!!\n";
+
+  // cache the analysis
+  std::string prof_filename = getLoopProfileFileName(trace_fname);
+  std::cout << "Creating .prof file: \"" << prof_filename << "\"\n";
+  std::ofstream ofs(prof_filename.c_str());
+  boost::archive::binary_oarchive oa(ofs);
+  // write class instance to archive
+  oa << pathProf;
+
 }
 
 
