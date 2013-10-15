@@ -37,6 +37,7 @@ static std::string getCallStackTraceFileName(const std::string &traceFileName)
   return traceFileName.substr(0, start_pos) + std::string("/callstack.out");
 }
 
+#if 0
 static std::string getLoopProfileFileName(const std::string &traceFileName)
 {
   size_t start_pos = traceFileName.find_last_of("/");
@@ -45,6 +46,7 @@ static std::string getLoopProfileFileName(const std::string &traceFileName)
                           + std::string(".prof"));
   return filename;
 }
+#endif
 
 void Prof::init_from_trace(const char *trace_fname,
                            uint64_t max_inst)
