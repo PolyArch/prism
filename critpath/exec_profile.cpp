@@ -25,12 +25,21 @@ void exec_profile::init()
     return ;
   _initialized = true;
 
-  const char *prof_fname = getenv("EXEC_PROFILE");
-  if (!prof_fname)
-    return;
-
   std::ifstream ifs;
-  ifs.open(prof_fname);
+  const char *prof_fname = getenv("EXEC_PROFILE");
+  if (prof_fname) {
+    ifs.open(prof_fname);
+    if (!ifs.is_open()) {
+      std::cerr << "Cannot open " << prof_fname << "\n";
+      return;
+    }
+  } else {
+    // can we open a file named exec.profile.disasm
+    ifs.open("exec.prof.disasm");
+    if (!ifs.is_open())
+      return;
+  }
+
   std::string str;
   while (ifs.good()) {
     uint64_t pc;
@@ -45,7 +54,13 @@ void exec_profile::init()
 }
 
 namespace ExecProfile {
+  bool _hasProfileInternal(void);
   std::string _getDisasmInternal(uint64_t pc, int upc);
+
+  bool _hasProfileInternal(void) {
+    return (_prof_instance.disasmMap.size() > 0);
+  }
+
   std::string _getDisasmInternal(uint64_t pc, int upc)
   {
     _prof_instance.init();
