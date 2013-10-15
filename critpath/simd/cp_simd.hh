@@ -391,12 +391,12 @@ namespace simd {
       //  printLoop(li);
       //}
       std::map<Op*, bool> emitted;
-      std::cout << "\n====== completeSIMDLoopWithIT ======>>>\n";
+      //std::cout << "\n====== completeSIMDLoopWithIT ======>>>\n";
       // Add trace to the pipe
       for (auto I = vecloop_InstTrace.begin(), E = vecloop_InstTrace.end();
            I != E; ++I) {
         Op *op = I->first;
-        printDisasm(op);
+        //printDisasm(op);
         // assert((int)_op2Count[op] == CurLoopIter
         //      && "Different control path inside simd loop??");
 
@@ -422,7 +422,7 @@ namespace simd {
           inserted(inst); // bookkeeping
         }
       }
-      std::cout << "<<<====== completeSIMDLoopWithIT ======\n";
+      //std::cout << "<<<====== completeSIMDLoopWithIT ======\n";
       // clear out instTrace, counts and cache latency
       vecloop_InstTrace.clear();
       _op2Count.clear();
@@ -439,12 +439,12 @@ namespace simd {
 
       // printLoop(li);
 
-      std::cout << "\n====== completeSIMDLoopWithLI ======>>>\n";
+      //std::cout << "\n====== completeSIMDLoopWithLI ======>>>\n";
       for (auto I = li->rpo_begin(), E = li->rpo_end(); I != E; ++I) {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
-          printDisasm(op);
+          //printDisasm(op);
           InstPtr inst = createSIMDInst(op);
           updateForSIMD(op, inst, false);
 
@@ -461,7 +461,7 @@ namespace simd {
           }
         }
       }
-      std::cout << "<<<====== completeSIMDLoopWithLI ======\n";
+      //std::cout << "<<<====== completeSIMDLoopWithLI ======\n";
 
       vecloop_InstTrace.clear();
       _op2Count.clear();

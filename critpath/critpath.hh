@@ -137,8 +137,8 @@ public:
     uint64_t cycles = this->numCycles();
     out << "Number of cycles [" << name << "]: " << cycles;
 
-    if (baseline_cycles != 0) {
-      out << " " << (double)cycles/(double)baseline_cycles;
+    if (cycles != 0) {
+      out << " " << (double)baseline_cycles/ (double)cycles;
     }
     accelSpecificStats(out);
     out << "\n";
