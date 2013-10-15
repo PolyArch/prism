@@ -150,8 +150,6 @@ int main(int argc, char *argv[])
   std::cout << "Num of records              :" << count << "\n";
   
 
-
-  pathProf.setStopInst(count);
   std::cout << "Loop/Rec Info: "
             << pathProf.insts_in_beret << " Beretized, "
             << pathProf.insts_in_simple_inner_loop << " Flat-Inner, "
