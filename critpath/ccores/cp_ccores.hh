@@ -452,7 +452,7 @@ private:
       // 
       //memoy dependence
      //memory dependence
-    if (inst->_mem_prod > 0) {
+    if (inst->_mem_prod > 0 && inst->_mem_prod < inst->index()) {
       BaseInst_t& prev_node = getCPDG()->queryNodes(inst->index()-inst->_mem_prod);
 
       if (prev_node._isstore && inst->_isload) {
