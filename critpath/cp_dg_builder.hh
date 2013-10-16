@@ -1381,6 +1381,11 @@ protected:
       int squash_cycles = squashCycles(insts_to_squash);
       int recheck_cycles = squash_cycles-1;
 
+
+      if(recheck_cycles < 3) {
+        recheck_cycles=3;
+      }
+
       assert(recheck_cycles>=1); 
       BaseInst_t* min_node =
          addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
