@@ -266,7 +266,7 @@ part_size(l)..   num_mapped(l) =l= on(l) * K;
 min_size(l)..    num_mapped(l) =g= on(l) * minK;
 mem_size(l)..   sum(v$(M(v)),y(v,l)) =l= on(l) * maxM;
 
-on.fx(l)=1;
+*on.fx(l)=1;
 
 on_ok(l)..   num_mapped(l) =g= on(l);
 order_on(l1,l2)$(ORD(l1)+1=ORD(l2)).. on(l1) =g= on(l2);
@@ -329,7 +329,7 @@ convexity(v,l).. ancestorT(v,l) + descendantT(v,l) - y(v,l) =l= 1;
 
 *obj.. interf_edges =e= sum(v, x(v))+sum(l,on(l))*1/100;
 *obj.. interf_edges =e= sum(v, x(v));
-obj.. interf_edges =e= sum(v,x(v)) + sum(l$(last_l(l)),ts(l))*1/100;
+obj.. interf_edges =e= sum(v,x(v)) + sum(l,on(l))*1 + sum(l$(last_l(l)),ts(l))*1/100;
 *obj.. interf_edges =e= sum(v,x(v)) + sum(l$(last_l(l)),ts(l));
 *obj.. interf_edges =e= sum(l$(last_l(l)),ts(l));
 
@@ -442,7 +442,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         out << op->id() << "." << uop->id();
       }
       if(op->isMem()) {
-        if(countElementsD++ != 0) {
+        if(countElementsM++ != 0) {
           streamM <<",";
         }
         streamM<<op->id();
@@ -551,6 +551,14 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         int latestSGInd=0;
         unsigned sg_ind =0;
         bool someDep=false;
+        int usesInPath=0;
+
+        for(auto ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
+          Op* use_op = *ui;
+          usesInPath+=dependenceInPath(instsInPath,op,use_op);
+        }
+
+
         for(auto sgi=subgraphVec.begin(),sge=subgraphVec.end();sgi!=sge;++sgi){
           Subgraph* sg = *sgi;
           for(auto dsi=op->d_begin(),dse=op->d_end();dsi!=dse;++dsi) {
@@ -570,7 +578,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         }
 
         //find earliest position to put it in
-        if(someDep || op->numUses()==0 || curOp + max_beret_size > countOps) {
+        if(someDep || /*usesInPath*/ true || curOp + max_beret_size > countOps) {
           Subgraph* subgraphFound=NULL;
           for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) {
             if(subgraphVec[sg_ind]->size() < (unsigned)max_beret_size) {

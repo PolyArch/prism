@@ -92,7 +92,7 @@ public:
     return getCPDG()->getMaxCycles();
   }
 
-  void printEdgeDep(Inst_t& inst, int ind,
+  virtual void printEdgeDep(Inst_t& inst, int ind,
                     unsigned default_type1, unsigned default_type2 = E_NONE)
   {
     if (!getTraceOutputs())

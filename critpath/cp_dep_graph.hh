@@ -412,6 +412,7 @@ public:
   }
 
   virtual void reCalculate() {
+    _cycle=0;
     for (auto i = _pred_edges.begin(), e = _pred_edges.end(); i!=e; ++i) {
       compute_cycle(*i); 
       //  E* edge = *i;

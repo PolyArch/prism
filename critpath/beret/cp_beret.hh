@@ -308,6 +308,24 @@ public:
     
   }
 
+virtual void printEdgeDep(BaseInst_t& inst, int ind,
+                    unsigned default_type1, unsigned default_type2 = E_NONE)
+  {
+    if (!getTraceOutputs())
+      return;
+    E* laEdge = inst[ind].lastArrivingEdge();
+    unsigned lae;
+    if (laEdge) {
+      lae = laEdge->type();
+      if ((lae != default_type1 && lae!=default_type2) || laEdge->len()>1) {
+        outs() << edge_name[lae];
+        outs() << laEdge->len();
+      }
+    }
+    outs() << ",";
+  }
+
+
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (!getTraceOutputs())
       return;
@@ -318,6 +336,8 @@ public:
 
     for (unsigned i = 0; i < inst.numStages(); ++i) {
       outs() << inst.cycleOfStage(i) << " ";
+      printEdgeDep(inst,i,E_FF);
+
     }
     CriticalPath::traceOut(index,img,op);
     outs() << "\n";
@@ -345,7 +365,7 @@ public:
   uint64_t _curBeretStartCycle=0, _curBeretStartInst=0;
   uint64_t _totalBeretCycles=0, _totalBeretInsts=0;
 
-  void addLoopIteration(dg_inst_base<T,E>* inst, unsigned eventInd) {
+  void addLoopIteration(dg_inst_base<T,E>* inst, unsigned eventInd, unsigned xfer=8) {
     Subgraph* prev_sg=NULL;
     first_inst=NULL;
     binstMap.clear();
@@ -373,7 +393,7 @@ public:
 
 	b_inst->ex_edge = 
 	    getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
-	                           *b_inst, BeretInst::Complete,op->avg_lat(), E_SEBC);
+	                           *b_inst, BeretInst::Complete,/*op->avg_lat()*/1, E_SEBC);
 
         getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
                                *b_inst, BeretInst::Writeback, 0, E_SEBE);
@@ -398,11 +418,11 @@ public:
             Op* ps_op = *si;
             std::shared_ptr<BeretInst> ps_BeretInst = binstMap[ps_op];
             getCPDG()->insert_edge(*ps_BeretInst, BeretInst::Complete,
-                                   *b_inst, BeretInst::SEBReady, 1, E_SEBA);
+                                   *b_inst, BeretInst::SEBReady, 0, E_SEBA);
           } 
         } else {
           getCPDG()->insert_edge(*inst, eventInd,
-                                 *b_inst,BeretInst::SEBReady,4/_beret_iops,E_SEBS);
+                                 *b_inst,BeretInst::SEBReady,xfer/_beret_iops,E_SEBS);
           /*std::cout << inst->cycleOfStage(eventInd) << " "
                     << b_inst->cycleOfStage(BeretInst::SEBReady) << "\n";*/
         }
@@ -501,7 +521,7 @@ public:
 
             _curBeretStartCycle=inst->cycleOfStage(inst->eventComplete());
             _curBeretStartInst=index;
-	    addLoopIteration(inst,Inst_t::Commit);
+	    addLoopIteration(inst,Inst_t::Commit,8);
             _prevLoop=li;
           }
         }
@@ -509,7 +529,7 @@ public:
       case BERET:
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
-	  addLoopIteration(last_inst,BeretInst::Complete);
+	  addLoopIteration(last_inst,BeretInst::Complete,0);
 	} else if(op->bb_pos()==0) {
           if(li->getHotPath()[++_whichBB]!=op->bb()) {
             beret_state = CPU;  //WRONG PATH - SWITCH TO CPU
