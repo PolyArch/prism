@@ -49,40 +49,40 @@ public:
   typedef std::map<std::pair<BB*,BB*>,int> EdgeInt;
   typedef std::set<LoopInfo*> LoopSet;
 
-  typedef std::map<Op*,uint64_t> OpAddr; 
+  typedef std::map<Op*,uint64_t> OpAddr;
   typedef std::map<Op*,int> OpInt;
   typedef std::map<Op*,uint32_t> OpUInt;
   typedef std::map<Op*,int> OpBool;
-  
+
   typedef std::vector<int> LoopDep;
   typedef std::set<LoopDep> LoopDepSet;
-  
+
   typedef std::set<Subgraph*> SubgraphSet;
   typedef std::vector<Subgraph*> SubgraphVec;
 
   typedef std::set<Op*> OpSet;
 
-  typedef std::map<std::pair<Op*,FunctionInfo*>,int> CallToMap;   
-  typedef std::set<FunctionInfo*> CallToSet;   
+  typedef std::map<std::pair<Op*,FunctionInfo*>,int> CallToMap;
+  typedef std::set<FunctionInfo*> CallToSet;
 
-static uint32_t _idcounter;
+  static uint32_t _idcounter;
 
 private:
-  uint32_t _id=0;
-  FunctionInfo* _funcInfo=NULL;
-  BB* _head=NULL;
+  uint32_t _id = 0;
+  FunctionInfo* _funcInfo = NULL;
+  BB* _head = NULL;
   BBset _loopLatches;
   BBset _loopBody;
   BBvec _rpo;
   PathMap _pathMap;
-  int     _maxPaths=0;
+  int     _maxPaths = 0;
   IntMap _iterCount; //path iteration count
-  int    _totalIterCount=0; //total number of iters
-  int    _loopCount=0; //total number of loops
-  int    _curIter=0;
+  int    _totalIterCount = 0; //total number of iters
+  int    _loopCount = 0; //total number of loops
+  int    _curIter = 0;
 
-  uint64_t  _numInsts=0; //total number of instructions executed in this loop
-  uint64_t  _numCycles=0; //total number of cycles (roughly) in this loop
+  uint64_t  _numInsts = 0; //total number of instructions executed in this loop
+  uint64_t  _numCycles = 0; //total number of cycles (roughly) in this loop
 
   EdgeInt _edgeWeight; //weight of each transition to compute path index
 

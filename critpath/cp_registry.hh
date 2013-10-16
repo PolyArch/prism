@@ -126,31 +126,35 @@ public:
   }
 
   void results() {
-    if(!baselineCP) {
+
+    if (!baselineCP && cpmap.size() > 0) {
       baselineCP = cpmap.begin()->second;
     }
-    double baseline = baselineCP->numCycles();
+    uint64_t baselineCycles = baselineCP ? baselineCP->numCycles() : 0;
 
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      std::cout << "Number of cycles [" << I->first << "]: "
-                << I->second->numCycles() << "  "
-                << (double)baseline/(double)I->second->numCycles();
-      I->second->accelSpecificStats(std::cout);
-      std::cout << "\n";
+      I->second->printResults(std::cout, I->first, baselineCycles);
     }
   }
+
   void printMcPATFiles() {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      I->second->printMcPATxml( (std::string("mcpat/") +
-                               I->first + std::string(".xml")).c_str() );
+      I->second->printMcPATxml((std::string("mcpat/") +
+                                I->first + std::string(".xml")).c_str() );
     }
   }
   void runMcPAT() {
+    // look up env
+    const char *mcpat = getenv("MCPAT");
+    if (!mcpat)
+      mcpat = "mcpat";
+
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       std::cout << I->first << " Dynamic Power(W)... ";
       std::cout.flush();
 
-      std::string ms = std::string("mcpat -print_level 5 -infile mcpat/") + I->first +
+
+      std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile mcpat/") + I->first +
                        std::string(".xml 2>&1 > mcpat/") + I->first +
                        std::string(".out");
 

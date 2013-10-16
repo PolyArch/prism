@@ -110,5 +110,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
   }
   delete[] cp_array;
 
+  pathProf.setStopInst(count);
+
   return true;
 }

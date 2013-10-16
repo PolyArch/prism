@@ -31,12 +31,68 @@ namespace simd {
     };
 
     unsigned _simd_len = 4;
+    bool _useInstTrace = false;
 
   public:
     cp_simd() : CP_DG_Builder<T, E> () {
     }
 
     virtual ~cp_simd() {}
+
+    bool VectorizingLoop = false;
+
+    // Override DataDependence Check
+    virtual Inst_t &checkRegisterDependence(Inst_t &n) {
+      if (!VectorizingLoop)
+        return CP_DG_Builder<T, E>::checkRegisterDependence(n);
+
+      Op *op = getOpForInst(n);
+      assert(op);
+
+      for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
+        Op *DepOp = *I;
+        Inst_t *depInst = getInstForOp(DepOp);
+        if (!depInst)
+          continue;
+        getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
+                               n, Inst_t::Ready, 0, E_RDep);
+      }
+      return n;
+    }
+
+    // Override DataDependence Check
+    virtual Inst_t &checkMemoryDependence(Inst_t &n) {
+      if (!VectorizingLoop)
+        return CP_DG_Builder<T, E>::checkMemoryDependence(n);
+
+      Op *op = getOpForInst(n);
+      assert(op);
+
+      for (auto I = op->m_begin(), E = op->m_end(); I != E; ++I) {
+        Op *DepOp = *I;
+        Inst_t* depInst = getInstForOp(DepOp);
+        if (!depInst)
+          continue;
+        insert_mem_dep_edge(*depInst, n);
+      }
+      return n;
+    }
+
+    Op* getOpForInst(Inst_t &n) {
+      auto I2Op = _inst2Op.find(&n);
+      if (I2Op != _inst2Op.end())
+        return I2Op->second;
+      assert(0 && "inst2Op map does not have inst??");
+      return 0;
+    }
+
+    Inst_t* getInstForOp(Op *op) {
+      auto Op2I = _op2InstPtr.find(op);
+      if (Op2I != _op2InstPtr.end())
+        return Op2I->second.get();
+      return 0;
+    }
+
 
     InstPtr _lastInst = 0;
     uint64_t numCycles() {
@@ -51,6 +107,10 @@ namespace simd {
         _simd_len = atoi(optarg);
         if (_simd_len == 0)
           _simd_len = 4;
+        return;
+      }
+      if (strcmp(name, "simd-use-inst-trace") == 0) {
+        _useInstTrace = true;
       }
     }
 
@@ -135,12 +195,21 @@ namespace simd {
 
             // Same memory touched by two ops in the same loop...
             if (li->inLoop(DepOp->bb())) {
+
+              // SIMD can handle must alias
+              // FIXME:: Same Address accessed is not guaranteed to be
+              // must-alias. For example, there may be a control instruction
+              // between them or it may be happenstance.
+
+              if (DepOp->isSameEffAddrAccessed(*I))
+                continue;
+
               if (shouldPrint) {
                 printDisasm(*I);
                 (*I)->printEffAddrs();
                 std::cout << "\n";
 
-                std::cout << " conflicts with \n";
+                std::cout << " may alias with \n";
                 printDisasm(DepOp);
                 DepOp->printEffAddrs();
                 std::cout << "\n";
@@ -151,6 +220,11 @@ namespace simd {
         }
       }
       isVectorizableMap[li] = canVectorize;
+      std::cout << ((canVectorize)? "Found "
+                    : "Non-")
+                <<  "vectorizable loop:: " << li
+                << " IterCnt: " << li->getTotalIters()
+                << " NumInst: " << li->numInsts() << "\n";
       return canVectorize;
     }
 
@@ -214,9 +288,38 @@ namespace simd {
       std::cout << "======================================\n";
     }
 
-    InstPtr addShuffleInst(InstPtr inst)
+    InstPtr createInst(const CP_NodeDiskImage &img,
+                       uint64_t index,
+                       Op *op)
     {
-      return InstPtr(new shuffle_inst());
+      InstPtr ret = InstPtr(new Inst_t(img, index));
+      if (op)
+        keepTrackOfInstOpMap(ret, op);
+      return ret;
+    }
+
+    InstPtr createShuffleInst(InstPtr inst, Op *op = 0)
+    {
+      InstPtr ret = InstPtr(new shuffle_inst());
+      if (op)
+        keepTrackOfInstOpMap(ret, op);
+      return ret;
+    }
+
+    InstPtr createSIMDInst(Op *op)
+    {
+      InstPtr ret = InstPtr(new Inst_t(op->img, 0));
+      keepTrackOfInstOpMap(ret, op);
+      return ret;
+    }
+
+    void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
+      auto Op2I = _op2InstPtr.find(op);
+      if (Op2I != _op2InstPtr.end())
+        _inst2Op.erase(Op2I->second.get());
+
+      _op2InstPtr[op] = ret;
+      _inst2Op[ret.get()] = op;
     }
 
     bool isStrideAccess(Op *op, int chkStride) {
@@ -244,6 +347,18 @@ namespace simd {
       }
     }
 
+    void updateForSIMD(Op *op, InstPtr inst, bool useInst) {
+      if (op->isLoad()) {
+        uint16_t inst_lat = useInst ? inst->_ex_lat : 0;
+        inst->_ex_lat = std::max(inst_lat, _cacheLat[op]);
+      }
+      if (op->isStore()) {
+        uint16_t inst_lat = useInst ? inst->_st_lat : 0;
+        inst->_st_lat = std::max(inst_lat, _cacheLat[op]);
+      }
+    }
+
+
     void updateForSIMD(Op *op, InstPtr inst) {
       if (op->isLoad()) {
         inst->_ex_lat = std::max(inst->_ex_lat, _cacheLat[op]);
@@ -253,8 +368,21 @@ namespace simd {
       }
     }
 
-    void completeSIMDLoop(LoopInfo *li, int CurLoopIter) {
 
+    void addSIMDDeps(InstPtr &n, Op *op) {
+      VectorizingLoop = true;
+      addDeps(n, op);
+      VectorizingLoop = false;
+    }
+
+    void completeSIMDLoop(LoopInfo *li, int CurLoopIter) {
+      if (_useInstTrace)
+        completeSIMDLoopWithInstTrace(li, CurLoopIter);
+      else
+        completeSIMDLoopWithLI(li, CurLoopIter);
+    }
+
+    void completeSIMDLoopWithInstTrace(LoopInfo *li, int CurLoopIter) {
       //if (vecloop_InstTrace.size() != 0) {
       // std::cout << "Completing SIMD Loop:" << li
       //          << " with iterCnt: " << CurLoopIter << "\n";
@@ -263,12 +391,12 @@ namespace simd {
       //  printLoop(li);
       //}
       std::map<Op*, bool> emitted;
-
+      //std::cout << "\n====== completeSIMDLoopWithIT ======>>>\n";
       // Add trace to the pipe
       for (auto I = vecloop_InstTrace.begin(), E = vecloop_InstTrace.end();
            I != E; ++I) {
         Op *op = I->first;
-
+        //printDisasm(op);
         // assert((int)_op2Count[op] == CurLoopIter
         //      && "Different control path inside simd loop??");
 
@@ -279,7 +407,7 @@ namespace simd {
 
         InstPtr inst = I->second;
         // update for SIMD
-        updateForSIMD(op, inst);
+        updateForSIMD(op, inst, true);
 
         addDeps(inst, op);
         pushPipe(inst);
@@ -288,20 +416,66 @@ namespace simd {
         // handle broadcast_loads
         //  load followed by shuffles ...
         if (op->isLoad() && isStrideAccess(op, 0)) {
-          inst = addShuffleInst(inst);
+          inst = createShuffleInst(inst);
           addDeps(inst);
           pushPipe(inst);
+          inserted(inst); // bookkeeping
         }
       }
+      //std::cout << "<<<====== completeSIMDLoopWithIT ======\n";
       // clear out instTrace, counts and cache latency
       vecloop_InstTrace.clear();
       _op2Count.clear();
       _cacheLat.clear();
     }
 
+    void completeSIMDLoopWithLI(LoopInfo *li, int CurLoopIter) {
+
+      // if loop did not finish executing fully
+      if (CurLoopIter != (int)_simd_len) {
+        completeSIMDLoopWithInstTrace(li, CurLoopIter);
+        return;
+      }
+
+      // printLoop(li);
+
+      //std::cout << "\n====== completeSIMDLoopWithLI ======>>>\n";
+      for (auto I = li->rpo_begin(), E = li->rpo_end(); I != E; ++I) {
+        BB *bb = *I;
+        for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
+          Op *op = *OI;
+          //printDisasm(op);
+          InstPtr inst = createSIMDInst(op);
+          updateForSIMD(op, inst, false);
+
+          addSIMDDeps(inst, op);
+          pushPipe(inst);
+          inserted(inst);
+          _lastInst = inst;
+          if (op->isLoad() && isStrideAccess(op, 0)) {
+            inst = createShuffleInst(inst, op);
+            addDeps(inst);
+            pushPipe(inst);
+            inserted(inst);
+            _lastInst = inst;
+          }
+        }
+      }
+      //std::cout << "<<<====== completeSIMDLoopWithLI ======\n";
+
+      vecloop_InstTrace.clear();
+      _op2Count.clear();
+      _cacheLat.clear();
+    }
+
+
+
     LoopInfo *CurLoop = 0;
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
+
+    std::map<Op *, InstPtr> _op2InstPtr;
+    std::map<Inst_t *, Op*> _inst2Op;
     //
     // Override insert_inst to transform to SIMD graph
     //
@@ -312,6 +486,7 @@ namespace simd {
       LoopInfo *li = getLoop(op);
 
       if (CurLoop != li) {
+        //std::cout << "\n";
         #ifdef TRACE_INST
         // We switched to a different loop, complete simd_loop
         std::cout << "DiffLoop<" << li << ">:: ";
@@ -363,19 +538,24 @@ namespace simd {
                            && CurLoopIter && (CurLoopIter % _simd_len == 0));
       }
 
-      // Create the instruction
-      InstPtr inst = InstPtr(new Inst_t(img, index));
-      // Add to the graph to do memory management
-      // and get static dependence from original dependence graph...
-      //std::cout << "Adding instruction with index:: " << index << "\n";
-      getCPDG()->addInst(inst, index);
 
       if (!canVectorize(li)) {
-        addDeps(inst, op);
-        pushPipe(inst);
-        inserted(inst);
+        // Create the instruction
+        InstPtr inst = createInst(img, index, op);
+
+        // Add to the graph to do memory management
+        // and get static dependence from original dependence graph...
+        //std::cout << "Adding instruction with index:: " << index << "\n";
+        getCPDG()->addInst(inst, index);
+
+        addDeps(inst, op); // Add Dependence Edges
+        pushPipe(inst);    // push in to the pipeline
+        inserted(inst);    // Book keeping
         _lastInst = inst;
       } else {
+        // Create the instruction -- but donot track op <-> inst
+        InstPtr inst = createInst(img, index, 0);
+        getCPDG()->addInst(inst, index);
         trackSIMDLoop(li, op, inst);
       }
 

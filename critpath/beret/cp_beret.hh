@@ -581,7 +581,7 @@ private:
     int rechecks=0;
     uint64_t extraLat=0;
 
-    uint64_t access_time=reqDelayT + n->cycleOfStage(BeretInst::Complete);
+    uint64_t access_time=reqDelayT + n->cycleOfStage(BeretInst::Execute);
 
     if (minT > access_time) {
       minT=access_time;

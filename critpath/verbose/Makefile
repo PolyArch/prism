@@ -1,7 +1,7 @@
 
 LEVEL = ../
-LIBNAME = libcpdyser.so
+LIBNAME = libcpverbose.so
 
-OBJ = cp_dyser.o
+OBJ = cp_verbose.o
 
 include $(LEVEL)/Makefile.rules

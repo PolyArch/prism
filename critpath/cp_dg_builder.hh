@@ -42,12 +42,12 @@ public:
      nodeResp.resize(MAX_FU_POOLS);
      for(int i = 0; i < MAX_FU_POOLS; ++i) {
        fuUsage[i][0]=0; //begining usage is 0
-       fuUsage[i][(uint64_t)-1000]=0; //end usage is 0 too (1000 to prevent overflow)
+       fuUsage[i][(uint64_t)-10000]=0; //end usage is 0 too (1000 to prevent overflow)
      }
      MSHRUseMap[0];
-     MSHRUseMap[(uint64_t)-1000];
+     MSHRUseMap[(uint64_t)-10000];
      MSHRResp[0];
-     MSHRResp[(uint64_t)-1000];
+     MSHRResp[(uint64_t)-10000];
      LQ.resize(LQ_SIZE);
      SQ.resize(SQ_SIZE);
      rob_head_at_dispatch=0;
@@ -161,7 +161,7 @@ public:
 protected:
 
   //function to add dependences onto uarch event nodes -- for the pipeline
-  virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op=NULL) { 
+  virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op = NULL) {
     setFetchCycle(*inst);
     setDispatchCycle(*inst);
     setReadyCycle(*inst);
@@ -296,7 +296,7 @@ protected:
     }
 
     //delete irrelevent 
-    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle-100);
+    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle-200);
     auto firstMSHRResp = MSHRResp.begin();
     if(upperMSHRResp->first > firstMSHRResp->first) {
       MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
@@ -361,6 +361,7 @@ protected:
     //keep going until we find a spot .. this is gauranteed
     while(true) {
       assert(cur_cycle_iter->second.size() <= maxUnits);
+      assert(cur_cycle_iter->first < ((uint64_t)-20000));
 
       if(cur_cycle_iter->second.size() < maxUnits && //max means cache-blocked
          cur_cycle_iter->second.count(addr)) {
@@ -384,10 +385,12 @@ protected:
       if(cur_cycle_iter->second.size() == maxUnits) {
         if(re_check_frequency<=1) {
           ++cur_cycle_iter;
+          assert(cur_cycle_iter->first < ((uint64_t)-20000));
           cur_cycle=cur_cycle_iter->first;
         } else {
           cur_cycle+=re_check_frequency;
           cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
+          assert(cur_cycle_iter->first < ((uint64_t)-20000));
           rechecks++;
         }
         continue;
@@ -412,10 +415,12 @@ protected:
             ++next_cycle_iter;
             cur_cycle_iter=next_cycle_iter;
             cur_cycle=cur_cycle_iter->first;
+            assert(cur_cycle_iter->first < ((uint64_t)-20000));
           } else {
             cur_cycle+=re_check_frequency;
             cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
             rechecks++;
+            assert(cur_cycle_iter->first < ((uint64_t)-20000));
           }
           break;
         }
@@ -1121,39 +1126,57 @@ protected:
   //Data dependence
   virtual Inst_t &checkDataDep(Inst_t &n) {
     //register dependence
-    for (int i = 0; i < 7; ++i) {
+    checkRegisterDependence(n);
+
+    //memory dependence
+    return checkMemoryDependence(n);
+  }
+
+  // Register Data Dependence
+  virtual Inst_t &checkRegisterDependence(Inst_t &n) {
+    const int NumProducer = 7; // FIXME: X86 specific
+    for (int i = 0; i < NumProducer; ++i) {
       unsigned prod = n._prod[i];
       if (prod <= 0 || prod >= n.index()) {
         continue;
       }
       BaseInst_t& depInst =
-            getCPDG()->queryNodes(n.index()-prod);
+        getCPDG()->queryNodes(n.index()-prod);
 
       getCPDG()->insert_edge(depInst, depInst.eventComplete(),
-                             n, Inst_t::Ready, 0,E_RDep);
+                             n, Inst_t::Ready, 0, E_RDep);
     }
-
-    //memory dependence
+    return n;
+  }
+  // Memory Dependence
+  virtual Inst_t &checkMemoryDependence(Inst_t &n) {
     if (n._mem_prod > 0 && n._mem_prod < n.index()) {
-      
-      BaseInst_t& prev_node=getCPDG()->queryNodes(n.index()-n._mem_prod);
 
-      //Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
-      if (prev_node._isstore && n._isload) {
-        //data dependence
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  n, Inst_t::Ready, 0, E_MDep);
-      } else if (prev_node._isstore && n._isstore) {
-        //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  n, Inst_t::Complete, 0, E_MDep);
-      } else if (prev_node._isload && n._isstore) {
-        //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  n, Inst_t::Complete, 0, E_MDep);
+      BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
+
+      if(dep_inst.isPipelineInst()) {
+        Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
+        insert_mem_dep_edge(prev_node, n);
       }
     }
     return n;
+  }
+
+  virtual void insert_mem_dep_edge(Inst_t &prev_node, Inst_t &n)
+  {
+    if (prev_node._isstore && n._isload) {
+      // RAW true dependence
+      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
+                             n, Inst_t::Ready, 0, E_MDep);
+    } else if (prev_node._isstore && n._isstore) {
+      // WAW dependence (output-dep)
+      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
+                             n, Inst_t::Complete, 0, E_MDep);
+    } else if (prev_node._isload && n._isstore) {
+      // WAR dependence (load-store)
+      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
+                             n, Inst_t::Ready, 0, E_MDep);
+    }
   }
 
   //==========EXECUTION ==============
@@ -1420,7 +1443,7 @@ protected:
 
         setDispatchCycle(*n);
         setReadyCycle(*n);
-        checkRE(*n);        
+        checkRE(*n);
 
         squashed_insts+=rechecks*insts_to_squash;
       }

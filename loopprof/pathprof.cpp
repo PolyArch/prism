@@ -162,6 +162,7 @@ void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
   if(profile) {
     if(_loopStack.size() > 0 && _loopStack.back()->loop_head() == bb) {
       _loopStack.back()->iterComplete(_pathIndex,_loopPath);
+      //cout<<"iter complete\n";
     }
   }
  
@@ -485,6 +486,10 @@ void PathProf::processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet)
 }
 
 void PathProf::runAnalysis() {
+  //force the last bb just in case
+  _callStack.back().processBB_phase1(_prevHead,std::make_pair(-1,-1)); 
+
+
   FuncMap::iterator i,e;
   for(i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
@@ -633,6 +638,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   if(op==NULL) {
     return;
   }
+  op->img = img;
   _op_buf[_dId%MAX_OPS]=op;
  
   if(isCall && call_fi && call_op) {

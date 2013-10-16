@@ -41,6 +41,8 @@ void FunctionInfo::ascertainBBs() {
 
 BB* FunctionInfo::addBB(BB* prevBB, CPC headCPC, CPC tailCPC) {
 
+   //std::cout << headCPC.first << "." << headCPC.second << " " << tailCPC.first << tailCPC.second << "\n"; 
+
    BB* bb;
    BBMap::iterator bbMapIter = _bbMap.find(headCPC);
    if(bbMapIter == _bbMap.end()){ //add bb to both maps
