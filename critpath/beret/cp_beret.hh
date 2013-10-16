@@ -449,8 +449,6 @@ public:
 
     //write stores from store buffer
     int iseb=0;
-    std::cout << "Commiting Iter!\n";
-
     for(auto i=li2sgmap[li].begin(), e=li2sgmap[li].end(); i!=e;++i,++iseb) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {

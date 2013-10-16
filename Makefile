@@ -2,7 +2,7 @@
 
 .PHONY: all clean cp lp base simd dyser ccores beret
 
-all: cp simd base dyser ccores beret disasm verbose
+all: cp simd base dyser ccores beret super disasm verbose
 
 cp:: lp
 	+make -C critpath

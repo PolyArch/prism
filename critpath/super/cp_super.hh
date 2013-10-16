@@ -119,15 +119,15 @@ public:
   uint64_t max_cycle=0;
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
-    if(TraceOutputs) {
+    if (getTraceOutputs()){
       dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);  
   
-      out << index + Prof::get().skipInsts << ": ";
-      out << inst.cycleOfStage(0) << " ";
-      out << inst.cycleOfStage(1) << " ";
+      outs() << index + Prof::get().skipInsts << ": ";
+      outs() << inst.cycleOfStage(0) << " ";
+      outs() << inst.cycleOfStage(1) << " ";
 
       CriticalPath::traceOut(index,img,op);
-      out << "\n";
+      outs() << "\n";
     }
   }
 
