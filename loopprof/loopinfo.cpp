@@ -674,6 +674,36 @@ void LoopInfo::serializeSubgraphs() {
 */
 }
 
+  static const char* opname(int opclass) {
+    switch(opclass) {
+    case 0: //No_OpClass
+      return "none";
+    case 1: //IntALU
+      return "ialu";
+
+    case 2: //IntMult
+      return "imult";
+    case 3: //IntDiv
+      return "idiv";
+
+    case 4: //FloatAdd
+      return "fadd";
+    case 5: //FloatCmp
+      return "fcmp";
+    case 6: //FloatCvt
+      return "fcvt";
+    case 7: //FloatMult
+      return "fmul";
+    case 8: //FloatDiv
+      return "fdiv";
+    case 9: //FloatSqrt
+      return "fsq";
+    default:
+      return "-";
+    }
+    return "?";
+  }
+
 
 void LoopInfo::printSubgraphDot(std::ostream& out) {
   out << "digraph GB{\n";
@@ -708,7 +738,10 @@ void LoopInfo::printSubgraphDot(std::ostream& out) {
         out << "ret";
       } else if(op->isCtrl()) {
         out << "ctrl";
+      } else {
+        out << "~" << opname(op->opclass());
       }
+
 
       out << i << "\" style=filled, color=white]\n";
     }

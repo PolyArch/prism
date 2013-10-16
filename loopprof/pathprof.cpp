@@ -664,7 +664,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
 
 
   op->executed(img._cc-img._ec);
-
+  op->setOpclass(img._opclass);
   //We must add in all the dependencies
   for(int i = 0; i < 7; ++i) {
     int dep_ind = img._prod[i];

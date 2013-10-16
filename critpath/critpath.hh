@@ -180,6 +180,9 @@ public:
     assert(!_setInOrder),
     _isInOrder=inOrder;
     _setInOrder=true;
+    if(_isInOrder) {
+      FETCH_TO_DISPATCH_STAGES=3;
+    }
   }
 
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}

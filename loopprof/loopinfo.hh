@@ -142,7 +142,6 @@ template<class Archive>
     ar & _calledToMap;
   }
 
-
   void serializeSubgraphs();
   bool setContainsCallReturn(OpSet& opSet) {
     std::set<Op*>::iterator i,e;
@@ -156,6 +155,21 @@ template<class Archive>
   }
 
 public:
+  bool forwardDep(Op* dop, Op* op) {
+    if(dop->bb() == op->bb()) { //only count forward ops
+      if(dop->bb_pos() >= op->bb_pos()) {
+        return false;
+      }
+    } else { //dop->bb() != op->bb() -- count forward bbs
+      if(dop->bb()->rpoNum() >= op->bb()->rpoNum()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+
+
   bool containsCallReturn() {
     for(auto bbi=_loopBody.begin(),bbe=_loopBody.end();bbi!=bbe;++bbi) {  
       BB* bb = *bbi;

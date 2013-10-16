@@ -683,7 +683,7 @@ protected:
     checkNonSpeculative(inst);
     checkDataDep(inst);
     if(_isInOrder) {
-      checkExecutePipeStalls(inst);
+      //checkExecutePipeStalls(inst);
     } else {
       //no other barriers
     }
@@ -710,6 +710,7 @@ protected:
     if(_isInOrder) {
       checkEE(*inst); //issue in order
       checkInorderIssueWidth(*inst); //in order issue width
+      checkPipelength(*inst);
     } else {
       //TODO: below two things should be merged
       checkIssueWidth(*inst);
@@ -770,6 +771,8 @@ protected:
     checkPC(inst);
     if(!_isInOrder) {
       checkSquashPenalty(inst);
+    } else {
+      checkEC(inst);
     }
     checkCC(inst);
     checkCBW(inst);
@@ -792,8 +795,6 @@ protected:
           rob_reads+=curCycle-prevCycle;
         }
       }
-
-
     }
 
 
@@ -1491,6 +1492,18 @@ protected:
     return n;
   }
 
+  //for inorder only, 
+  virtual Inst_t &checkPipelength(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                           n, Inst_t::Execute, -INORDER_EX_DEPTH,E_EPip);
+    return n;
+  }
+
+
   //Insert Dynamic Edge for constraining issue width, 
   //each inst reserves slots in the issueRes map
   virtual Inst_t &checkIssueWidth(Inst_t &n) {    
@@ -1516,6 +1529,9 @@ protected:
     return n;
   }
 
+#if 0
+   //this was incredibly stupid ... i am ashamed
+   
   //make sure current instructions are done executing before getting the next
   //This is for inorder procs...
   virtual Inst_t &checkExecutePipeStalls(Inst_t &n) {
@@ -1540,11 +1556,12 @@ protected:
 
     return n;
   }
+#endif
 
   //logic to determine ep latency based on information in the trace
   static int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
                    bool cache_prod, bool true_cache_prod, 
-                   bool inorder_pipeline=false, int inorderExDepth=0) {
+                   bool inorder_pipeline=false) {
 
     //memory instructions bear their memory latency here.  If we have a cache
     //producer, that means we should be in the cache, so drop the latency
@@ -1561,10 +1578,6 @@ protected:
       //lat = n._ex_lat;
       lat = getFUOpLatency(opclass);
     }
-
-    if(inorder_pipeline && lat < inorderExDepth ) {
-      lat = inorderExDepth;
-    }
     return lat;
   }
 
@@ -1573,7 +1586,7 @@ protected:
   virtual Inst_t &checkEP(Inst_t &n) {
     int lat=epLat(n._ex_lat,n._opclass,n._isload,
                   n._isstore,n._cache_prod,n._true_cache_prod,
-                  _isInOrder,INORDER_EX_DEPTH);
+                  _isInOrder);
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Complete, lat, E_EP);
     return n;
@@ -1618,10 +1631,24 @@ protected:
     return n;
   }
 
+  //For inorder, commit comes after execute, by 
+  //
+  virtual Inst_t &checkEC(Inst_t &n) {
+    getCPDG()->insert_edge(n, Inst_t::Execute,
+                           n, Inst_t::Commit, INORDER_EX_DEPTH,E_EPip);
+    return n;
+  }
+
+
   //Commit follows complete
   virtual Inst_t &checkPC(Inst_t &n) {
-    getCPDG()->insert_edge(n, Inst_t::Complete,
-                           n, Inst_t::Commit, 2,E_PC);  
+    if(!_isInOrder) {
+      getCPDG()->insert_edge(n, Inst_t::Complete,
+                             n, Inst_t::Commit, 2,E_PC);  
+    } else {
+      getCPDG()->insert_edge(n, Inst_t::Complete,
+                             n, Inst_t::Commit, 0,E_PC);  
+    }
     //simulator says: minimum two cycles between commit and complete
     return n;
   }
@@ -1643,7 +1670,7 @@ protected:
       return 1 +  insts_to_squash/SQUASH_WIDTH 
                + (insts_to_squash%SQUASH_WIDTH!=0);  
     } else {
-      return 2;
+      return 0;
     }
   }
 

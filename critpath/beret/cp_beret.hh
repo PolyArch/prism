@@ -91,6 +91,11 @@ public:
     ex_edge->_len=lat;
   }
 
+  uint16_t ex_lat() {
+    return ex_edge->_len;
+  }
+
+
   void reCalculate() {
     for(int i = 0; i < NumStages; ++i) {
       events[i].reCalculate();
@@ -369,6 +374,10 @@ public:
 	b_inst->ex_edge = 
 	    getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
 	                           *b_inst, BeretInst::Complete,op->avg_lat(), E_SEBC);
+
+        getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
+                               *b_inst, BeretInst::Writeback, 0, E_SEBE);
+
 /*        std::cout << "X " << b_inst->cycleOfStage(0) << " "
                   << b_inst->cycleOfStage(1) << " "
                   << b_inst->cycleOfStage(2) << "\n";*/
@@ -389,7 +398,7 @@ public:
             Op* ps_op = *si;
             std::shared_ptr<BeretInst> ps_BeretInst = binstMap[ps_op];
             getCPDG()->insert_edge(*ps_BeretInst, BeretInst::Complete,
-                                   *b_inst, BeretInst::SEBReady, 0, E_SEBA);
+                                   *b_inst, BeretInst::SEBReady, 1, E_SEBA);
           } 
         } else {
           getCPDG()->insert_edge(*inst, eventInd,
@@ -399,7 +408,7 @@ public:
         }
         for(auto di = op->d_begin(),de = op->d_end();di!=de;++di) {
           Op* dop = *di;
-          if(li->dependenceInPath(op,dop)) {
+          if(binstMap.count(dop) && li->forwardDep(dop,op)) {
             std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
             getCPDG()->insert_edge(*dep_BeretInst, BeretInst::Complete,
                        *b_inst, BeretInst::Execute, 0,E_SEBD);
@@ -439,7 +448,10 @@ public:
     }
 
     //write stores from store buffer
-    for(auto i = li2sgmap[li].begin(), e =li2sgmap[li].end(); i!=e; ++i) {
+    int iseb=0;
+    std::cout << "Commiting Iter!\n";
+
+    for(auto i=li2sgmap[li].begin(), e=li2sgmap[li].end(); i!=e;++i,++iseb) {
       Subgraph* sg = *i;
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -450,6 +462,13 @@ public:
         }
         //done with this instruction
         //getCPDG()->done(sh_inst);
+/*        if (getTraceOutputs()) {
+          std::cout << "SEB" << iseb << ":";
+          for (unsigned i = 0; i < b_inst->numStages(); ++i) {
+            std::cout << b_inst->cycleOfStage(i) << " ";
+          }
+          std::cout << b_inst->ex_lat() << "\n";*/
+        //`}
       }
     }
   }
@@ -554,8 +573,8 @@ public:
 	getCPDG()->addInst(sh_inst,index);
 
         //this sets the latency for a beret instruction
-        int lat=epLat(b_inst->_ex_lat,b_inst->_opclass,b_inst->_isload,
-               b_inst->_isstore,b_inst->_cache_prod,b_inst->_true_cache_prod);
+        int lat=epLat(img._cc-img._ec,img._opclass,img._isload,
+               img._isstore,img._cache_prod,img._true_cache_prod);
         b_inst->updateLat(lat);
 
 	replay_queue.push_back(std::make_pair(img,index));
@@ -569,8 +588,9 @@ public:
 private:
 
   virtual void checkNumMSHRs(std::shared_ptr<BeretInst>& n, uint64_t minT=0) {
-    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-                  n->_cache_prod,n->_true_cache_prod);
+    int ep_lat=n->ex_lat();
+ //epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+               //   n->_cache_prod,n->_true_cache_prod);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
     if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,

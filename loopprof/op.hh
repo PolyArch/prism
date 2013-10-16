@@ -65,6 +65,7 @@ private:
   Deps _memDeps;
   Deps _cacheDeps;
   Deps _ctrlDeps;
+  unsigned _opclass=0;
   std::bitset<8> _flags;
   BB* _bb; //saved in parent
   int _bb_pos;
@@ -87,6 +88,7 @@ private:
     //ar & _uses;
     ar & _memDeps;
     ar & _cacheDeps;
+    ar & _opclass;
     ar & temp_flags;
     //ar & _bb; saved in bb, just add it back from bb
     ar & _bb_pos;
@@ -247,6 +249,10 @@ public:
     _deps.insert(op);
   }
 
+  unsigned opclass() {return _opclass;}
+  void setOpclass(unsigned opclass) {
+    _opclass=opclass;
+  }
 
   void addDep(Op* op) {
     //assert(op!=this);
