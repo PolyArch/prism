@@ -383,10 +383,12 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
           first_inst=b_inst;
         }
 	last_inst=b_inst;
-
+    
+        assert(b_inst);
         binstMap.emplace(std::piecewise_construct,
                          std::forward_as_tuple(op),
                          std::forward_as_tuple(b_inst));
+        assert(binstMap[op]);
 
         getCPDG()->insert_edge(*b_inst, BeretInst::SEBReady,
                                *b_inst, BeretInst::Execute, 0, E_SEBE);
@@ -412,10 +414,12 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
+        assert(b_inst);
         //add subgraph deps to previous subgraph
         if(prev_sg!=NULL) {
           for(auto si=prev_sg->op_begin(),se=prev_sg->op_end();si!=se;++si){
             Op* ps_op = *si;
+            assert(ps_op);
             std::shared_ptr<BeretInst> ps_BeretInst = binstMap[ps_op];
             getCPDG()->insert_edge(*ps_BeretInst, BeretInst::Complete,
                                    *b_inst, BeretInst::SEBReady, 0, E_SEBA);
@@ -453,6 +457,7 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
+        assert(b_inst);
 	b_inst->reCalculate();
         if(b_inst->_isload) {
           //get the MSHR resource here!
@@ -474,6 +479,7 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
       for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
+        assert(b_inst);
         if(commit_iter && b_inst->_isstore) {
           // stores must come after all computation is complete
           checkNumMSHRs(b_inst, last_cycle); 
@@ -531,10 +537,18 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
           reCalcBeretLoop(true); //get correct beret timing
 	  addLoopIteration(last_inst,BeretInst::Complete,0);
 	} else if(op->bb_pos()==0) {
-          if(li->getHotPath()[++_whichBB]!=op->bb()) {
+          ++_whichBB;
+          LoopInfo::BBvec& bbvec = li->getHotPath();
+          if(bbvec.size()==_whichBB || bbvec[_whichBB] !=op->bb()) {
             beret_state = CPU;  //WRONG PATH - SWITCH TO CPU
-            std::shared_ptr<BeretInst> binst = 
-                           binstMap[li->getHotPath()[_whichBB-1]->firstOp() ];
+          
+            std::shared_ptr<BeretInst> binst;
+            if(bbvec.size()==_whichBB) {
+               binst = binstMap[*(--(li2sgmap[li][li2sgmap[li].size()-1]->op_end()))];
+            } else {
+               assert( bbvec[_whichBB] != op->bb() );
+               binst = binstMap[li->getHotPath()[_whichBB-1]->firstOp()];
+            }
 
             reCalcBeretLoop(false); //get correct beret wrong-path timing
             //get timing for beret loop

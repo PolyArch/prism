@@ -144,13 +144,13 @@ public:
   //this means that you either recurse, or call a recursive function
   void propogateCallsRecursiveFunc(bool propogate=false, int depth=0) {
     //this node already processed
-    for(int i = 0 ; i < depth; ++i) {
-      std::cout << "->";
-    }
-    std::cout << nice_name() 
-              << " propogate=" << propogate 
-              << " _canRecurse=" << _canRecurse 
-              << " _callsRec=" << _callsRecursiveFunc << "\n";
+    //for(int i = 0 ; i < depth; ++i) {
+    //  std::cout << "->";
+    //}
+    //std::cout << nice_name() 
+      //        << " propogate=" << propogate 
+        //      << " _canRecurse=" << _canRecurse 
+          //    << " _callsRec=" << _callsRecursiveFunc << "\n";
 
     if(_callsRecursiveFunc) {
       return;
