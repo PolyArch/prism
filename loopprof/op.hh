@@ -54,7 +54,7 @@ public:
   typedef std::set<Op*> Deps;
   static uint32_t _idcounter;
 
-  CP_NodeDiskImage img;
+  //CP_NodeDiskImage img;
 
 private:
   enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN };
@@ -153,9 +153,11 @@ public:
     }
   };
 
-  std::vector<eainfo> effAddrAccessed;
+  //std::vector<eainfo> effAddrAccessed;
 
   void printEffAddrs() {
+    return ;
+#if 0
     int i = 0;
     std::cout << "size: " << _size << "\n";
     for (auto I = effAddrAccessed.begin(), E = effAddrAccessed.end(); I != E; ++I) {
@@ -167,16 +169,20 @@ public:
       if ( (++i) % 8 == 0)
         std::cout << "\n";
     }
+#endif
   }
   unsigned _size = 0;
+  uint64_t _first_effAddr = 0;
   void initEffAddr(uint64_t addr, unsigned size, int iterCnt) {
-    effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
+    //effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
+    _first_effAddr = addr;
     _effAddr = addr;
     _size = size;
   }
 
   void computeStride(uint64_t addr, int iterCnt) {
     if (_effAddr == 0) {
+      _first_effAddr = addr;
       _effAddr = addr;
       return;
     }
@@ -189,7 +195,7 @@ public:
       _effAddr = addr;
       if (new_stride != stride) {
         // can this be cycle through the address location...
-        if (effAddrAccessed.begin()->addr != addr) {
+        if (_first_effAddr  != addr) {
           stride_ty = st_Variable;
         } else {
           // Are we cycling through the address? I guess so -- a case in radar.
@@ -198,10 +204,12 @@ public:
         }
       }
     }
-    effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
+    //effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
   }
 
   bool isSameEffAddrAccessed(Op *Op) {
+    return false;
+    #if 0
     std::vector<eainfo> &That = Op->effAddrAccessed;
     if (effAddrAccessed.size() != That.size())
       return false;
@@ -210,6 +218,7 @@ public:
         return false;
     }
     return true;
+    #endif
   }
 
   bool getStride(int *strideLen) const {

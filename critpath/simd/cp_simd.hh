@@ -31,7 +31,7 @@ namespace simd {
     };
 
     unsigned _simd_len = 4;
-    bool _useInstTrace = false;
+    bool _useInstTrace = true;
 
   public:
     cp_simd() : CP_DG_Builder<T, E> () {
@@ -84,18 +84,26 @@ namespace simd {
     }
 
     Op* getOpForInst(Inst_t &n) {
+      assert(0);
+      return 0;
+      /*
       auto I2Op = _inst2Op.find(&n);
       if (I2Op != _inst2Op.end())
         return I2Op->second;
       assert(0 && "inst2Op map does not have inst??");
       return 0;
+      */
     }
 
     Inst_t* getInstForOp(Op *op) {
+      assert(0);
+      return 0;
+      /*
       auto Op2I = _op2InstPtr.find(op);
       if (Op2I != _op2InstPtr.end())
         return Op2I->second.get();
       return 0;
+      */
     }
 
 
@@ -177,10 +185,10 @@ namespace simd {
           int stride = 0;
           if (!(*I)->getStride(&stride)) {
             if (shouldPrint) {
-              printDisasm(*I);
-              std::cout << "    stride is not constant or unknown\n";
-              (*I)->printEffAddrs();
-              std::cout << "\n";
+              //printDisasm(*I);
+              //std::cout << "    stride is not constant or unknown\n";
+              //(*I)->printEffAddrs();
+              //std::cout << "\n";
             }
             canVectorize = false;
           }
@@ -210,14 +218,14 @@ namespace simd {
                 continue;
 
               if (shouldPrint) {
-                printDisasm(*I);
-                (*I)->printEffAddrs();
-                std::cout << "\n";
+                //printDisasm(*I);
+                //(*I)->printEffAddrs();
+                //std::cout << "\n";
 
-                std::cout << " may alias with \n";
-                printDisasm(DepOp);
-                DepOp->printEffAddrs();
-                std::cout << "\n";
+                //std::cout << " may alias with \n";
+                //printDisasm(DepOp);
+                //DepOp->printEffAddrs();
+                //std::cout << "\n";
               }
               canVectorize = false;
             }
@@ -313,18 +321,25 @@ namespace simd {
 
     InstPtr createSIMDInst(Op *op)
     {
+      assert(0);
+      return 0;
+      #if 0
       InstPtr ret = InstPtr(new Inst_t(op->img, 0));
       keepTrackOfInstOpMap(ret, op);
       return ret;
+      #endif
     }
 
     void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
+      return;
+      #if 0
       auto Op2I = _op2InstPtr.find(op);
       if (Op2I != _op2InstPtr.end())
         _inst2Op.erase(Op2I->second.get());
 
       _op2InstPtr[op] = ret;
       _inst2Op[ret.get()] = op;
+      #endif
     }
 
     bool isStrideAccess(Op *op, int chkStride) {
@@ -479,8 +494,8 @@ namespace simd {
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
 
-    std::map<Op *, InstPtr> _op2InstPtr;
-    std::map<Inst_t *, Op*> _inst2Op;
+    // std::map<Op *, InstPtr> _op2InstPtr;
+    // std::map<Inst_t *, Op*> _inst2Op;
     //
     // Override insert_inst to transform to SIMD graph
     //
