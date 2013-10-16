@@ -39,6 +39,11 @@ namespace simd {
 
     virtual ~cp_simd() {}
 
+    virtual void traceOut(uint64_t index,
+                          const CP_NodeDiskImage &img, Op* op) {
+    }
+
+
     bool VectorizingLoop = false;
 
     // Override DataDependence Check

@@ -18,6 +18,10 @@ namespace verbose {
   public:
     dep_graph_t<Inst_t, T, E> * getCPDG() { return 0; }
 
+   virtual void traceOut(uint64_t index,
+                        const CP_NodeDiskImage &img, Op* op) {
+   }
+
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
                      Op *op) {
       ++_count;

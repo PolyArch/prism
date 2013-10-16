@@ -21,8 +21,7 @@ namespace DySER {
       dg_inst<T, E>(img, index) {
 
     }
-    dyser_inst(): dg_inst<T, E>() {}
-
+    dyser_inst(): dg_inst<T, E>() {} 
 
     enum EventTy {
       OpReady = 0,
@@ -98,7 +97,7 @@ namespace DySER {
           // Marks its dependence also in LS
           for (int i = 0; i < 7; ++i) {
             int prod = instPtr->_prod[i];
-            if (prod <= 0)
+            if ((uint64_t)prod >= instPtr->index())
               continue;
             int depIdx = curIdx - prod;
             if (depIdx < 0)
@@ -120,7 +119,7 @@ namespace DySER {
 
       for (int i = 0; i < 7; ++i) {
         int prod = n->_prod[i];
-        if (prod <= 0) {
+        if ((uint64_t)prod >= n->index()) {
           continue;
         }
         dg_inst_base<T,E>& depInst =
@@ -151,6 +150,10 @@ namespace DySER {
       dyser_model_state = IN_CPU;
     }
     virtual ~cp_dyser() {}
+
+   virtual void traceOut(uint64_t index,
+                         const CP_NodeDiskImage &img, Op* op) {
+    }
 
     virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
       return &cpdg;
