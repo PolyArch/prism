@@ -288,7 +288,7 @@ public:
          && loopInfo->instsOnPath(hpi) <= (int)_beret_max_ops
          ) {
         std::stringstream part_gams_str;
-        part_gams_str << "partition." << loopInfo->id() << ".gams";
+        part_gams_str << _run_name << "partition." << loopInfo->id() << ".gams";
   
         bool gams_details=false;
         bool no_gams=false;

@@ -37,6 +37,8 @@ int main(int argc, char *argv[])
 
   load_plugins(argv[0]);
 
+  string run_name;
+
   static struct option static_long_options[] =
     {
       {"help", no_argument, 0, 'h'},
@@ -50,6 +52,7 @@ int main(int argc, char *argv[])
       {"trace-out", no_argument, 0, 4},
       {"all-models", no_argument, &allModels, 1},
       {"gen-loop-prof", no_argument, &gen_loop_prof, 1},
+      {"run-name", required_argument, 0, 5},
       {0,0,0,0}
     };
 
@@ -92,6 +95,9 @@ int main(int argc, char *argv[])
     case 4:
       traceOutputs = true;
       break;
+    case 5:
+      run_name=string(optarg);
+      break;
     case 'h':
       std::cout << argv[0] << " [options] file\n";
       return(0);
@@ -117,6 +123,7 @@ int main(int argc, char *argv[])
       abort();
     }
   }
+  CPRegistry::get()->setRunName(run_name);
 
   if (argc - optind != 1) {
     std::cerr << "Requires one argument.\n";

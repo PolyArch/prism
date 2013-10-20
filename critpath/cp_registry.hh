@@ -139,7 +139,7 @@ public:
 
   void printMcPATFiles() {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      I->second->printMcPATxml((std::string("mcpat/") +
+      I->second->printMcPATxml((std::string("mcpat/") + _run_name +
                                 I->first + std::string(".xml")).c_str() );
     }
   }
@@ -154,16 +154,25 @@ public:
       std::cout.flush();
 
 
-      std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile mcpat/") + I->first +
-                       std::string(".xml 2>&1 > mcpat/") + I->first +
+      std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile mcpat/") 
+                       + _run_name + I->first +
+                       std::string(".xml 2>&1 > mcpat/") + _run_name + I->first +
                        std::string(".out");
 
       system(ms.c_str());
       std::string gs = std::string("grep -ir \"Runtime Dynamic\" ") +
-                       std::string("mcpat/") +  I->first + std::string(".out") +
+                       std::string("mcpat/") + _run_name + I->first + std::string(".out") +
                        std::string(" | head -1 | cut -d\" \" -f6");
       system(gs.c_str());
 
+    }
+  }
+
+  std::string _run_name = "";
+  void setRunName(std::string run_name) {
+    _run_name = run_name;
+    for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
+      I->second->setRunName(_run_name);
     }
   }
 

@@ -16,6 +16,7 @@
 class CriticalPath //: public insert_event_handler<dg_inst<T,E>>
 {
 protected:
+  std::string _run_name = "";
   std::string _name = "";
   uint64_t _last_index;
   bool _isInOrder;
@@ -129,7 +130,9 @@ protected:
   }
 
 public:
-
+  void setRunName(std::string run_name) {
+    _run_name=run_name;
+  }
   virtual void printResults(std::ostream& out,
                             std::string name,
                             uint64_t baseline_cycles) {
