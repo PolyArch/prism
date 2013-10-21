@@ -54,7 +54,7 @@ public:
   typedef std::set<Op*> Deps;
   static uint32_t _idcounter;
 
-  //CP_NodeDiskImage img;
+  CP_NodeDiskImage img;
 
 private:
   enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN };
