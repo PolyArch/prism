@@ -2,6 +2,7 @@
 #define OP_HH
 
 #include <set>
+#include <map>
 #include <bitset>
 
 #include <boost/serialization/set.hpp>
@@ -180,6 +181,10 @@ public:
     _size = size;
   }
 
+  uint64_t getCurEffAddr() const {
+    return _effAddr;
+  }
+
   void computeStride(uint64_t addr, int iterCnt) {
     if (_effAddr == 0) {
       _first_effAddr = addr;
@@ -207,8 +212,12 @@ public:
     //effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
   }
 
-  bool isSameEffAddrAccessed(Op *Op) {
-    return false;
+  std::set<Op*> _sameEffAddrOpSet;
+  bool isSameEffAddrAccessed(Op *op) const {
+
+    // check whether the same effective addr accessed map
+    return (_sameEffAddrOpSet.count(op) != 0);
+
     #if 0
     std::vector<eainfo> &That = Op->effAddrAccessed;
     if (effAddrAccessed.size() != That.size())
@@ -219,6 +228,46 @@ public:
     }
     return true;
     #endif
+  }
+
+  void set_intersect_inplace(std::set<Op*> &this_set,
+                             const std::set<Op*> &that_set) {
+    std::set<Op*>::iterator it1 = this_set.begin();
+    std::set<Op*>::const_iterator it2 = that_set.begin();
+    while ( (it1 != this_set.end()) && (it2 != that_set.end()) ) {
+      if (*it1 < *it2) {
+        this_set.erase(it1++);
+      } else if (*it2 < *it1) {
+        ++it2;
+      } else {
+        ++it1;
+        ++it2;
+      }
+    }
+    this_set.erase(it1, this_set.end());
+  }
+
+  void iterComplete(std::map<uint64_t, std::set<Op*> > &_effAddr2Op)
+  {
+    // if (_sameEffAddrOpSet == nullset)
+    //   _sameEffAddrOpSet = _effAddr2Op[getCurEffAddr]
+    // else
+    //   _sameEffAddrOpSet = _sameEffAddrOpSet \intersect
+    //                            _effAddr2Op[getCurEffAddr]
+    if (!isLoad() && !isStore())
+      return;
+
+    // atleast this op will be there.
+    assert (_effAddr2Op.count(getCurEffAddr()));
+
+    const std::set<Op*> &opSet = _effAddr2Op[getCurEffAddr()];
+
+    if (_sameEffAddrOpSet.size() == 0)
+      _sameEffAddrOpSet.insert(opSet.begin(), opSet.end());
+    else
+      set_intersect_inplace(_sameEffAddrOpSet,
+                            opSet);
+    assert(_sameEffAddrOpSet.size() != 0);
   }
 
   bool getStride(int *strideLen) const {

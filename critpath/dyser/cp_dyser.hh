@@ -21,7 +21,7 @@ namespace DySER {
       dg_inst<T, E>(img, index) {
 
     }
-    dyser_inst(): dg_inst<T, E>() {} 
+    dyser_inst(): dg_inst<T, E>() {}
 
     enum EventTy {
       OpReady = 0,

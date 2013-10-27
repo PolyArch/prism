@@ -55,15 +55,33 @@ void LoopInfo::iterComplete(int pathIndex, BBvec& path) {
       std::cout << "ERROR: PATH IS BIGGER THAN MAX\n";
       std::cout << pathIndex << ">" <<  _maxPaths << "\n";
       std::cout << _funcInfo->nice_name();
-      printLoopBody(std::cout); 
+      printLoopBody(std::cout);
     }
-    
+
     _iterCount[pathIndex]++;
     _curIter++;
     _totalIterCount++;
 
     if(_pathMap.count(pathIndex)==0) {
       _pathMap[pathIndex]=path;
+    }
+  }
+  std::map<uint64_t, std::set<Op*> > _effAddr2Op;
+
+  for (auto I = path.begin(), E = path.end(); I != E; ++I) {
+    for (auto OI = (*I)->op_begin(), OE = (*I)->op_end();
+         OI != OE; ++OI) {
+      if (!(*OI)->isLoad() && !(*OI)->isStore())
+        continue;
+      _effAddr2Op[(*OI)->getCurEffAddr()].insert(*OI);
+    }
+  }
+  for (auto I = path.begin(), E = path.end(); I != E; ++I) {
+    for (auto OI = (*I)->op_begin(), OE = (*I)->op_end();
+         OI != OE; ++OI) {
+      if (!(*OI)->isLoad() && !(*OI)->isStore())
+        continue;
+      (*OI)->iterComplete(_effAddr2Op);
     }
   }
 }

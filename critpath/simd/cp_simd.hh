@@ -6,12 +6,14 @@
 
 #include "simd_inst.hh"
 #include "exec_profile.hh"
+#include "vectorization_legality.hh"
 
 #include "cp_args.hh"
 
 namespace simd {
 
   class cp_simd : public ArgumentHandler,
+                  public VectorizationLegality,
                   public CP_DG_Builder<dg_event,
                                        dg_edge_impl_t<dg_event> >
 
@@ -164,6 +166,8 @@ namespace simd {
     }
 
     std::map<Op*, unsigned> _op2Count;
+
+#if 0
     std::map<LoopInfo *, bool> isVectorizableMap;
     bool isVectorizable(LoopInfo *li) {
 
@@ -198,11 +202,10 @@ namespace simd {
             // Same -- broadcast load should handle this
             if (DepOp == (*I))
               continue;
-
-            // For now, check the pc
             if (DepOp->cpc().first == (*I)->cpc().first)
               continue;
 
+            // load - load
             if (DepOp->isLoad() && (*I)->isLoad())
               continue;
 
@@ -241,6 +244,7 @@ namespace simd {
       return canVectorize;
     }
 
+
     bool canVectorize(LoopInfo *li)
     {
       // No loop -- scalar
@@ -253,6 +257,7 @@ namespace simd {
 
       return isVectorizable(li);
     }
+#endif
 
     static std::map<LoopInfo*, bool> li_printed;
 
@@ -321,25 +326,18 @@ namespace simd {
 
     InstPtr createSIMDInst(Op *op)
     {
-      assert(0);
-      return 0;
-      #if 0
       InstPtr ret = InstPtr(new Inst_t(op->img, 0));
       keepTrackOfInstOpMap(ret, op);
       return ret;
-      #endif
     }
 
     void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
-      return;
-      #if 0
       auto Op2I = _op2InstPtr.find(op);
       if (Op2I != _op2InstPtr.end())
         _inst2Op.erase(Op2I->second.get());
 
       _op2InstPtr[op] = ret;
       _inst2Op[ret.get()] = op;
-      #endif
     }
 
     bool isStrideAccess(Op *op, int chkStride) {
@@ -494,8 +492,8 @@ namespace simd {
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
 
-    // std::map<Op *, InstPtr> _op2InstPtr;
-    // std::map<Inst_t *, Op*> _inst2Op;
+     std::map<Op *, InstPtr> _op2InstPtr;
+     std::map<Inst_t *, Op*> _inst2Op;
     //
     // Override insert_inst to transform to SIMD graph
     //
