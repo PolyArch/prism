@@ -2,121 +2,62 @@
 #ifndef CP_DYSER_HH
 #define CP_DYSER_HH
 
-#include "cp_dg_builder.hh"
-#include "cp_registry.hh"
+#include "cp_args.hh"
+#include "cp_opdg_builder.hh"
+#include "dyser_inst.hh"
+#include "vectorization_legality.hh"
+#include "sliceinfo.hh"
 
 namespace DySER {
-  class dyser_inst : public dg_inst<dg_event,
-                                    dg_edge_impl_t<dg_event> > {
 
-    typedef dg_event T;
-    typedef dg_edge_impl_t<T> E;
-    typedef T* TPtr;
-    typedef E* EPtr;
-
-    T events[3];
-
-  public:
-    dyser_inst(const CP_NodeDiskImage &img, uint64_t index):
-      dg_inst<T, E>(img, index) {
-
-    }
-    dyser_inst(): dg_inst<T, E>() {}
-
-    enum EventTy {
-      OpReady = 0,
-      Execute = 1,
-      Complete = 2,
-      NumStages = 3
-    };
-
-    T& operator[](const unsigned i) {
-      if (i == dg_inst<T, E>::Ready)
-        return events[OpReady];
-      if (i == dg_inst<T, E>::Execute)
-        return events[Execute];
-      if (i == dg_inst<T, E>::Complete)
-        return events[Complete];
-      assert(0);
-      return events[0];
-    }
-
-
-    void reCalculate() {
-      for(int i = 0; i < NumStages; ++i) {
-        events[i].reCalculate();
-      }
-    }
-
-  virtual unsigned numStages() {
-    return NumStages;
-  }
-  virtual uint64_t cycleOfStage(const unsigned i) {
-    return events[i].cycle();
-  }
-  virtual unsigned eventComplete() {
-    return Complete;
-  }
-  };
-
-  class cp_dyser : public CP_DG_Builder<dg_event,
+  class cp_dyser : public ArgumentHandler,
+                   public VectorizationLegality,
+                   public CP_OPDG_Builder<dg_event,
                                         dg_edge_impl_t<dg_event> > {
+
+  protected:
     typedef dg_event T;
     typedef dg_edge_impl_t<T> E;
     typedef dg_inst<T, E> Inst_t;
     typedef std::shared_ptr<Inst_t> InstPtr;
-    typedef std::shared_ptr<dyser_inst> DyInstPtr;
 
-    enum ModelState {
-      IN_CPU,  // all instructions execute in CPU
-      IN_DYSER // LoadSlice in CPU, compSlice in DYSER
+    enum MODEL_STATE {
+      IN_CPU = 0,
+      IN_DYSER = 1
     };
 
-    LoopInfo *li;
-    Op* curLoopHead;
-    ModelState dyser_model_state;
 
+    // number of times dyser configured..
+    unsigned _num_config = 0;
+    // dyser size
+    unsigned _dyser_size = 16;
 
-    std::vector<InstPtr> CurInsts;
-    std::vector<DyInstPtr> CurDySERInsts;
-    //FIXME::This should be indexed by pc not the index
-    std::map<uint64_t, bool> isInLS;
-    void doSlice() {
-      if (CurInsts.empty())
-        return;
-      for (int curIdx = CurInsts.size() - 1; curIdx >= 0; --curIdx) {
-        InstPtr instPtr = CurInsts[curIdx];
-        if (instPtr->_isload) {
-          isInLS[instPtr->_index] = true;
-        }
-        // skip others for now
-        //else if (instPtr->_isstore) {
-        //}
-
-        if (isInLS[instPtr->_index]) {
-          // Marks its dependence also in LS
-          for (int i = 0; i < 7; ++i) {
-            int prod = instPtr->_prod[i];
-            if ((uint64_t)prod >= instPtr->index())
-              continue;
-            int depIdx = curIdx - prod;
-            if (depIdx < 0)
-              continue; // dependence from outside
-            InstPtr depInst = CurInsts[depIdx];
-            isInLS[depInst->_index] = true;
-          }
-        }
-        if (instPtr->_isstore) {
-          isInLS[instPtr->_index] = true;
-          // FIXME::Handle address computation
-        }
-        if (instPtr->_isctrl) {
-          isInLS[instPtr->_index] = true;
-        }
+    InstPtr createDyComputeInst(Op *op, uint64_t index) {
+      InstPtr dy_compute = InstPtr(new dyser_inst(op->img,
+                                                  index));
+      if (op) {
+        keepTrackOfInstOpMap(dy_compute, op);
       }
+      return dy_compute;
     }
-    void setDataDep(DyInstPtr &n) {
 
+    InstPtr createDySendInst(Op *op) {
+      InstPtr dy_send = InstPtr(new dyser_send());
+      if (op) {
+        keepTrackOfInstOpMap(dy_send, op);
+      }
+      return dy_send;
+    }
+
+    InstPtr createDyRecvInst(Op *op) {
+      InstPtr dy_recv = InstPtr(new dyser_recv());
+      if (op) {
+        keepTrackOfInstOpMap(dy_recv, op);
+      }
+      return dy_recv;
+    }
+
+    void setDataDep(InstPtr &n) {
       for (int i = 0; i < 7; ++i) {
         int prod = n->_prod[i];
         if ((uint64_t)prod >= n->index()) {
@@ -125,34 +66,45 @@ namespace DySER {
         dg_inst_base<T,E>& depInst =
           getCPDG()->queryNodes(n->index()-prod);
 
-        getCPDG()->insert_edge(depInst, depInst.eventComplete(),
+        Inst_t *ptr = dynamic_cast<Inst_t*>(&depInst);
+        assert(ptr);
+        Op *op = getOpForInst(*ptr);
+        InstPtr recentDepInst = getInstForOp(op);
+
+        getCPDG()->insert_edge(*recentDepInst,
+                               recentDepInst->eventComplete(),
                                *n, Inst_t::Ready,
                                0,
                                E_RDep);
       }
     }
-    void setReadyToExecute(DyInstPtr &n) {
+    void setReadyToExecute(InstPtr &n) {
       getCPDG()->insert_edge(*n, Inst_t::Ready,
                              *n, Inst_t::Execute, 0,
                              E_RE);
     }
-    void setExecuteToComplete(DyInstPtr &n) {
+    void setExecuteToComplete(InstPtr &n) {
       getCPDG()->insert_edge(*n, Inst_t::Execute,
                              *n, Inst_t::Complete,
                              n->_ex_lat,
                              E_EP);
 
     }
+    void setExecuteToExecute(InstPtr &P,
+                             InstPtr &N) {
+      getCPDG()->insert_edge(*P, Inst_t::Execute,
+                             *N, Inst_t::Execute,
+                             N->_ex_lat,
+                             E_EE);
+    }
 
-    bool isInCS(Op* op) { return false; }
   public:
-    cp_dyser(): CP_DG_Builder<T, E> () {
-      dyser_model_state = IN_CPU;
+    cp_dyser(): CP_OPDG_Builder<T, E> () {
     }
     virtual ~cp_dyser() {}
 
-   virtual void traceOut(uint64_t index,
-                         const CP_NodeDiskImage &img, Op* op) {
+    virtual void traceOut(uint64_t index,
+                          const CP_NodeDiskImage &img, Op* op) {
     }
 
     virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
@@ -161,99 +113,195 @@ namespace DySER {
     dep_graph_impl_t<Inst_t, T, E> cpdg;
 
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
-                     Op *op) {
-      ModelState prev_model_state = dyser_model_state;
+                     Op *op)
+    {
+      bool shouldCompleteLoop = false;
+      //ModelState prev_model_state = dyser_model_state;
+      LoopInfo *li = getLoop(op);
 
-      switch (dyser_model_state) {
-      default:
-      case IN_CPU:
-        //can we switch to dyser state?
-        if (op->bb_pos() == 0) {
-          // we are in top of basicblock
-          li = op->func()->getLoop(op->bb());
-          if (li && li->isInnerLoop()) {
-            // We are inside a innerLoop, switch to dyser
-            dyser_model_state = IN_DYSER;
-            //std::cout << "Switched to DySER\n";
+      if (CurLoop != li) {
+        // we switched to a different loop, complete DySER Loop
+        if (canDySERize(CurLoop)) {
+          completeDySERLoop(CurLoop, CurLoopIter);
+        }
+        CurLoop = li;
+        CurLoopIter = 0;
+        global_loop_iter = 0;
+      } else if (!CurLoop) {
+        // no loop
+      } else if (CurLoop) {
+        // Same loop
+        if (op == op->bb()->lastOp() // last instruction in the bb
+            && CurLoop->isLatch(op->bb())) // latch for current loop
+          {
+            ++CurLoopIter;
+            ++global_loop_iter;
           }
-        }
-        break;
-      case IN_DYSER:
-        if (li != op->func()->getLoop(op->bb())) {
-          //We are in a different loop??
-          dyser_model_state = IN_CPU;
-          li = 0;
-        }
-        break;
+        shouldCompleteLoop = shouldCompleteThisLoop(CurLoop,
+                                                    CurLoopIter);
       }
-#if 0
-      Inst_t* inst = new Inst_t(img, index);
-      std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
 
-      // add Instruction to the instruction trace <-- whatever I read from
-      getCPDG()->addInst(sh_inst, index);
+      if (!canDySERize(li)) {
+        // We are in the CPU mode
+        // use the default insert_inst
+        CP_DG_Builder<T, E>::insert_inst(img, index, op);
+      } else {
+        // Create the instruction, but add it to the loop trace.
+        // but do not map op <-> inst.
+        InstPtr inst = createInst(img, index, 0);
+        getCPDG()->addInst(inst, index);
 
-      // Adds Dependence Edges between events
-      //   Different for IN_CPU and IN_DYSER
-      addDeps(inst);
-
-      // For the Pipeline -- should only happen for CPU Instruction
-      getCPDG()->pushPipe(sh_inst);
-
-      inserted(*inst, img);
-#endif
-      switch (dyser_model_state) {
-      case IN_DYSER:  {
-        //Create the instruction, but do not add to CPDG yet
-        InstPtr inst = InstPtr(new Inst_t (img, index));
-        CurInsts.push_back(inst);
-        DyInstPtr dyinst = DyInstPtr(new dyser_inst(img, index));
-        CurDySERInsts.push_back(dyinst);
-        break;
+        trackDySERLoop(CurLoop, op, inst);
       }
-      case IN_CPU:
-      default: {
-        if (prev_model_state == IN_DYSER) {
-          //std::cout << "Switch back to CPU\n";
-          doSlice();
-          for (unsigned i = 0, e = CurInsts.size(); i != e; ++i) {
-            InstPtr sh_inst = CurInsts[i];
-            if (isInLS[sh_inst->_index]) {
-              getCPDG()->addInst(sh_inst, sh_inst->_index);
-              addDeps(sh_inst);
-              getCPDG()->pushPipe(sh_inst);
-              inserted(sh_inst);
-            } else {
-              DyInstPtr dy_inst = CurDySERInsts[i];
-              getCPDG()->addInst(dy_inst, dy_inst->_index);
-              //Assumptions::
-              // All Instruction in CS can be scheduled to DySER
-              // Latency between complete->next instruction is zero
-              //Honor data dependence
-              setDataDep(dy_inst);
-              //Honor ready to Execute
-              setReadyToExecute(dy_inst);
-              //Honor Execute->Complete (latency)
-              setExecuteToComplete(dy_inst);
-            }
-          }
-          CurInsts.clear();
-          CurDySERInsts.clear();
-          isInLS.clear();
-        }
-        Inst_t* inst = new Inst_t(img,index);
-        std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
-        getCPDG()->addInst(sh_inst,index);
-        addDeps(sh_inst);
-        getCPDG()->pushPipe(sh_inst);
-        inserted(sh_inst);
-      }
+      if (shouldCompleteLoop) {
+        completeDySERLoop(CurLoop, CurLoopIter);
+        CurLoopIter = 0; // reset loop counter.
       }
     }
+
     uint64_t numCycles() {
-      getCPDG()->finish(maxIndex);
-      return getCPDG()->getMaxCycles();
+      if (CurLoop) {
+        completeDySERLoop(CurLoop, CurLoopIter);
+      }
+      return _lastInst->finalCycle();
     }
+
+    void handle_argument(const char *name, const char *optarg) {}
+
+
+
+  protected:
+    LoopInfo *CurLoop = 0;
+    unsigned CurLoopIter = 0;
+    uint64_t global_loop_iter = 0;
+
+    SliceInfo *SI = 0;
+    bool DySERizingLoop = false;
+    bool useOpDependence() const {
+      return DySERizingLoop;
+    }
+    virtual bool canDySERize(LoopInfo *li) {
+      // all inner loops are candidate for dyserization.
+      return (li && li->isInnerLoop());
+    }
+
+    virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,
+                                        unsigned CurLoopIter)
+    {
+      if (!CurLoop)
+        return false;
+      if (!canDySERize(CurLoop))
+        return false;
+      if (CurLoopIter == 0)
+        return false;
+      return true;
+    }
+
+
+    std::vector<std::pair<Op*, InstPtr> > loop_InstTrace;
+    virtual void trackDySERLoop(LoopInfo *li, Op *op, InstPtr inst) {
+      loop_InstTrace.push_back(std::make_pair(op, inst));
+    }
+
+
+    virtual void completeDySERLoop(LoopInfo *DyLoop,
+                                   unsigned curLoopIter)
+    {
+      if (0) {
+        completeDySERLoopWithIT(DyLoop, curLoopIter);
+      } else {
+        completeDySERLoopWithLI(DyLoop, curLoopIter);
+      }
+    }
+
+    virtual void completeDySERLoopWithIT(LoopInfo *DyLoop,
+                                         unsigned curLoopIter) {
+      assert(DyLoop);
+
+      SI = SliceInfo::get(DyLoop);
+      assert(SI);
+
+
+      _num_config += (SI->size()/_dyser_size);
+      DySERizingLoop = true;
+
+      for (unsigned i = 0, e = loop_InstTrace.size(); i != e; ++i) {
+        auto op_n_Inst  = loop_InstTrace[i];
+        Op *op = op_n_Inst.first;
+        InstPtr inst = op_n_Inst.second;
+        insert_sliced_inst(SI, op, inst);
+      }
+      DySERizingLoop = false;
+      loop_InstTrace.clear();
+    }
+
+
+    virtual void completeDySERLoopWithLI(LoopInfo *LI, int curLoopIter) {
+      SI = SliceInfo::get(LI);
+      assert(SI);
+      _num_config += (SI->size()/_dyser_size);
+      DySERizingLoop = true;
+      for (auto I = LI->rpo_begin(), E = LI->rpo_end(); I != E; ++I) {
+        BB *bb = *I;
+        for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
+          Op *op = *OI;
+          InstPtr inst = createInst(op->img, 0, op);
+          insert_sliced_inst(SI, op, inst);
+        }
+      }
+      DySERizingLoop = false;
+      loop_InstTrace.clear();
+    }
+
+    virtual void insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
+                                    bool pipeLined = true) {
+      if (SI->isInLoadSlice(op)) {
+        addDeps(inst, op);
+        pushPipe(inst);
+        inserted(inst);
+
+        if (!op->isLoad() // Skip DySER Load because we morph load to dyload
+            &&  SI->isAInputToDySER(op)) {
+          // Insert a dyser send instruction to pipeline
+          InstPtr dy_send = createDySendInst(op);
+          addDeps(dy_send, op);
+          pushPipe(dy_send);
+          inserted(dy_send);
+        }
+      } else {
+        InstPtr prev_inst = getInstForOp(op);
+
+        InstPtr dy_inst = createDyComputeInst(op,
+                                              inst->index());
+        //Assumptions::
+        // All Instruction in CS can be scheduled to DySER
+        // Latency between complete->next instruction is zero
+        // Honor data dependence
+        setDataDep(dy_inst);
+        // Honor ready to Execute
+        setReadyToExecute(dy_inst);
+        // Honor Execute->Complete (latency)
+        setExecuteToComplete(dy_inst);
+        if (pipeLined) {
+          // Honor DySER InOrder execution
+          if (prev_inst.get() != 0)
+            setExecuteToExecute(prev_inst, dy_inst);
+        }
+
+        keepTrackOfInstOpMap(dy_inst, op);
+        if (!op->isStore() && SI->isADySEROutput(op)) {
+          InstPtr dy_recv = createDyRecvInst(op);
+          addDeps(dy_recv, op);
+          pushPipe(dy_recv);
+          inserted(dy_recv);
+          getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
+                                 *dy_recv, Inst_t::Ready, 0,
+                                 E_RDep);
+        }
+      }
+
+    }
+
 
   };
 }

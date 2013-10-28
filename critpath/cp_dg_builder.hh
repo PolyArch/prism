@@ -71,7 +71,9 @@ public:
   }
 
 
-  void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
+  void insert_inst(const CP_NodeDiskImage &img,
+                   uint64_t index, Op* op) {
+
     Inst_t* inst = new Inst_t(img,index);
     std::shared_ptr<Inst_t> sh_inst(inst);
     getCPDG()->addInst(sh_inst,index);
@@ -79,6 +81,7 @@ public:
     pushPipe(sh_inst);
     inserted(sh_inst);
   }
+
 
   virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
     getCPDG()->pushPipe(sh_inst);

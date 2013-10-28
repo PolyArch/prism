@@ -622,17 +622,20 @@ class dep_graph_impl_t : public dep_graph_t<Inst_t,T,E> {
 public:
   dep_graph_impl_t(): _latestIdx(0), numCycles(0) {
     //_vec.resize(BSIZE);
+    for (unsigned i = 0; i != BSIZE; ++i)
+      _vec[BSIZE] = 0;
   }
   ~dep_graph_impl_t() { cleanup(); }
   //typedef dg_inst<T, E> Inst_t;
 
 protected:
   //uint64_t _lastIdx;
-  
+
   //InstVec _vec;
-  typename std::shared_ptr<dg_inst_base<T,E>> _vec[BSIZE];
+  typedef  std::shared_ptr<dg_inst_base<T, E> > dg_inst_base_ptr;
+  dg_inst_base_ptr  _vec[BSIZE];
   uint64_t _latestIdx;
-  
+
   typename std::shared_ptr<Inst_t> _pipe[PSIZE];
   uint64_t _pipeLoc;
 
@@ -670,21 +673,26 @@ public:
        //std::cout << "requested idx: " << idx << "(cur idx:" << _latestIdx << ")\n";
        assert(0);
     }
-    
+
     int vec_ind = idx % BSIZE;
     return *_vec[vec_ind];
   }
 
-  virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,uint64_t index) {
-    //assert(index==_latestIdx+1 || _latestIdx==0);
+  virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,
+                       uint64_t index)
+  {
+
     assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
     _latestIdx=index;
 
     int vec_ind = index%BSIZE;
+    if (_vec[vec_ind].get() != 0) {
+      remove_instr(_vec[vec_ind].get());
+    }
     _vec[vec_ind]=dg;
-
-    return;
   }
+
+  virtual void remove_instr(dg_inst_base<T, E>* ptr) { }
 
   virtual Inst_t* peekPipe(int offset) {  
     if(_pipeLoc+offset > (uint64_t)-1000) {

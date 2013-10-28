@@ -3,14 +3,42 @@
 #define VECTORIZE_LEGALITY_HH
 
 #include <map>
+#include <vector>
 
 #include "loopinfo.hh"
 
 class VectorizationLegality {
 
+  LoopInfo *_cached_curloop = 0;
+
   std::map<LoopInfo *, bool> hasVectorizableMemAccessMap;
 
 protected:
+
+  LoopInfo *getLoop(Op *op) {
+    // not a first instruction.
+    if (op->bb_pos() != 0)
+      return _cached_curloop;
+
+    // is this bb starts another loop?
+    LoopInfo *next_loop = op->func()->getLoop(op->bb());
+
+    if (next_loop) {
+      _cached_curloop = next_loop;
+      return _cached_curloop;
+    }
+
+    // is op in the current loop itself?
+    if (_cached_curloop && _cached_curloop->inLoop(op->bb())) {
+      return _cached_curloop;
+    }
+
+    // op is not in a loop.
+    _cached_curloop = 0;
+    return _cached_curloop;
+  }
+
+
 
   // utility function to check whether the loop is legally
   // vectorizable with respect to memory access.

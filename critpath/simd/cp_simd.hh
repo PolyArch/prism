@@ -2,7 +2,7 @@
 #ifndef CP_SIMD_HH
 #define CP_SIMD_HH
 
-#include "cp_dg_builder.hh"
+#include "cp_opdg_builder.hh"
 
 #include "simd_inst.hh"
 #include "exec_profile.hh"
@@ -14,7 +14,7 @@ namespace simd {
 
   class cp_simd : public ArgumentHandler,
                   public VectorizationLegality,
-                  public CP_DG_Builder<dg_event,
+                  public CP_OPDG_Builder<dg_event,
                                        dg_edge_impl_t<dg_event> >
 
   {
@@ -36,7 +36,7 @@ namespace simd {
     bool _useInstTrace = true;
 
   public:
-    cp_simd() : CP_DG_Builder<T, E> () {
+    cp_simd() : CP_OPDG_Builder<T, E> () {
     }
 
     virtual ~cp_simd() {}
@@ -46,70 +46,14 @@ namespace simd {
     }
 
 
+  protected:
     bool VectorizingLoop = false;
 
-    // Override DataDependence Check
-    virtual Inst_t &checkRegisterDependence(Inst_t &n) {
-      if (!VectorizingLoop)
-        return CP_DG_Builder<T, E>::checkRegisterDependence(n);
-
-      Op *op = getOpForInst(n);
-      assert(op);
-
-      for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
-        Op *DepOp = *I;
-        Inst_t *depInst = getInstForOp(DepOp);
-        if (!depInst)
-          continue;
-        getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
-                               n, Inst_t::Ready, 0, E_RDep);
-      }
-      return n;
+    virtual bool useOpDependence() const {
+      return VectorizingLoop;
     }
 
-    // Override DataDependence Check
-    virtual Inst_t &checkMemoryDependence(Inst_t &n) {
-      if (!VectorizingLoop)
-        return CP_DG_Builder<T, E>::checkMemoryDependence(n);
-
-      Op *op = getOpForInst(n);
-      assert(op);
-
-      for (auto I = op->m_begin(), E = op->m_end(); I != E; ++I) {
-        Op *DepOp = *I;
-        Inst_t* depInst = getInstForOp(DepOp);
-        if (!depInst)
-          continue;
-        insert_mem_dep_edge(*depInst, n);
-      }
-      return n;
-    }
-
-    Op* getOpForInst(Inst_t &n) {
-      assert(0);
-      return 0;
-      /*
-      auto I2Op = _inst2Op.find(&n);
-      if (I2Op != _inst2Op.end())
-        return I2Op->second;
-      assert(0 && "inst2Op map does not have inst??");
-      return 0;
-      */
-    }
-
-    Inst_t* getInstForOp(Op *op) {
-      assert(0);
-      return 0;
-      /*
-      auto Op2I = _op2InstPtr.find(op);
-      if (Op2I != _op2InstPtr.end())
-        return Op2I->second.get();
-      return 0;
-      */
-    }
-
-
-    InstPtr _lastInst = 0;
+  public:
     uint64_t numCycles() {
       if (CurLoop) {
         completeSIMDLoop(CurLoop, CurLoopIter);
@@ -135,35 +79,6 @@ namespace simd {
 
     bool simd_state  = IN_SCALAR;
 
-    LoopInfo *getLoop(Op *op) {
-      static LoopInfo *_cached_curloop = 0;
-      // not a first instruction.
-      if (op->bb_pos() != 0)
-        return _cached_curloop;
-
-      //std::cout << "BB<<" << op->bb() << "> ::";
-
-      // is this bb starts another loop
-      // is this bb starts an another loop?
-      LoopInfo *next_loop = op->func()->getLoop(op->bb());
-
-      if (next_loop) {
-        _cached_curloop = next_loop;
-        //std::cout << "\tLoop<" << next_loop << "> <<<< Head <<<<<\n";
-        return _cached_curloop;
-      }
-
-      // is in current loop itself
-      if (_cached_curloop && _cached_curloop->inLoop(op->bb())) {
-        //std::cout << "\tLoop<" << _cached_curloop << "> <<<< BODY <<<<<\n";
-        return _cached_curloop;
-      }
-
-      // it is not in the loop
-      _cached_curloop = 0;
-      //std::cout << "\tLoop<0> <<<<<<<<<\n";
-      return _cached_curloop;
-    }
 
     std::map<Op*, unsigned> _op2Count;
 
@@ -306,15 +221,6 @@ namespace simd {
       std::cout << "======================================\n";
     }
 
-    InstPtr createInst(const CP_NodeDiskImage &img,
-                       uint64_t index,
-                       Op *op)
-    {
-      InstPtr ret = InstPtr(new Inst_t(img, index));
-      if (op)
-        keepTrackOfInstOpMap(ret, op);
-      return ret;
-    }
 
     InstPtr createShuffleInst(InstPtr inst, Op *op = 0)
     {
@@ -329,15 +235,6 @@ namespace simd {
       InstPtr ret = InstPtr(new Inst_t(op->img, 0));
       keepTrackOfInstOpMap(ret, op);
       return ret;
-    }
-
-    void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
-      auto Op2I = _op2InstPtr.find(op);
-      if (Op2I != _op2InstPtr.end())
-        _inst2Op.erase(Op2I->second.get());
-
-      _op2InstPtr[op] = ret;
-      _inst2Op[ret.get()] = op;
     }
 
     bool isStrideAccess(Op *op, int chkStride) {
@@ -430,7 +327,7 @@ namespace simd {
         addDeps(inst, op);
         pushPipe(inst);
         inserted(inst);
-        _lastInst = inst;
+
         // handle broadcast_loads
         //  load followed by shuffles ...
         if (op->isLoad() && isStrideAccess(op, 0)) {
@@ -469,13 +366,12 @@ namespace simd {
           addSIMDDeps(inst, op);
           pushPipe(inst);
           inserted(inst);
-          _lastInst = inst;
+
           if (op->isLoad() && isStrideAccess(op, 0)) {
             inst = createShuffleInst(inst, op);
             addDeps(inst);
             pushPipe(inst);
             inserted(inst);
-            _lastInst = inst;
           }
         }
       }
@@ -492,8 +388,6 @@ namespace simd {
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
 
-     std::map<Op *, InstPtr> _op2InstPtr;
-     std::map<Inst_t *, Op*> _inst2Op;
     //
     // Override insert_inst to transform to SIMD graph
     //
@@ -569,7 +463,6 @@ namespace simd {
         addDeps(inst, op); // Add Dependence Edges
         pushPipe(inst);    // push in to the pipeline
         inserted(inst);    // Book keeping
-        _lastInst = inst;
       } else {
         // Create the instruction -- but donot track op <-> inst
         InstPtr inst = createInst(img, index, 0);
