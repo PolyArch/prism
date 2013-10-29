@@ -56,7 +56,7 @@ namespace simd {
   public:
     uint64_t numCycles() {
       if (CurLoop) {
-        completeSIMDLoop(CurLoop, CurLoopIter);
+        completeSIMDLoop(CurLoop, CurLoopIter, false);
       }
       return _lastInst->finalCycle();
     }
@@ -93,12 +93,30 @@ namespace simd {
 
     void printLoop(LoopInfo *li) {
 
-      if (!ExecProfile::hasProfile())
+      //if (!ExecProfile::hasProfile())
+      //  return;
+
+      static std::set<LoopInfo*> li_printed;
+      if (li_printed.count(li))
         return;
+
+      li_printed.insert(li);
+
 
       std::cout << "======================================\n";
       std::cout << "================" << li << "==========\n";
-      for (auto BBI = li->body_begin(), BBE = li->body_end(); BBI != BBE; ++BBI) {
+      if (li->isInnerLoop())
+        std::cout << "Inner Loop\n";
+      else
+        std::cout << "Not an inner Loop\n";
+
+
+      if (canVectorize(li))
+        std::cout << "Vectorizable\n";
+      else
+        std::cout << "Nonvectorizable\n";
+
+      for (auto BBI = li->rpo_rbegin(), BBE = li->rpo_rend(); BBI != BBE; ++BBI) {
         std::cout << "BB<" << *BBI << "> "
                   << ((li->loop_head() == *BBI)?" Head ":"")
                   << ((li->isLatch(*BBI))?" Latch ":"") << "\n";
@@ -196,8 +214,8 @@ namespace simd {
       VectorizingLoop = false;
     }
 
-    void completeSIMDLoop(LoopInfo *li, int CurLoopIter) {
-      if (_useInstTrace)
+    void completeSIMDLoop(LoopInfo *li, int CurLoopIter, bool useIT) {
+      if (_useInstTrace || li->body_size() == 1 || useIT)
         completeSIMDLoopWithInstTrace(li, CurLoopIter);
       else
         completeSIMDLoopWithLI(li, CurLoopIter);
@@ -258,13 +276,82 @@ namespace simd {
         return;
       }
 
+      std::set<Op*> internalCtrlOps;
+
+      uint64_t pc = 0;
+      for (auto I = li->rpo_rbegin(), E = li->rpo_rend(); I != E; ++I) {
+        BB *bb = *I;
+        Op *ref_op = 0;
+        for (auto OI = bb->op_rbegin(), OE = bb->op_rend(); OI != OE; ++OI) {
+          Op *op = *OI;
+          if (pc != op->cpc().first) {
+            ref_op = op;
+            pc = op->cpc().first;
+          }
+          if (!li->isLatch(bb) &&
+              ref_op->isCtrl() && !(ref_op->isCall() || ref_op->isReturn())) {
+            internalCtrlOps.insert(op);
+          }
+        }
+      }
+
+      static std::set<LoopInfo*> li_printed;
+      static std::set<Op*>       op_printed;
+
+      if (!li_printed.count(li)) {
+        li_printed.insert(li);
+        std::cout << "\nLoop " << li << "\n";
+
+        for (auto I = li->rpo_rbegin(), E = li->rpo_rend(); I != E; ++I) {
+          BB *bb = *I;
+          std::cout << "\nBB" << bb << ": ";
+          if (li->loop_head() == bb)
+            std::cout << " <Head> ";
+          if (li->isLatch(bb))
+            std::cout << " <Latch>";
+          std::cout << "\n";
+
+          std::cout << "\tPred:: ";
+          for (auto PI = bb->pred_begin(), PE = bb->pred_end(); PI != PE; ++PI) {
+            std::cout << *PI << " ";
+          }
+          std::cout << "\n";
+
+          std::cout << "\tSucc:: ";
+          for (auto SI = bb->succ_begin(), SE = bb->succ_end(); SI != SE; ++SI) {
+            std::cout << *SI << " ";
+          }
+          std::cout << "\n";
+
+          for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
+            Op *op = *OI;
+            printDisasm(op);
+          }
+        }
+        std::cout << "\n<==\n\n";
+      }
+
       // printLoop(li);
 
       //std::cout << "\n====== completeSIMDLoopWithLI ======>>>\n";
-      for (auto I = li->rpo_begin(), E = li->rpo_end(); I != E; ++I) {
+      for (auto I = li->rpo_rbegin(), E = li->rpo_rend(); I != E; ++I) {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
+
+          // If it is internal control, and not a call or return
+          // -- we are not creating instruction
+          if (internalCtrlOps.count(op)) {
+            continue;
+          }
+
+          if (!op_printed.count(op)) {
+            printDisasm(op);
+            op_printed.insert(op);
+            if (op == op->bb()->lastOp())
+              std::cout << "\n";
+          }
+
           //printDisasm(op);
           InstPtr inst = createSIMDInst(op);
           updateForSIMD(op, inst, false);
@@ -294,6 +381,12 @@ namespace simd {
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
 
+    bool isLastInstACall = true;
+    bool isLastInstAReturn = true;
+    bool forceCompleteWithIT = false;
+    LoopInfo *StackLoop = 0;
+    unsigned StackLoopIter = 0;
+
     //
     // Override insert_inst to transform to SIMD graph
     //
@@ -303,7 +396,21 @@ namespace simd {
       bool insertSIMDInst = false;
       LoopInfo *li = getLoop(op);
 
+
+      if (li)
+        printLoop(li);
+
       if (CurLoop != li) {
+
+        if (isLastInstACall && CurLoop && canVectorize(CurLoop)) {
+          if (op->func()->nice_name() == "__libm_sse2_sincosf") {
+            // We can vectorize this function as well.
+            StackLoop = CurLoop;
+            StackLoopIter = CurLoopIter;
+            forceCompleteWithIT = true;
+          }
+        }
+
         //std::cout << "\n";
         #ifdef TRACE_INST
         // We switched to a different loop, complete simd_loop
@@ -313,12 +420,21 @@ namespace simd {
           std::cout << "\n";
         }
         #endif
-        if (CurLoop && canVectorize(CurLoop)) {
-          completeSIMDLoop(CurLoop, CurLoopIter);
+
+        if (!StackLoop && CurLoop && canVectorize(CurLoop)) {
+          completeSIMDLoop(CurLoop, CurLoopIter, forceCompleteWithIT);
+          forceCompleteWithIT = false;
         }
         CurLoop = li;
         CurLoopIter = 0;
         global_loop_iter = 0;
+
+        if (isLastInstAReturn) {
+          StackLoop = 0;
+          CurLoopIter = StackLoopIter;
+          StackLoopIter = 0;
+        }
+
       } else if (!CurLoop) {
 
         #ifdef TRACE_INST
@@ -353,11 +469,17 @@ namespace simd {
           }
         // set insertSIMDInstr if curloopiter is a multiple of _simd_len.
         insertSIMDInst =  (canVectorize(CurLoop)
-                           && CurLoopIter && (CurLoopIter % _simd_len == 0));
+                           && CurLoopIter && (CurLoopIter % _simd_len == 0)
+                           && !StackLoop);
       }
 
+      if (op) {
+        isLastInstACall = op->isCall();
+        isLastInstAReturn = op->isReturn();
+      }
 
-      if (!canVectorize(li)) {
+      if (!StackLoop && !canVectorize(li)) {
+
         // Create the instruction
         InstPtr inst = createInst(img, index, op);
 
@@ -378,8 +500,9 @@ namespace simd {
 
 
       if (insertSIMDInst) {
-        completeSIMDLoop(CurLoop, CurLoopIter);
+        completeSIMDLoop(CurLoop, CurLoopIter, forceCompleteWithIT);
         CurLoopIter = 0; // reset loop counter..
+        forceCompleteWithIT = false;
       }
     }
 

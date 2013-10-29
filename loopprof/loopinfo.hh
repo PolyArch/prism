@@ -198,6 +198,7 @@ public:
     return _subgraphSet.size()>0;
   }
 
+  unsigned              body_size()   { return _loopBody.size(); }
   BBset::iterator       body_begin()  { return _loopBody.begin(); }
   BBset::iterator       body_end()    { return _loopBody.end(); }
   PathMap::iterator     paths_begin() { return _pathMap.begin(); }
@@ -209,6 +210,9 @@ public:
 
   BBvec::iterator       rpo_begin()   { return _rpo.begin(); }
   BBvec::iterator       rpo_end()     { return _rpo.end(); }
+
+  BBvec::reverse_iterator rpo_rbegin()   { return _rpo.rbegin(); }
+  BBvec::reverse_iterator rpo_rend()     { return _rpo.rend(); }
 
   bool isOuterLoop() {
     return _immOuterLoop == NULL;

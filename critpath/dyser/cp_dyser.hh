@@ -265,7 +265,7 @@ namespace DySER {
       loop_InstTrace.clear();
     }
 
-    virtual void insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
+    virtual InstPtr insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
                                     bool pipeLined = true) {
       if (SI->isInLoadSlice(op)) {
         addDeps(inst, op);
@@ -279,39 +279,41 @@ namespace DySER {
           addDeps(dy_send, op);
           pushPipe(dy_send);
           inserted(dy_send);
+          return dy_send;
         }
-      } else {
-        InstPtr prev_inst = getInstForOp(op);
-
-        InstPtr dy_inst = createDyComputeInst(op,
-                                              inst->index());
-        //Assumptions::
-        // All Instruction in CS can be scheduled to DySER
-        // Latency between complete->next instruction is zero
-        // Honor data dependence
-        setDataDep(dy_inst);
-        // Honor ready to Execute
-        setReadyToExecute(dy_inst);
-        // Honor Execute->Complete (latency)
-        setExecuteToComplete(dy_inst);
-        if (pipeLined) {
-          // Honor DySER InOrder execution
-          if (prev_inst.get() != 0)
-            setExecuteToExecute(prev_inst, dy_inst);
-        }
-
-        keepTrackOfInstOpMap(dy_inst, op);
-        if (!op->isStore() && SI->isADySEROutput(op)) {
-          InstPtr dy_recv = createDyRecvInst(op);
-          addDeps(dy_recv, op);
-          pushPipe(dy_recv);
-          inserted(dy_recv);
-          getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
-                                 *dy_recv, Inst_t::Ready, 0,
-                                 E_RDep);
-        }
+        return inst;
       }
 
+      InstPtr prev_inst = getInstForOp(op);
+
+      InstPtr dy_inst = createDyComputeInst(op,
+                                            inst->index());
+      //Assumptions::
+      // All Instruction in CS can be scheduled to DySER
+      // Latency between complete->next instruction is zero
+      // Honor data dependence
+      setDataDep(dy_inst);
+      // Honor ready to Execute
+      setReadyToExecute(dy_inst);
+      // Honor Execute->Complete (latency)
+      setExecuteToComplete(dy_inst);
+      if (pipeLined) {
+        // Honor DySER InOrder execution
+        if (prev_inst.get() != 0)
+          setExecuteToExecute(prev_inst, dy_inst);
+      }
+
+      keepTrackOfInstOpMap(dy_inst, op);
+      if (!op->isStore() && SI->isADySEROutput(op)) {
+        InstPtr dy_recv = createDyRecvInst(op);
+        addDeps(dy_recv, op);
+        pushPipe(dy_recv);
+        inserted(dy_recv);
+        getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
+                               *dy_recv, Inst_t::Ready, 0,
+                               E_RDep);
+      }
+      return dy_inst;
     }
 
 

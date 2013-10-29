@@ -107,8 +107,9 @@ protected:
       return false;
 
     // no inner loop.
-    if (!li->isInnerLoop())
+    if (!li->isInnerLoop()) {
       return false;
+    }
 
     return hasVectorizableMemAccess(li);
   }

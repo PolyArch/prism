@@ -98,6 +98,11 @@ public:
   OpVec::iterator op_begin() {return _ops.begin();}
   OpVec::iterator op_end() {return _ops.end();}
 
+  OpVec::reverse_iterator op_rbegin() {return _ops.rbegin();}
+  OpVec::reverse_iterator op_rend() {return _ops.rend();}
+
+
+
   void rev_trace(BB* bb_prev);
   void trace(BB* bb_next);
   void remove(BB* bb);

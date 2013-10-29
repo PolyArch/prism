@@ -109,6 +109,19 @@ namespace DySER {
       loop_InstTrace.clear();
     }
 
+
+    bool useCloneOpMap = false;
+    unsigned pipeId = 0;
+    std::map<Op*, std::map<unsigned, InstPtr > > cloneOp2InstMap;
+    InstPtr getInstForOp(Op* op) {
+      if (!useCloneOpMap)
+        return cp_dyser::getInstForOp(op);
+      if (cloneOp2InstMap.count(op) == 0 || pipeId == 0)
+        return cp_dyser::getInstForOp(op);
+      return cloneOp2InstMap[op][pipeId];
+    }
+
+
     void completeDySERLoopWithLI(LoopInfo *LI,
                                  unsigned curLoopIter)
     {
@@ -134,9 +147,12 @@ namespace DySER {
       if (depth == 0)
         depth = 1;
 
+      assert(numClones*depth == _dyser_vec_len);
+
       _num_config += extraConfigRequired;
 
       DySERizingLoop = true;
+
       for (auto I = LI->rpo_begin(), E = LI->rpo_end(); I != E; ++I) {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
@@ -144,9 +160,19 @@ namespace DySER {
           InstPtr inst = InstPtr(new Inst_t(op->img, 0));
           if (!SI->isInLoadSlice(op)) {
             // Emit dyser_vec_len nodes for compute slice
-            for (unsigned k = 0; k < _dyser_vec_len; k += depth) {
+            for (unsigned clone = 0; clone < numClones; ++clone) {
               for (unsigned j = 0; j < depth; ++j) {
-                insert_sliced_inst(SI, op, inst, (k!=0));
+                useCloneOpMap = true;
+                pipeId = j;
+                InstPtr dy_inst = insert_sliced_inst(SI, op, inst,
+                                                     false);
+                pipeId = 0;
+                useCloneOpMap = false;
+                cloneOp2InstMap[op][j] = dy_inst;
+                if (j != 0) {
+                  setExecuteToExecute(cloneOp2InstMap[op][j-1],
+                                      dy_inst);
+                }
               }
             }
           } else {
