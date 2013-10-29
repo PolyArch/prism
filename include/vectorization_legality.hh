@@ -15,7 +15,8 @@ class VectorizationLegality {
 
 protected:
 
-  LoopInfo *getLoop(Op *op) {
+  LoopInfo *getLoop(Op *op,
+                    bool prevInstAReturn = false, LoopInfo *stack_loop = 0) {
     // not a first instruction.
     if (op->bb_pos() != 0)
       return _cached_curloop;
@@ -30,6 +31,11 @@ protected:
 
     // is op in the current loop itself?
     if (_cached_curloop && _cached_curloop->inLoop(op->bb())) {
+      return _cached_curloop;
+    }
+
+    if (prevInstAReturn && stack_loop && stack_loop->inLoop(op->bb())) {
+      _cached_curloop = stack_loop;
       return _cached_curloop;
     }
 

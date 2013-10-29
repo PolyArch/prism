@@ -143,6 +143,7 @@ namespace simd {
       }
       std::cout << "================" << li << "==========\n";
       std::cout << "======================================\n";
+      std::cout.flush();
     }
 
 
@@ -381,8 +382,8 @@ namespace simd {
     unsigned CurLoopIter = 0;
     uint64_t global_loop_iter = 0;
 
-    bool isLastInstACall = true;
-    bool isLastInstAReturn = true;
+    bool isLastInstACall = false;
+    bool isLastInstAReturn = false;
     bool forceCompleteWithIT = false;
     LoopInfo *StackLoop = 0;
     unsigned StackLoopIter = 0;
@@ -394,7 +395,7 @@ namespace simd {
                      Op *op) {
 
       bool insertSIMDInst = false;
-      LoopInfo *li = getLoop(op);
+      LoopInfo *li = getLoop(op, isLastInstAReturn, StackLoop);
 
 
       if (li)
@@ -414,7 +415,8 @@ namespace simd {
         //std::cout << "\n";
         #ifdef TRACE_INST
         // We switched to a different loop, complete simd_loop
-        std::cout << "DiffLoop<" << li << ">:: ";
+        std::cout << "Diff Loop<" << li << ">" << CurLoopIter << ":: StackLoop <" << StackLoop << ">" << StackLoopIter << "::"
+                  << ((isLastInstACall)?"L..Call":"") << ((isLastInstAReturn)?"L..Return":"");
         printDisasm(op);
         if (op == op->bb()->lastOp()) {
           std::cout << "\n";
@@ -433,12 +435,17 @@ namespace simd {
           StackLoop = 0;
           CurLoopIter = StackLoopIter;
           StackLoopIter = 0;
+#ifdef TRACE_INST
+          // We switched to a different loop, complete simd_loop
+          std::cout << "  Reset Loop<" << li << ">" << CurLoopIter << ":: StackLoop <" << StackLoop << ">" << StackLoopIter << "::";
+#endif
+
         }
 
       } else if (!CurLoop) {
 
         #ifdef TRACE_INST
-        std::cout << "SameLoop<" << CurLoop << ">:: ";
+        std::cout << "SameLoop<" << CurLoop << ">" << CurLoopIter << ":: " << ">:: StackLoop<" << StackLoop << ">" << StackLoopIter << "::";
         printDisasm(op);
         if (op == op->bb()->lastOp()) {
           std::cout << "\n";
@@ -446,7 +453,7 @@ namespace simd {
         #endif
       } else if (CurLoop) {
         #ifdef TRACE_INST
-        std::cout << "SameLoop<" << CurLoop << ">:: ";
+        std::cout << "SameLoop<" << CurLoop << ">" << CurLoopIter<< ":: " << ">:: StackLoop<" << StackLoop << ">" << StackLoopIter << "::";
         printDisasm(op);
         if (op == op->bb()->lastOp()) {
           std::cout << "\n";

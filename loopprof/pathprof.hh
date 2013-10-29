@@ -365,7 +365,7 @@ public:
     _dId=0;
   }
 
-  void procSymTab(char* filename) {
+  void procSymTab(const char* filename) {
     ELF_parser::read_symbol_tables(filename,sym_tab);
   }
 

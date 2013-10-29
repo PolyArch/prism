@@ -38,6 +38,7 @@ int main(int argc, char *argv[])
   load_plugins(argv[0]);
 
   string run_name;
+  string binary_name;
 
   static struct option static_long_options[] =
     {
@@ -53,6 +54,7 @@ int main(int argc, char *argv[])
       {"all-models", no_argument, &allModels, 1},
       {"gen-loop-prof", no_argument, &gen_loop_prof, 1},
       {"run-name", required_argument, 0, 5},
+      {"binary", required_argument, 0, 'b'},
       {0,0,0,0}
     };
 
@@ -98,6 +100,7 @@ int main(int argc, char *argv[])
     case 5:
       run_name=string(optarg);
       break;
+    case 'b': binary_name = std::string(optarg); break;
     case 'h':
       std::cout << argv[0] << " [options] file\n";
       return(0);
@@ -133,6 +136,9 @@ int main(int argc, char *argv[])
   //determine the prof file name
   std::string prof_file(argv[optind]);
   size_t start_pos = prof_file.find_last_of("/");
+
+  if (binary_name != "")
+    Prof::get().procSymTab(binary_name.c_str());
 
   //open prof file
   bool hasLoopProfile = false;

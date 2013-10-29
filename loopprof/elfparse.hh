@@ -140,7 +140,7 @@ public:
       }
   }
   
-  static void read_symbol_tables(char* filename, SYM_TAB& sym_tab) {
+  static void read_symbol_tables(const char* filename, SYM_TAB& sym_tab) {
     elfio reader;
     if ( !reader.load( filename ) ) {
         printf( "File %s is not found or it is not an ELF file\n", filename );
