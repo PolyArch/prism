@@ -33,7 +33,7 @@ namespace simd {
     };
 
     unsigned _simd_len = 4;
-    bool _useInstTrace = true;
+    bool _useInstTrace = false;
 
   public:
     cp_simd() : CP_OPDG_Builder<T, E> () {
@@ -81,100 +81,6 @@ namespace simd {
 
 
     std::map<Op*, unsigned> _op2Count;
-
-#if 0
-    std::map<LoopInfo *, bool> isVectorizableMap;
-    bool isVectorizable(LoopInfo *li) {
-
-      if (isVectorizableMap.count(li))
-        return isVectorizableMap[li];
-
-      bool shouldPrint =  !li_printed.count(li);
-      if (shouldPrint) {
-        li_printed[li] = true;
-        printLoop(li);
-      }
-
-      bool canVectorize = true;
-
-      for (auto BBI = li->body_begin(), BBE = li->body_end(); BBI != BBE; ++BBI) {
-        for (auto I = (*BBI)->op_begin(), E = (*BBI)->op_end(); I != E; ++I) {
-          if (!(*I)->isLoad() && !(*I)->isStore())
-            continue;
-          int stride = 0;
-          if (!(*I)->getStride(&stride)) {
-            if (shouldPrint) {
-              //printDisasm(*I);
-              //std::cout << "    stride is not constant or unknown\n";
-              //(*I)->printEffAddrs();
-              //std::cout << "\n";
-            }
-            canVectorize = false;
-          }
-          for (auto DI = (*I)->m_begin(), DE = (*I)->m_end(); DI != DE; ++DI) {
-            Op *DepOp = *DI;
-            assert(DepOp->isLoad() || DepOp->isStore());
-            // Same -- broadcast load should handle this
-            if (DepOp == (*I))
-              continue;
-            if (DepOp->cpc().first == (*I)->cpc().first)
-              continue;
-
-            // load - load
-            if (DepOp->isLoad() && (*I)->isLoad())
-              continue;
-
-            // Same memory touched by two ops in the same loop...
-            if (li->inLoop(DepOp->bb())) {
-
-              // SIMD can handle must alias
-              // FIXME:: Same Address accessed is not guaranteed to be
-              // must-alias. For example, there may be a control instruction
-              // between them or it may be happenstance.
-
-              if (DepOp->isSameEffAddrAccessed(*I))
-                continue;
-
-              if (shouldPrint) {
-                //printDisasm(*I);
-                //(*I)->printEffAddrs();
-                //std::cout << "\n";
-
-                //std::cout << " may alias with \n";
-                //printDisasm(DepOp);
-                //DepOp->printEffAddrs();
-                //std::cout << "\n";
-              }
-              canVectorize = false;
-            }
-          }
-        }
-      }
-      isVectorizableMap[li] = canVectorize;
-      std::cout << ((canVectorize)? "Found "
-                    : "Non-")
-                <<  "vectorizable loop:: " << li
-                << " IterCnt: " << li->getTotalIters()
-                << " NumInst: " << li->numInsts() << "\n";
-      return canVectorize;
-    }
-
-
-    bool canVectorize(LoopInfo *li)
-    {
-      // No loop -- scalar
-      if (!li)
-        return false;
-
-      // No inner loop -- scalar
-      if (!li->isInnerLoop())
-        return false;
-
-      return isVectorizable(li);
-    }
-#endif
-
-    static std::map<LoopInfo*, bool> li_printed;
 
     void printDisasm(uint64_t pc, int upc) {
       std::cout << pc << "," << upc << " : "

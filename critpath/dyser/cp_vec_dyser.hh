@@ -20,7 +20,6 @@ static unsigned floor_to_pow2(unsigned num)
   return num;
 }
 
-static 
 
 namespace DySER {
   class cp_vec_dyser : public cp_dyser {
@@ -33,6 +32,8 @@ namespace DySER {
     virtual ~cp_vec_dyser() { }
 
     void handle_argument(const char *name, const char *optarg) {
+      cp_dyser::handle_argument(name, optarg);
+
       if (strcmp(name, "dyser-vec-len")) {
         _dyser_vec_len = atoi(optarg);
         if (_dyser_vec_len == 0)
@@ -73,7 +74,7 @@ namespace DySER {
       SliceInfo *SI = SliceInfo::get(DyLoop);
       assert(SI);
 
-      unsinged cssize = SI->cs_size();
+      unsigned cssize = SI->cs_size();
 
       // 19/16 = 1 extraConfigRequired
       unsigned extraConfigRequired = (cssize / _dyser_size);
@@ -119,7 +120,7 @@ namespace DySER {
       SliceInfo *SI = SliceInfo::get(LI);
       assert(SI);
 
-      unsinged cssize = SI->cs_size();
+      unsigned cssize = SI->cs_size();
 
       // 19/16 = 1 extraConfigRequired
       unsigned extraConfigRequired = (cssize / _dyser_size);
@@ -143,7 +144,7 @@ namespace DySER {
           InstPtr inst = InstPtr(new Inst_t(op->img, 0));
           if (!SI->isInLoadSlice(op)) {
             // Emit dyser_vec_len nodes for compute slice
-            for (unsigned k = 0; k < _dyser_vec_dyser; k += depth) {
+            for (unsigned k = 0; k < _dyser_vec_len; k += depth) {
               for (unsigned j = 0; j < depth; ++j) {
                 insert_sliced_inst(SI, op, inst, (k!=0));
               }

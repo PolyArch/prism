@@ -163,10 +163,16 @@ namespace DySER {
       if (CurLoop) {
         completeDySERLoop(CurLoop, CurLoopIter);
       }
-      return _lastInst->finalCycle();
+      return _lastInst->finalCycle() + _num_config * 64;
     }
 
-    void handle_argument(const char *name, const char *optarg) {}
+    void handle_argument(const char *name, const char *optarg) {
+      if (strcmp(name, "dyser-size") == 0) {
+        _dyser_size = atoi(optarg);
+        if (_dyser_size < 16)
+          _dyser_size = 16;
+      }
+    }
 
 
 
@@ -204,9 +210,15 @@ namespace DySER {
     }
 
 
+    LoopInfo *PrevLoop = 0;
     virtual void completeDySERLoop(LoopInfo *DyLoop,
                                    unsigned curLoopIter)
     {
+      if (PrevLoop != DyLoop) {
+        ++_num_config;
+        PrevLoop = DyLoop;
+      }
+
       if (0) {
         completeDySERLoopWithIT(DyLoop, curLoopIter);
       } else {
