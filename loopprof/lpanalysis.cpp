@@ -51,7 +51,13 @@ bool doLoopProfAnalysis(const char *trace_fname,
 
       CPC cpc = std::make_pair(cp_array[ind]._pc,
                                cp_array[ind]._upc);
+
+      if(cpc.first==0) {
+        break; //unreal instructions should be ignored
+      }
+
       ++count;
+
 
       #if 0
       if (pass == 2) {

@@ -26,6 +26,9 @@ namespace disasm {
                      Op *op) {
       if (!op)
         return;
+      if(op->bb_pos()==0) {
+        std::cout << "BB<" << op->bb()->rpoNum() << ">:\n";
+      }
       uint64_t pc  = op->cpc().first;
       uint16_t upc = op->cpc().second;
       std::cout << pc << "," << upc << " : "
