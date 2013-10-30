@@ -25,5 +25,11 @@ static void init()
   CPRegistry::get()->register_argument("ccores-iops", true, &OOO.cp_obj);
   CPRegistry::get()->register_argument("ccores-iops", true, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("ccores-bb-runahead",true,&OOO.cp_obj);
+  CPRegistry::get()->register_argument("ccores-bb-runahead",true,&In.cp_obj);
+
+  CPRegistry::get()->register_argument("ccores-full-dataflow",true,&OOO.cp_obj);
+  CPRegistry::get()->register_argument("ccores-full-dataflow",true,&In.cp_obj);
+
 }
 

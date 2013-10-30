@@ -1,5 +1,5 @@
-#ifndef MCPAT_DEFAULT_HH
-#define MCPAT_DEFAULT_HH
+//#ifndef MCPAT_DEFAULT_HH
+//#define MCPAT_DEFAULT_HH
 
 static const char * xml_str = R"(
 <?xml version="1.0" ?>
@@ -446,4 +446,4 @@ static const char * xml_str = R"(
 </component>
 )";
 
-#endif //MCPAT_DEFAULT_HH
+//#endif //MCPAT_DEFAULT_HH

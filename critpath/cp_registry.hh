@@ -12,6 +12,42 @@
 #include <tuple>
 
 
+static  std::string exec(const char* cmd) {
+  FILE* pipe = popen(cmd, "r");
+  if (!pipe) return "ERROR";
+  char buffer[128];
+  std::string result = "";
+  while(!feof(pipe)) {
+      if(fgets(buffer, 128, pipe) != NULL)
+              result += buffer;
+  }
+  pclose(pipe);
+  return result;
+}
+
+static std::string grepF(std::string& fname, const char* sval, 
+                  int lineoff, int field) {
+  std::stringstream rss;
+  rss << "grep -irA" << lineoff-1 <<  " \"" << std::string(sval) << "\" "
+      << fname << " | tail -1 | tr -s \" \" | cut -d\" \" -f" << field;
+
+  std::string rs = rss.str();
+  //std::cout << rs << "\n";
+  return exec(rs.c_str());
+}
+
+static void execMcPAT(std::string& inf, std::string& outf) {
+  const char *mcpat = getenv("MCPAT");
+  if (!mcpat) {
+    mcpat = "mcpat";
+    std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile ") 
+                   + inf + std::string(" 2>&1 > ") + outf;
+    //std::cout << ms << "\n";
+    system(ms.c_str());
+  }
+}
+
+
 class CPRegistry {
 private:
   CPRegistry() {}
@@ -143,28 +179,24 @@ public:
                                 I->first + std::string(".xml")).c_str() );
     }
   }
+
   void runMcPAT() {
     // look up env
-    const char *mcpat = getenv("MCPAT");
-    if (!mcpat)
-      mcpat = "mcpat";
-
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       std::cout << I->first << " Dynamic Power(W)... ";
       std::cout.flush();
 
+      std::string inf = std::string("mcpat/") + _run_name + 
+                         I->first + std::string(".xml");
+      std::string outf = std::string("mcpat/") + _run_name + 
+                         I->first + std::string(".out");
 
-      std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile mcpat/") 
-                       + _run_name + I->first +
-                       std::string(".xml 2>&1 > mcpat/") + _run_name + I->first +
-                       std::string(".out");
+      execMcPAT(inf,outf);
 
-      system(ms.c_str());
-      std::string gs = std::string("grep -ir \"Runtime Dynamic\" ") +
-                       std::string("mcpat/") + _run_name + I->first + std::string(".out") +
-                       std::string(" | head -1 | cut -d\" \" -f6");
-      system(gs.c_str());
+      float rund = stof(grepF(outf,"Processor:",9,5));
+      std::cout << rund << "\n";
 
+      I->second->calcAccelEnergy();
     }
   }
 

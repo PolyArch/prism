@@ -4,6 +4,37 @@
 using namespace std;
 
 uint32_t Subgraph::_idCounter=0;
+void Subgraph::checkVec() {
+  //topological sort the subgraph
+  if(_opVec.size() != _ops.size()) {
+    assert(_opVec.size()==0);
+    std::set<Op*> ops = _ops;
+    while(ops.size() != 0) {
+      for(auto i = ops.begin(),e=ops.end();i!=e;++i) {
+        Op* op = *i;
+        bool readyOp=true;
+        for(auto dsi=op->d_begin(),dse=op->d_end();dsi!=dse;++dsi) {
+          Op* dep_op = *dsi;
+          if(LoopInfo::staticForwardDep(dep_op,op) && ops.count(dep_op)) {
+            readyOp=false;
+            break;
+          }
+        }
+        if(readyOp) {
+          ops.erase(op);
+          _opVec.push_back(op);
+          break;
+        }
+      }
+    }
+  } 
+  assert(_ops.size() == _opVec.size());
+}
+
+
+
+
+
 uint32_t LoopInfo::_idcounter=0;
 
 #define MAX_GAMS_SIZE 200

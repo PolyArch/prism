@@ -49,6 +49,8 @@ protected:
   uint64_t mult_ops=0;
   uint64_t func_calls=0;
   uint64_t idleCycles=0;
+  uint64_t nonPipelineCycles=0;
+
 
   //icache
   uint64_t icache_read_accesses=0, icache_read_misses=0, icache_conflicts=0;
@@ -204,11 +206,18 @@ public:
 
   virtual uint64_t numCycles() = 0;
 
+  virtual void calcAccelEnergy() {
+    return;
+  }
+
+  std::string mcpat_xml_fname;
+  std::string mcpat_xml_accel_fname;
   virtual void printMcPATxml(const char* filename) {
     #include "mcpat-defaults.hh"
     pugi::xml_document doc;
     std::istringstream ss(xml_str);
     pugi::xml_parse_result result = doc.load(ss);
+    mcpat_xml_fname=std::string(filename);
 
     //pugi::xml_parse_result result = doc.load_file("tony-ooo.xml");
     if(result) {

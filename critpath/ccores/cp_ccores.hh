@@ -34,8 +34,10 @@ public:
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
 
-  uint64_t _curCCoresStartCycle=0, _curCCoresStartInst=0;
+  uint64_t _startCCoresCycle=0;
+  uint64_t _curCCoresStartInst=0;
   uint64_t _totalCCoresCycles=0, _totalCCoresInsts=0;
+  //uint64_t
 
   virtual void accelSpecificStats(std::ostream& out) {
     out << " (ccores-only " << _totalCCoresCycles
@@ -43,22 +45,20 @@ public:
        << ")";
   }
 
-  unsigned _ccores_num_mem=1, _ccores_bb_runahead=1, _ccores_max_ops=1000,_ccores_iops=2;
+  //energy things
+  uint64_t _ccores_int_ops=0, _ccores_fp_ops=0, _ccores_mult_ops=0;
+
+  //arguements
+  unsigned _ccores_num_mem=1, _ccores_max_ops=1000,_ccores_iops=2;
+  unsigned _ccores_bb_runahead=0, _ccores_full_dataflow=0;
+
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "ccores-num-mem") == 0) {
       unsigned temp = atoi(optarg);
       if (temp != 0) {
         _ccores_num_mem = temp;
       } else {
-        std::cerr << "ERROR: ccores-num-mem arg\"" << optarg << "\" is invalid\n";
-      }
-    }
-    if (strcmp(name, "ccores-bb-runahead") == 0) {
-      unsigned temp = atoi(optarg);
-      if (temp != 0) {
-        _ccores_bb_runahead = temp;
-      } else {
-        std::cerr << "ERROR: ccores-bb-runahead arg\"" << optarg << "\" is invalid\n";
+         std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
     if (strcmp(name, "ccores-max-ops") == 0) {
@@ -66,7 +66,7 @@ public:
       if (temp != 0) {
         _ccores_max_ops = temp;
       } else {
-        std::cerr << "ERROR: ccores-max-ops arg\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
     if (strcmp(name, "ccores-iops") == 0) {
@@ -74,7 +74,23 @@ public:
       if (temp != 0) {
         _ccores_iops = temp;
       } else {
-        std::cerr << "ERROR: ccores-max-ops arg\"" << optarg << "\" is invalid\n";
+         std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
+      }
+    }
+    if (strcmp(name, "ccores-bb-runahead") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _ccores_bb_runahead = temp;
+      } else {
+         std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
+      }
+    }
+    if (strcmp(name, "ccores-full-dataflow") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _ccores_full_dataflow = temp;
+      } else {
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
 
@@ -122,7 +138,7 @@ public:
         LoopInfo* li = i->second;
         if(!li->cantFullyInline()) {
           float inlineValue=inline_value(li); 
-          std::cout << "->" << li->nice_name() << " --- " << inlineValue << "\n";
+          std::cout << "->" << li->nice_name() << " (value " << inlineValue << ")\n";
           PQL.push(li,inlineValue);
         } else {
           //std::cout << "can't inline " << li->nice_name() << "\n";
@@ -131,7 +147,7 @@ public:
       }
       if(!fi->cantFullyInline()) {
         float inlineValue = inline_value(fi);
-        std::cout << "->" << fi->nice_name() << " === " << inlineValue << "\n";
+        std::cout << "->" << fi->nice_name() << " (value " << inlineValue << ")\n";
         PQF.push(fi,inlineValue);
       } else {
         //std::cout << "can't inline " << fi->nice_name() << "\n";
@@ -162,8 +178,9 @@ public:
         
         LoopInfo* li=PQL.begin()->second;
           float inlineValue=PQL.begin()->first; 
-          std::cout << "pick: " << li->func()->nice_name() << "_" << li->id()
-                    << " === " << inlineValue << "\n";
+          std::cout << "-------------------------- pick loop: " 
+                    << li->func()->nice_name() << "_" << li->id()
+                    << "  (value " << inlineValue << ")\n";
 
         PQL.erase(li);
         if(total + li->inlinedStaticInsts() < (int)_ccores_max_ops) {
@@ -175,7 +192,8 @@ public:
       } else { //add a func
         FunctionInfo* fi=PQF.begin()->second;
            float inlineValue = PQF.begin()->first;
-           std::cout << "pick: " << fi->nice_name() << " === " << inlineValue << "\n";
+           std::cout << "------------------------- pick func: " 
+                     << fi->nice_name() << " (value " << inlineValue << ")\n";
 
         PQF.erase(fi);
         if(total + fi->inlinedStaticInsts() < (int)_ccores_max_ops) {
@@ -270,7 +288,6 @@ public:
   FunctionInfo* _prevFunc=NULL;
   //FunctionInfo* _prevBB=NULL;
 
-  uint64_t _startCCoresCycle=0;
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
     
     if(first_op) {
@@ -282,6 +299,9 @@ public:
       //}
       if(_fi_ccore) {
         _prevFunc=op->func();
+      }
+      if(_fi_ccore || _li_ccore) {
+        _startCCoresCycle=1;
       }
     }
 
@@ -362,8 +382,22 @@ public:
         prev_bb_end=cur_bb_end;
         T* event_ptr = new T();
         cur_bb_end.reset(event_ptr);
+        
+        if(prev_bb_end) {
+          getCPDG()->insert_edge(*prev_bb_end,
+                                 *cur_bb_end, 1, E_CSBB); 
+        }
       }
       addCCoreDeps(sh_inst,img);
+
+      if(sh_inst->_floating) {
+        _ccores_fp_ops++;
+      } else if (sh_inst->_opclass==2) {
+        _ccores_mult_ops++;
+      } else {
+        _ccores_int_ops++;
+      }
+
 
 /*      prevRet = op->isReturn();
       if(prevRet) {
@@ -373,7 +407,7 @@ public:
       Inst_t* inst = new Inst_t(img,index);
       std::shared_ptr<Inst_t> sh_inst(inst);
       getCPDG()->addInst(sh_inst,index);
-      if(transitioned) {
+      if(transitioned) { 
         if(cur_bb_end) {
           getCPDG()->insert_edge(*cur_bb_end,
               *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
@@ -433,7 +467,7 @@ private:
   //(no need for ready, b/c it has dedicated resources)
   virtual void setExecuteCycle_cc(std::shared_ptr<CCoresInst>& inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(*inst, CCoresInst::BBReady,
-                           *inst, CCoresInst::Execute, 0, true);
+                           *inst, CCoresInst::Execute, 0, E_BBA);
 
     for (int i = 0; i < 7; ++i) {
       unsigned prod = inst->_prod[i];
@@ -442,7 +476,7 @@ private:
       }
       dg_inst_base<T,E>& dep_inst = getCPDG()->queryNodes(inst->index()-prod);
       getCPDG()->insert_edge(dep_inst, dep_inst.eventComplete(),
-                             *inst, CCoresInst::Execute, 0, true);
+                             *inst, CCoresInst::Execute, 0, E_RDep);
     }
 
     //Memory dependence enforced by BB ordering, in the restricted case
@@ -458,16 +492,16 @@ private:
 
       if (prev_node._isstore && inst->_isload) {
         //data dependence
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  *inst, CCoresInst::Execute, 0, true);
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  *inst, CCoresInst::Execute, 0, E_MDep);
       } else if (prev_node._isstore && inst->_isstore) {
         //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  *inst, CCoresInst::Execute, 0, true);
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  *inst, CCoresInst::Execute, 0, E_MDep);
       } else if (prev_node._isload && inst->_isstore) {
         //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node.index(), prev_node.eventComplete(),
-                                  *inst, CCoresInst::Execute, 0, true);
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  *inst, CCoresInst::Execute, 0, E_MDep);
       }
     }
 
@@ -487,18 +521,39 @@ private:
 
     getCPDG()->insert_edge(inst, CCoresInst::Execute,
                            inst, CCoresInst::Complete, lat);
-
+    
     if(cur_bb_end) {
       inst.endBB = cur_bb_end; // have instruction keep
-      getCPDG()->insert_edge(inst, CCoresInst::Complete,
-                               *cur_bb_end, 0);
-    }
 
+      if(_ccores_full_dataflow) {
+         if(inst._isctrl && inst._ctrl_miss) {
+          getCPDG()->insert_edge(inst, CCoresInst::Complete,
+                                 *cur_bb_end, 1,E_BBC);
+        }
+      } else if(_ccores_bb_runahead) {
+        if(inst._isctrl) {
+          getCPDG()->insert_edge(inst, CCoresInst::Complete,
+                                 *cur_bb_end, 0,E_BBC);
+        }
+      } else {
+        getCPDG()->insert_edge(inst, CCoresInst::Complete,
+                               *cur_bb_end, 0,E_BBC);
+
+      }
+    }
   }
 
   uint64_t numCycles() {
     getCPDG()->finish(maxIndex);
-    return getCPDG()->getMaxCycles();
+    uint64_t curCycle = getCPDG()->getMaxCycles();
+
+     if(_startCCoresCycle!=0) {
+       _totalCCoresCycles+= curCycle-_startCCoresCycle;
+       _startCCoresCycle=curCycle;
+     }
+
+
+    return curCycle;
   }
 
   virtual void checkNumMSHRs(std::shared_ptr<CCoresInst>& n,uint64_t minT=0) {
@@ -539,19 +594,57 @@ private:
     }
   }
 
+  // Handle enrgy events for McPAT XML DOC
+  virtual void setEnergyEvents(pugi::xml_document& doc) {
+    //set the normal events based on the m5out/stats file
+    CP_DG_Builder::setEnergyEvents(doc);
+
+    #include "mcpat-defaults.hh"
+    pugi::xml_document accel_doc;
+    std::istringstream ss(xml_str);
+    pugi::xml_parse_result result = accel_doc.load(ss);
+
+    //pugi::xml_parse_result result = doc.load_file("tony-ooo.xml");
+
+    if(result) {
+      pugi::xml_node system_node = accel_doc.child("component").find_child_by_attribute("name","system");
+      //set the total_cycles so that we get power correctly
+      sa(system_node,"total_cycles",numCycles());
+ 
+      pugi::xml_node core_node =
+                system_node.find_child_by_attribute("name","core0");
+      sa(core_node,"ALU_per_core", Prof::get().int_alu_count);
+      sa(core_node,"MUL_per_core", Prof::get().mul_div_count);
+      sa(core_node,"FPU_per_core", Prof::get().fp_alu_count);
+
+      sa(core_node,"ialu_accesses",_ccores_int_ops);
+      sa(core_node,"fpu_accesses",_ccores_fp_ops);
+      sa(core_node,"mul_accesses",_ccores_mult_ops);
+ 
+    } else {
+      std::cerr << "XML Malformed\n";
+      return;
+    }
+
+    mcpat_xml_accel_fname = 
+           std::string(mcpat_xml_fname) + std::string(".accel");
+    accel_doc.save_file(mcpat_xml_accel_fname.c_str());
+  }
+
+  virtual void calcAccelEnergy() {
+    std::string outf = mcpat_xml_accel_fname + ".out";
+
+    std::cout << _name << " accel: ... ";
+    std::cout.flush();
+
+    float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
+    float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
+    float calu  = stof(grepF(outf,"Complex ALUs",7,5));
+    std::cout << ialu << ", " << fpalu << ", " << calu << "\n";
+
+  }
+
 };
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -84,6 +84,15 @@ public:
 
 
   virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
+    Inst_t* depInst = getCPDG()->peekPipe(-1);
+    if(depInst) {
+      uint64_t commitCycle = depInst->cycleOfStage(Inst_t::Commit);
+      uint64_t fetchCycle = sh_inst->cycleOfStage(Inst_t::Fetch);
+      int64_t diff = fetchCycle - commitCycle;
+      if(diff > 0) {
+        nonPipelineCycles+=diff;
+      }
+    }
     getCPDG()->pushPipe(sh_inst);
     rob_head_at_dispatch++;
   }
@@ -692,7 +701,7 @@ protected:
     }
 
     /*
-    // num src regs is wrong... eventually fix this in gem5, for now just cheat
+    // num src regs is wrong... eventually fix this in gem5
     if(inst._floating) {
       regfile_freads+=inst._numSrcRegs;
     } else {
@@ -1747,8 +1756,15 @@ protected:
     sa(system_node,"idle_cycles", idleCycles);
     sa(system_node,"busy_cycles",busyCycles);
 
+
+    //std::cout << "squash: " << squashed_insts
+    //          << "commit: " << committed_insts << "\n";            
+    
     //Modify relevent events to be what we predicted
-    double squashRatio = (double)squashed_insts/(double)(committed_insts);
+    double squashRatio=0;
+    if(committed_insts!=0) {
+      squashRatio =(double)squashed_insts/(double)committed_insts;
+    }
     double highSpecFactor = 1.00+1.5*squashRatio;
     double specFactor = 1.00+squashRatio;
     double halfSpecFactor = 1.00+0.5*squashRatio;
@@ -1767,15 +1783,24 @@ protected:
     sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*fourthSpecFactor));
     sa(core_node,"store_instructions",(uint64_t)(committed_store_insts*fourthSpecFactor));
 
-    sa(core_node,"committed_instructions",committed_insts);
-    sa(core_node,"committed_int_instructions",committed_int_insts);
-    sa(core_node,"committed_fp_instructions",committed_fp_insts);
+    sa(core_node,"committed_instructions", committed_insts);
+    sa(core_node,"committed_int_instructions", committed_int_insts);
+    sa(core_node,"committed_fp_instructions", committed_fp_insts);
 
     sa(core_node,"total_cycles",numCycles());
     sa(core_node,"idle_cycles", idleCycles); //TODO: how to get this?
     sa(core_node,"busy_cycles",busyCycles);
 
-    sa(core_node,"ROB_reads",(uint64_t)(rob_reads-idleCycles)*halfSpecFactor);
+    /*
+    if(true_idle_cycles<0) {
+      true_idle_cycles=0;
+    }*/
+    if(!_isInOrder) {
+      sa(core_node,"ROB_reads",(uint64_t)(rob_reads-idleCycles)*halfSpecFactor);
+    } else {
+      sa(core_node,"ROB_reads",(uint64_t)0);
+    } 
+
     sa(core_node,"ROB_writes",(uint64_t)(rob_writes*specFactor)+squashed_insts);
 
     sa(core_node,"rename_reads",(uint64_t)(rename_reads*specFactor));
@@ -1805,7 +1830,16 @@ protected:
     sa(core_node,"cdb_alu_accesses",(uint64_t)(committed_int_insts*specFactor));
     sa(core_node,"cdb_fpu_accesses",(uint64_t)(committed_fp_insts*specFactor));
     sa(core_node,"cdb_mul_accesses",(uint64_t)(mult_ops*specFactor));
-     
+
+    // ---------- icache --------------
+    pugi::xml_node icache_node =
+              core_node.find_child_by_attribute("name","icache");
+    sa(icache_node,"read_accesses",icache_read_accesses);
+    sa(icache_node,"read_misses",icache_read_misses);
+    //sa(icache_node,"conflicts",Prof::get().icacheReplacements);
+
+
+
   }
 };
 

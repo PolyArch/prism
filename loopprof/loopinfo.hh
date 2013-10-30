@@ -16,9 +16,11 @@
 class Subgraph {
 public:
   typedef std::set<Op*> OpSet;
+  typedef std::vector<Op*> OpVec;
 
 private:
   OpSet _ops;
+  OpVec _opVec;
   static uint32_t _idCounter;
   uint32_t _id;
 
@@ -29,12 +31,21 @@ template<class Archive>
     ar & _ops;
   }
 
-  Subgraph():_id(_idCounter++){}
+  Subgraph():_id(_idCounter++){
+    _ops.clear();
+    _opVec.clear();
+  }
 
   void insertOp(Op* op) {_ops.insert(op);}
-  bool hasOp(Op* op) {return _ops.count(op);}
+  void checkVec();
+  bool hasOp(Op* op) {
+    return _ops.count(op);
+  }
   OpSet::iterator op_begin() {return _ops.begin();}
   OpSet::iterator op_end() {return _ops.end();}
+
+  OpVec::iterator opv_begin() {checkVec(); return _opVec.begin();}
+  OpVec::iterator opv_end() {return _opVec.end();}
   unsigned size() {return _ops.size();}
 
   uint32_t id() {return _id;}
@@ -155,7 +166,7 @@ template<class Archive>
   }
 
 public:
-  bool forwardDep(Op* dop, Op* op) {
+  static bool staticForwardDep(Op* dop, Op* op) {
     if(dop->bb() == op->bb()) { //only count forward ops
       if(dop->bb_pos() >= op->bb_pos()) {
         return false;
@@ -166,6 +177,10 @@ public:
       }
     }
     return true;
+  }
+
+  bool forwardDep(Op* dop, Op* op) {
+    return staticForwardDep(dop,op);
   }
 
 

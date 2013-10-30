@@ -8,117 +8,9 @@
 #include <memory>
 
 #include "loopinfo.hh"
+#include "beret_inst.hh"
 
-class BeretInst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
-  typedef dg_event T;
-  typedef dg_edge_impl_t<T> E;  
-
-  typedef T* TPtr;
-  typedef E* EPtr;
-
-public:
-  //Events:
-  enum NodeTy {
-      SEBReady = 0,
-      Execute = 1,
-      Complete = 2,
-      Writeback = 3,
-      NumStages
-  };
-
-
-
-private:
-  T events[NumStages];
-
-public:
-  virtual ~BeretInst() { 
-    /*for (int i = 0; i < 3; ++i) {
-      events[i].remove_all_edges();
-    }*/
-  }
-
-  bool _isctrl=0;
-  bool _ctrl_miss=0;
-  uint16_t _icache_lat=0;
-  uint16_t _prod[7]={0,0,0,0,0,0,0};
-  uint16_t _mem_prod=0;
-  uint16_t _cache_prod=0;
-  uint64_t _true_cache_prod=false;
-  uint16_t _ex_lat=0;
-  bool _serialBefore=0;
-  bool _serialAfter=0;
-  bool _nonSpec=0;
-  uint16_t _st_lat=0;
-  uint64_t _pc=0;
-  uint16_t _upc=0;
-  uint64_t _eff_addr;
-  bool _floating=false;
-  bool _iscall=false;
-  E* ex_edge;
-
-  BeretInst(const CP_NodeDiskImage &img, uint64_t index):
-              dg_inst_base<T,E>(index){
-    _opclass=img._opclass;
-    _isload=img._isload;
-    _isstore=img._isstore;
-    _isctrl=img._isctrl;
-    _ctrl_miss=img._ctrl_miss;
-    _icache_lat=img._icache_lat;
-    std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
-    _mem_prod=img._mem_prod;
-    _cache_prod=img._cache_prod;
-    _true_cache_prod=img._true_cache_prod;
-    _ex_lat=img._cc-img._ec;
-    _serialBefore=img._serialBefore;
-    _serialAfter=img._serialAfter;
-    _nonSpec=img._nonSpec;
-    _st_lat=img._xc-img._wc;
-    _pc=img._pc;
-    _upc=img._upc;
-    _floating=img._floating;
-    _iscall=img._iscall;
-  }
-
-  BeretInst() : dg_inst_base<T,E>() {}
-
-  T& operator[](const unsigned i) {
-    assert(i < NumStages);
-    return events[i];
-  }
-
-  void updateLat(uint16_t lat) {
-    ex_edge->_len=lat;
-  }
-
-  uint16_t ex_lat() {
-    return ex_edge->_len;
-  }
-
-
-  void reCalculate() {
-    for(int i = 0; i < NumStages; ++i) {
-      events[i].reCalculate();
-    }
-  }
-
-  virtual unsigned numStages() {
-    return NumStages;
-  }
-  virtual uint64_t cycleOfStage(const unsigned i) {
-    return events[i].cycle(); 
-  }
-  virtual unsigned eventComplete() {
-    return Complete; 
-  }
-  virtual unsigned memComplete() {
-    return Complete;
-  }
-
-};
-
-
-// CP_BERET !!!
+// CP_BERET
 class cp_beret : public ArgumentHandler,
       public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
@@ -141,7 +33,7 @@ class cp_beret : public ArgumentHandler,
       BB* bb = *I;
       
       BB::OpVec::iterator io,eo;
-      for(io=bb.op_begin(),eo=bb.op_end();io!=eo;++io) {
+      for(io=bb.opv_begin(),eo=bb.opv_end();io!=eo;++io) {
         Op* op = *io;
         opsInTrace.insert(op); 
       }
@@ -195,16 +87,20 @@ public:
   std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
   LoopInfo* _prevLoop=NULL;
 
+  uint64_t _beret_int_ops=0, _beret_fp_ops=0, _beret_mult_ops=0;
+  uint64_t _beret_regfile_fwrites=0, _beret_regfile_writes=0;
+  uint64_t _beret_regfile_freads=0,  _beret_regfile_reads=0;
+
   unsigned _beret_max_seb=6,_beret_max_mem=2,_beret_max_ops=80;
   unsigned _beret_config_time=1,_beret_iops=2;
-
+  unsigned _beret_dataflow_seb=0,_beret_dataflow_pure=0;
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "beret-max-seb") == 0) {
       unsigned temp = atoi(optarg);
       if (temp != 0) {
         _beret_max_seb = temp;
       }  else {
-        std::cerr << "ERROR: \"" << name << "\" arg value\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR: \"" << name << "\" arg: \"" << optarg << "\" is invalid\n";
       }
     }
     if (strcmp(name, "beret-max-mem") == 0) {
@@ -212,7 +108,7 @@ public:
       if (temp != 0) {
         _beret_max_mem = temp;
       } else {
-        std::cerr << "ERROR: \"" << name << "\" arg value\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR: \"" << name << "\" arg: \"" << optarg << "\" is invalid\n";
       }
     }
     if (strcmp(name, "beret-max-ops") == 0) {
@@ -220,7 +116,7 @@ public:
       if (temp != 0) {
         _beret_max_ops = temp;
       } else {
-        std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
     if (strcmp(name, "beret-config-time") == 0) {
@@ -228,7 +124,7 @@ public:
       if (temp != 0) {
         _beret_config_time = temp;
       } else {
-        std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
     if (strcmp(name, "beret-iops") == 0) {
@@ -236,10 +132,25 @@ public:
       if (temp != 0) {
         _beret_iops = temp;
       } else {
-        std::cerr << "ERROR:" << name << " arg\"" << optarg << "\" is invalid\n";
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
-
+    if (strcmp(name, "beret-dataflow-seb") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_dataflow_seb = temp;
+      } else {
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
+      }
+    }
+    if (strcmp(name, "beret-dataflow-pure") == 0) {
+      unsigned temp = atoi(optarg);
+      if (temp != 0) {
+        _beret_dataflow_pure = temp;
+      } else {
+        std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
+      }
+    }
 
   }
 
@@ -308,7 +219,7 @@ public:
     
   }
 
-virtual void printEdgeDep(BaseInst_t& inst, int ind,
+virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
                     unsigned default_type1, unsigned default_type2 = E_NONE)
   {
     if (!getTraceOutputs())
@@ -318,11 +229,17 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
     if (laEdge) {
       lae = laEdge->type();
       if ((lae != default_type1 && lae!=default_type2) || laEdge->len()>1) {
-        outs() << edge_name[lae];
-        outs() << laEdge->len();
+        outs << edge_name[lae];
+        /*int idiff=-laEdge->src()->_index + inst._index;
+        if(idiff != 0) {
+          outs << idiff;
+        }*/
+        if(laEdge->len()!=0) {
+          outs << laEdge->len();
+        }
       }
     }
-    outs() << ",";
+    outs << ",";
   }
 
 
@@ -336,7 +253,7 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
 
     for (unsigned i = 0; i < inst.numStages(); ++i) {
       outs() << inst.cycleOfStage(i) << " ";
-      printEdgeDep(inst,i,E_FF);
+      printEdgeDep(outs(),inst,i,E_FF);
 
     }
     CriticalPath::traceOut(index,img,op);
@@ -345,9 +262,11 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
   
 
   virtual void accelSpecificStats(std::ostream& out) {
-    //out << "Beret Cycles = " << _totalBeretCycles << "\n";
+//out << "Beret Cycles = " << _totalBeretCycles << "\n";
     out << " (beret-only " << _totalBeretCycles 
         << " beret-insts " << _totalBeretInsts
+//        << " idle-cycles " << idleCycles
+//        << " non-pipeline-cycles" << nonPipelineCycles
        << ")";
   }
 
@@ -356,8 +275,6 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
    */
   unsigned beret_state;
   std::map<Op*,std::shared_ptr<BeretInst>> binstMap;
-  BeretInst* first_inst=NULL;
-  BeretInst* last_inst=NULL;
   LoopInfo* li;
   Op* curLoopHead;
   std::vector<std::pair<CP_NodeDiskImage,uint64_t>> replay_queue;
@@ -365,105 +282,162 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
   uint64_t _curBeretStartCycle=0, _curBeretStartInst=0;
   uint64_t _totalBeretCycles=0, _totalBeretInsts=0;
 
-  void addLoopIteration(dg_inst_base<T,E>* inst, unsigned eventInd, unsigned xfer=8) {
-    Subgraph* prev_sg=NULL;
-    first_inst=NULL;
+  std::shared_ptr<T> prevStartSEB = NULL;
+  //Add a loop iteration based on the CFG and hot path
+  std::shared_ptr<T> addLoopIteration(T* startIterEv, unsigned xfer_cycles) {
     binstMap.clear();
     replay_queue.clear();
     _whichBB=0;
     //create instruction for each SEB
-    
+
     assert(li2sgmap[li].size()>0);
+    std::shared_ptr<T> prevEndSEB   = NULL;
     for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
-      for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
+      std::shared_ptr<T> startSEB(new T());
+      std::shared_ptr<T> endSEB(new T());
+      endSEB->_index=343;
+
+      if(_beret_dataflow_pure) {
+        if(!prevEndSEB && xfer_cycles!=0 && startIterEv) {
+          getCPDG()->insert_edge(*startIterEv,*startSEB, xfer_cycles, E_BXFR);
+        }
+        if(prevStartSEB) {
+          getCPDG()->insert_edge(*prevStartSEB,*startSEB, 1, E_SEBS);
+        }
+      } else if (_beret_dataflow_seb) {
+        if(!prevEndSEB && xfer_cycles!=0 && startIterEv) {
+          getCPDG()->insert_edge(*startIterEv,*startSEB, xfer_cycles, E_BXFR);
+        }
+        if(prevStartSEB) {
+          getCPDG()->insert_edge(*prevStartSEB,*startSEB, 1, E_SEBS);
+        }
+      } else {
+        if(!prevEndSEB) {
+          if(startIterEv) {
+            getCPDG()->insert_edge(*startIterEv,
+                      *startSEB, xfer_cycles, E_BXFR);
+          } 
+        } else {
+           getCPDG()->insert_edge(*prevEndSEB,
+               *startSEB,0,E_SEBS); 
+        }
+
+      }
+
+      for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
         BeretInst* b_inst = new BeretInst();
-	if(first_inst==NULL) {
-          first_inst=b_inst;
-        }
-	last_inst=b_inst;
-    
-        assert(b_inst);
+
+        b_inst->startSEB=startSEB;
+        b_inst->endSEB=endSEB;
+
         binstMap.emplace(std::piecewise_construct,
                          std::forward_as_tuple(op),
                          std::forward_as_tuple(b_inst));
         assert(binstMap[op]);
 
-        getCPDG()->insert_edge(*b_inst, BeretInst::SEBReady,
-                               *b_inst, BeretInst::Execute, 0, E_SEBE);
+        getCPDG()->insert_edge(*startSEB, *b_inst, BeretInst::Execute,0,E_SEBB);
+        getCPDG()->insert_edge(*b_inst, BeretInst::Complete,*endSEB, 0, E_SEBL);
 
-	b_inst->ex_edge = 
-	    getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
-	                           *b_inst, BeretInst::Complete,/*op->avg_lat()*/1, E_SEBC);
+        b_inst->ex_edge = getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
+                   *b_inst, BeretInst::Complete,/*op->avg_lat()*/1, E_SEBL);
 
         getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
-                               *b_inst, BeretInst::Writeback, 0, E_SEBE);
+                               *b_inst, BeretInst::Writeback, 0, E_SEBW);
 
-/*        std::cout << "X " << b_inst->cycleOfStage(0) << " "
-                  << b_inst->cycleOfStage(1) << " "
-                  << b_inst->cycleOfStage(2) << "\n";*/
       }
-      prev_sg=sg;
+      prevEndSEB=endSEB;
+      prevStartSEB=startSEB;
     }
 
-    prev_sg=NULL;
     //Add Deps
+    //(this is in a seperate loop, because we need to make sure that all the binsts
+    //in each subgraph are created before continuing
     for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
-      for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
+      for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
-        //add subgraph deps to previous subgraph
-        if(prev_sg!=NULL) {
-          for(auto si=prev_sg->op_begin(),se=prev_sg->op_end();si!=se;++si){
-            Op* ps_op = *si;
-            assert(ps_op);
-            std::shared_ptr<BeretInst> ps_BeretInst = binstMap[ps_op];
-            getCPDG()->insert_edge(*ps_BeretInst, BeretInst::Complete,
-                                   *b_inst, BeretInst::SEBReady, 0, E_SEBA);
-          } 
-        } else {
-          getCPDG()->insert_edge(*inst, eventInd,
-                                 *b_inst,BeretInst::SEBReady,xfer/_beret_iops,E_SEBS);
-          /*std::cout << inst->cycleOfStage(eventInd) << " "
-                    << b_inst->cycleOfStage(BeretInst::SEBReady) << "\n";*/
-        }
-        for(auto di = op->d_begin(),de = op->d_end();di!=de;++di) {
+
+        for(auto di = op->d_begin(),de =op->d_end();di!=de;++di) {
           Op* dop = *di;
+           
           if(binstMap.count(dop) && li->forwardDep(dop,op)) {
             std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
             getCPDG()->insert_edge(*dep_BeretInst, BeretInst::Complete,
                        *b_inst, BeretInst::Execute, 0,E_SEBD);
+            /*std::cout << dop->id() << "->" << op->id()
+            << " " << binstMap.count(dop) << " " << li->forwardDep(dop,op);
+            std::cout << "\n";*/
           }
         }
         b_inst->reCalculate();
-/*        std::cout << b_inst->cycleOfStage(0) << " "
+        /*std::cout << b_inst->cycleOfStage(0) << " "
                   << b_inst->cycleOfStage(1) << " "
                   << b_inst->cycleOfStage(2) << "\n";*/
       }
-
-      prev_sg=sg;
     }
+    return prevEndSEB;
   }
-
   
   void reCalcBeretLoop(bool commit_iter) {
     //recalc loop, and get last cycle
     uint64_t last_cycle=0;
     for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
       Subgraph* sg = *i;
-      for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
+      for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
-	b_inst->reCalculate();
+        b_inst->reCalculate();
         if(b_inst->_isload) {
           //get the MSHR resource here!
           checkNumMSHRs(b_inst); 
         }
-	b_inst->reCalculate();  //TODO: check this! : 
+        b_inst->reCalculate();  //TODO: check this! : 
+
+        if(b_inst->_floating) {
+          _beret_fp_ops++;
+        } else if (b_inst->_opclass==2) {
+          _beret_mult_ops++;
+        } else {
+          _beret_int_ops++;
+        }
+       
+        for(auto di = op->d_begin(),de = op->d_end();di!=de;++di) {
+          Op* dop = *di;
+          if(binstMap.count(dop) /*&& li->forwardDep(dop,op)*/) {
+            //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
+            if(!sg->hasOp(dop)) {
+              if(b_inst->_floating) {
+                _beret_regfile_freads+=1;
+               } else {
+                _beret_regfile_reads+=1;
+              }
+            }
+          }
+        }
+
+        for(auto ui = op->u_begin(),ue = op->u_end();ui!=ue;++ui) {
+          Op* uop = *ui;
+          if(binstMap.count(uop) /*&& li->forwardDep(op,uop)*/) {
+            //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
+            if(!sg->hasOp(uop)) {
+              if(b_inst->_floating) {
+                _beret_regfile_fwrites+=1;
+               } else {
+                _beret_regfile_writes+=1;
+              }
+              break;
+            }
+          }
+        }
+       
+        //regfile_fwrites+=inst._numFPDestRegs;
+        //regfile_writes+=inst._numIntDestRegs;
+
 
         uint64_t cycle=b_inst->cycleOfStage(BeretInst::Complete);
         if(last_cycle < cycle) {
@@ -476,7 +450,7 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
     int iseb=0;
     for(auto i=li2sgmap[li].begin(), e=li2sgmap[li].end(); i!=e;++i,++iseb) {
       Subgraph* sg = *i;
-      for(auto opi = sg->op_begin(),ope=sg->op_end();opi!=ope;++opi) {
+      for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
@@ -486,48 +460,62 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
         }
         //done with this instruction
         //getCPDG()->done(sh_inst);
-/*        if (getTraceOutputs()) {
-          std::cout << "SEB" << iseb << ":";
+
+/*
+        if (getTraceOutputs()) {
+          std::cout << "SEB" << iseb << ", op" << op->id() << ":";
+          std::cout << b_inst->startSEB->cycle() << " ";
           for (unsigned i = 0; i < b_inst->numStages(); ++i) {
             std::cout << b_inst->cycleOfStage(i) << " ";
           }
-          std::cout << b_inst->ex_lat() << "\n";*/
-        //`}
+          std::cout << b_inst->endSEB->cycle();
+
+
+          std::cout << ",";
+          dg_inst_base<T,E>& inst = *b_inst;
+          for (unsigned i = 0; i < inst.numStages(); ++i) {
+            printEdgeDep(std::cout,inst,i,E_FF);
+            std::cout << "-" << inst[i].numPredEdges();
+            std::cout << ",";
+          }
+ 
+          std::cout << "\n";
+          //std::cout << b_inst->ex_lat() << "\n";
+        }
+*/
       }
     }
+
+  //  std::cout << "\n";
   }
 
+  std::shared_ptr<T> beretEndEv;
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     switch(beret_state) {
       case CPU:
         //Started BERET Loop
         if(op->bb_pos()==0) {
-	  li = op->func()->getLoop(op->bb());
-          if(li) {
-            //std::cout << "found a loop\n";
-          }
+          li = op->func()->getLoop(op->bb());
          
           if(li && li2sgmap.count(li)!=0 && li2sgmap[li].size()!=0) {
             //std::cout << " .. and it's beret-able!\n";
             curLoopHead=op;
             beret_state=BERET;
-            Inst_t* inst = new Inst_t();
             unsigned config_time = _beret_config_time*li2sgmap[li].size();
             if(li==_prevLoop) {
-              config_time=0;
+              config_time=1;
             }
-            //This instruction is created to simulate transfering live inputs
-            //like loop constants, initial values for induction vars, etc
-            inst->set_ex_lat(8/_beret_iops + config_time); //TODO: make this real num vars
-            std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
-            addDeps(sh_inst);
-            pushPipe(sh_inst);
-            inserted(sh_inst);
-            //inserted(inst,img);
-
-            _curBeretStartCycle=inst->cycleOfStage(inst->eventComplete());
+          
+            Inst_t* prevInst = getCPDG()->peekPipe(-D_WIDTH); 
+ 
+            T* iterStartEv=NULL;
+            if(prevInst) {
+              _curBeretStartCycle=prevInst->cycleOfStage(prevInst->eventComplete());
+              iterStartEv=&(*prevInst)[Inst_t::Commit];
+            }
             _curBeretStartInst=index;
-	    addLoopIteration(inst,Inst_t::Commit,8);
+
+            beretEndEv = addLoopIteration(iterStartEv,8/_beret_iops + config_time);
             _prevLoop=li;
           }
         }
@@ -535,47 +523,59 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
       case BERET:
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
-	  addLoopIteration(last_inst,BeretInst::Complete,0);
-	} else if(op->bb_pos()==0) {
+          std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
+          beretEndEv=event;
+          assert(beretEndEv);
+        } else if(op->bb_pos()==0) {
           ++_whichBB;
           LoopInfo::BBvec& bbvec = li->getHotPath();
           if(bbvec.size()==_whichBB || bbvec[_whichBB] !=op->bb()) {
             beret_state = CPU;  //WRONG PATH - SWITCH TO CPU
           
-            std::shared_ptr<BeretInst> binst;
+            //std::shared_ptr<BeretInst> binst;
+            T* finalBeretEvent;
+            bool replay=false;
             if(bbvec.size()==_whichBB) {
-               binst = binstMap[*(--(li2sgmap[li][li2sgmap[li].size()-1]->op_end()))];
+              //binst = binstMap[*(--(li2sgmap[li][li2sgmap[li].size()-1]->op_end()))];
+              reCalcBeretLoop(false); //get correct beret wrong-path timing
+              finalBeretEvent=beretEndEv.get();
             } else {
                assert( bbvec[_whichBB] != op->bb() );
-               binst = binstMap[li->getHotPath()[_whichBB-1]->firstOp()];
+               std::shared_ptr<BeretInst> binst = binstMap[li->getHotPath()[_whichBB-1]->firstOp()];
+               reCalcBeretLoop(false); //get correct beret wrong-path timing
+               finalBeretEvent=&((*binst)[BeretInst::Complete]);
+               replay=true;
             }
 
-            reCalcBeretLoop(false); //get correct beret wrong-path timing
             //get timing for beret loop
-            uint64_t endBeretCyc=binst->cycleOfStage(binst->eventComplete());
+            uint64_t endBeretCyc=finalBeretEvent->cycle(); //binst->cycleOfStage(binst->eventComplete());
             _totalBeretCycles+=endBeretCyc-_curBeretStartCycle;
+            //not really, but close enough
             _totalBeretInsts+=index-_curBeretStartInst;
 
-	    //Replay BERET on CPU
-	    for(unsigned i=0; i < replay_queue.size();++i) {
-	      CP_NodeDiskImage& img = replay_queue[i].first;
-	      uint64_t& index = replay_queue[i].second;
-              Inst_t* inst = new Inst_t(img,index);
-	      if(i==0) {
-                getCPDG()->insert_edge(*binst, BeretInst::Complete,
-	                               *inst, Inst_t::Fetch,4/_beret_iops,E_BREP); 
-	      }
-              std::shared_ptr<Inst_t> sh_inst(inst);
-              getCPDG()->addInst(sh_inst,index);
-              addDeps(sh_inst); //regular add deps
-              pushPipe(sh_inst);
-              inserted(sh_inst);
-	    }
-	    //Done Replaying up to the instruction before the bad instruction!
-	    //The CPU execution is now caught up.
-	    replay_queue.clear();
+            if(replay) {
+              //Replay BERET on CPU
+              for(unsigned i=0; i < replay_queue.size();++i) {
+                CP_NodeDiskImage& img = replay_queue[i].first;
+                uint64_t& index = replay_queue[i].second;
+                Inst_t* inst = new Inst_t(img,index);
+                if(i==0) {
+                  getCPDG()->insert_edge(*finalBeretEvent,
+                                         *inst, Inst_t::Fetch,8/_beret_iops,E_BXFR); 
+                }
+                std::shared_ptr<Inst_t> sh_inst(inst);
+                getCPDG()->addInst(sh_inst,index);
+                addDeps(sh_inst); //regular add deps
+                pushPipe(sh_inst);
+                inserted(sh_inst);
+              }
+              beretEndEv = NULL;
+            }
+            //Done Replaying up to the instruction before the bad instruction!
+            //The CPU execution is now caught up.
+            replay_queue.clear();
           }
-	}
+        }
         break;
       default:
         assert(0); //not sure what to do
@@ -588,6 +588,12 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
         Inst_t* inst = new Inst_t(img,index);
         std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
         getCPDG()->addInst(sh_inst,index);
+        if(beretEndEv) {
+          getCPDG()->insert_edge(*beretEndEv,
+                         *sh_inst, Inst_t::Fetch, 8/_beret_iops, E_BXFR);
+
+          beretEndEv = NULL;
+        }
         addDeps(sh_inst);
         pushPipe(sh_inst);
         inserted(sh_inst);
@@ -599,17 +605,27 @@ virtual void printEdgeDep(BaseInst_t& inst, int ind,
         getCPDG()->addInst(sh_inst,index);
         addBeretDeps(*inst);*/
 
-	std::shared_ptr<BeretInst> b_inst = binstMap[op];
+        std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
-	std::shared_ptr<BeretInst> sh_inst(b_inst);
-	getCPDG()->addInst(sh_inst,index);
+        std::shared_ptr<BeretInst> sh_inst(b_inst);
+        getCPDG()->addInst(sh_inst,index);
 
         //this sets the latency for a beret instruction
         int lat=epLat(img._cc-img._ec,img._opclass,img._isload,
                img._isstore,img._cache_prod,img._true_cache_prod);
         b_inst->updateLat(lat);
+        b_inst->updateImg(img);
+        b_inst->_index=index;
 
-	replay_queue.push_back(std::make_pair(img,index));
+        //std::cout << "adding index: " << b_inst->_index << "\n";
+
+
+        if(_beret_dataflow_pure) {
+          add_dataflow_pure_dep(*b_inst);
+        } else if (_beret_dataflow_seb) {
+          add_dataflow_seb_dep(*b_inst); 
+        }
+        replay_queue.push_back(std::make_pair(img,index));
         break;
       } default:
         assert(0); //not sure what to do
@@ -647,7 +663,7 @@ private:
           getCPDG()->insert_edge(*min_node, min_node->memComplete(),
                          *n, BeretInst::Execute, mshrT+respDelayT, E_MSHR);
       }
-    } else {
+    } else { //store
       BaseInst_t* min_node =
            addMSHRResource(access_time, 
                            mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
@@ -660,65 +676,104 @@ private:
   }
 
 
-/*
-  virtual void addBeretDeps(BeretInst& inst) { 
-    setSEBReadyCycle_beret(inst);
-    setExecuteCycle_beret(inst);
-    setCompleteCycle_beret(inst);
-  }
-
-  //This node when current SEB is active
-  virtual void setSEBReadyCycle_beret(BeretInst& inst) {
-    CCoresBB::iterator I,E;
-    for(I=prev_bb.begin(),E=prev_bb.end();I!=E;++I) {
-        BeretInst* cc_inst= I->get(); 
-        getCPDG()->insert_edge(*cc_inst, BeretInst::Complete,
-                               inst, BeretInst::BBReady, 0);
-    }
-  }
-
-  //this node when current BB is about to execute 
-  //(no need for ready, b/c it has dedicated resources)
-  virtual void setExecuteCycle_beret(BeretInst &inst) {
-    getCPDG()->insert_edge(inst, BeretInst::SEBReady,
-                           inst, BeretInst::Execute, 0, true);
+  //Ensure that the data dependencies are enforced --
+  //this is only necessary under _dataflow_seb and _dataflow_pure models
+  virtual void add_dataflow_seb_dep(BeretInst &inst) {
     for (int i = 0; i < 7; ++i) {
-      int prod = inst._prod[i];
-      if (prod <= 0) {
+      unsigned prod = inst._prod[i];
+      if (prod <= 0 || prod >= inst._index) {
         continue;
       }
-      dg_inst_base<T,E>& depInst =
-            getCPDG()->queryNodes(inst.index()-prod);
+      dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(inst.index()-prod);
 
+      if(!depInst.isPipelineInst()) {
+        BeretInst* dep_binst = dynamic_cast<BeretInst*>(&depInst);
+        assert(dep_binst);
+        if(dep_binst->startSEB != inst.startSEB) {
+          if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SEBS)) {
+            getCPDG()->insert_edge(*dep_binst->endSEB,*inst.startSEB, 0, E_SEBS);
+          }
+        } else {
+          //getCPDG()->insert_edge(depInst, depInst.eventComplete(),
+          //                      inst, Inst_t::Ready, 0,E_RDep);
+        }
+      }
+    }
+    
+    //memory dependence
+    if (inst._mem_prod > 0 && inst._mem_prod < inst._index) {
+      BaseInst_t& depInst = static_cast<BaseInst_t&>( 
+                          getCPDG()->queryNodes(inst.index()-inst._mem_prod));
+
+      if(!depInst.isPipelineInst()) {
+        BeretInst* dep_binst = dynamic_cast<BeretInst*>(&depInst);
+        assert(dep_binst);
+        if(dep_binst->startSEB != inst.startSEB
+          &&(!(dep_binst->_isload && inst._isload))) {  
+          if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SEBS)) {
+            getCPDG()->insert_edge(*dep_binst->endSEB,*inst.startSEB, 0, E_SEBS);
+          }
+        } else {
+          //getCPDG()->insert_edge(depInst, depInst.eventComplete(),
+          //                      inst, Inst_t::Ready, 0,E_RDep);
+        }
+      }
+/*    if (prev_node._isstore && inst._isload) {
+        //data dependence
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  inst, BeretInst::Execute, 0, true);
+      } else if (prev_node._isstore && inst._isstore) {
+        //anti dependence (output-dep)
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  inst, BeretInst::Execute, 0, true);
+      } else if (prev_node._isload && inst._isstore) {
+        //anti dependence (load-store)
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  inst, BeretInst::Execute, 0, true);
+      } */
+    }
+     
+  }
+
+
+  //Ensure that the data dependencies are enforced --
+  //this is only necessary under _dataflow_seb and _dataflow_pure models
+  virtual void add_dataflow_pure_dep(BeretInst &inst) {
+    for (int i = 0; i < 7; ++i) {
+      unsigned prod = inst._prod[i];
+      if (prod <= 0 || prod >= inst._index) {
+        continue;
+      }
+      dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(inst.index()-prod);
       getCPDG()->insert_edge(depInst, depInst.eventComplete(),
-                             inst, Inst_t::Ready, 0,E_RDep);
+                             inst, BeretInst::Execute, 0,E_RDep);
     }
     
     //Memory dependence enforced by BB ordering -- if this is going to be
     //relaxed, then go ahead and implement mem dependence
 
     //memory dependence
-    if (n._mem_prod > 0) {
-      Inst_t& prev_node = static_cast<Inst_t&>( 
-                          getCPDG()->queryNodes(n.index()-n._mem_prod));
+    if (inst._mem_prod > 0 && inst._mem_prod < inst._index) {
+      BaseInst_t& prev_node = static_cast<BaseInst_t&>( 
+                          getCPDG()->queryNodes(inst.index()-inst._mem_prod));
 
-      if (prev_node._isstore && n._isload) {
+      if (prev_node._isstore && inst._isload) {
         //data dependence
-        getCPDG()->insert_edge(prev_node.index(), dg_inst::Complete,
-                                  n, dg_inst::Ready, 0, true);
-      } else if (prev_node._isstore && n._isstore) {
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  inst, BeretInst::Execute, 0, E_MDep);
+      } else if (prev_node._isstore && inst._isstore) {
         //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node.index(), dg_inst::Complete,
-                                  n, dg_inst::Complete, 0, true);
-      } else if (prev_node._isload && n._isstore) {
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  inst, BeretInst::Execute, 0, E_MDep);
+      } else if (prev_node._isload && inst._isstore) {
         //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node.index(), dg_inst::Complete,
-                                  n, dg_inst::Complete, 0, true);
+        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                  inst, BeretInst::Execute, 0, E_MDep);
       }
     }
-
   }
 
+/*
   virtual void setCompleteCycle_beret(BeretInst& inst) {
     getCPDG()->insert_edge(inst, BeretInst::Execute,
                            inst, BeretInst::Complete, inst._ex_lat);
@@ -727,6 +782,74 @@ private:
   uint64_t numCycles() {
     getCPDG()->finish(maxIndex);
     return getCPDG()->getMaxCycles();
+  }
+
+  // Handle enrgy events for McPAT XML DOC
+  virtual void setEnergyEvents(pugi::xml_document& doc) {
+    //set the normal events based on the m5out/stats file
+    CP_DG_Builder::setEnergyEvents(doc);
+  
+    #include "mcpat-defaults.hh"
+    pugi::xml_document accel_doc;
+    std::istringstream ss(xml_str);
+    pugi::xml_parse_result result = accel_doc.load(ss);
+  
+    //pugi::xml_parse_result result = doc.load_file("tony-ooo.xml");
+  
+    if(result) {
+      pugi::xml_node system_node = accel_doc.child("component").find_child_by_attribute("name","system");
+      //set the total_cycles so that we get power correctly
+      sa(system_node,"total_cycles",numCycles());
+  
+      pugi::xml_node core_node =
+                system_node.find_child_by_attribute("name","core0");
+      sa(core_node,"ALU_per_core", Prof::get().int_alu_count);
+      sa(core_node,"MUL_per_core", Prof::get().mul_div_count);
+      sa(core_node,"FPU_per_core", Prof::get().fp_alu_count);
+  
+      sa(core_node,"ialu_accesses",_beret_int_ops);
+      sa(core_node,"fpu_accesses",_beret_fp_ops);
+      sa(core_node,"mul_accesses",_beret_mult_ops);
+
+      sa(core_node,"archi_Regs_IRF_size",8);
+      sa(core_node,"archi_Regs_FRF_size",8);
+      sa(core_node,"phy_Regs_IRF_size",64);
+      sa(core_node,"phy_Regs_FRF_size",64);
+
+      //sa(core_node,"instruction_buffer_size",4);
+      //sa(core_node,"decoded_stream_buffer_size",4);
+      //sa(core_node,"instruction_window_scheme",0);
+      //sa(core_node,"instruction_window_size",8);
+      //sa(core_node,"fp_instruction_window_size",8);
+
+      sa(core_node,"int_regfile_reads",_beret_regfile_reads);
+      sa(core_node,"int_regfile_writes",_beret_regfile_writes);
+      sa(core_node,"float_regfile_reads",_beret_regfile_freads);
+      sa(core_node,"float_regfile_writes",_beret_regfile_fwrites);
+ 
+    } else {
+      std::cerr << "XML Malformed\n";
+      return;
+    }
+
+    mcpat_xml_accel_fname = 
+           std::string(mcpat_xml_fname) + std::string(".accel");
+    accel_doc.save_file(mcpat_xml_accel_fname.c_str());
+  }
+
+  virtual void calcAccelEnergy() {
+    std::string outf = mcpat_xml_accel_fname + ".out";
+
+    std::cout << _name << " accel: ... ";
+    std::cout.flush();
+
+    execMcPAT(mcpat_xml_accel_fname,outf);
+    float reg   = stof(grepF(outf,"Register Files",7,5));
+    float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
+    float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
+    float calu  = stof(grepF(outf,"Complex ALUs",7,5));
+    std::cout << ialu << ", " << fpalu << ", " << calu << ", " << reg << "\n";
+
   }
 
 

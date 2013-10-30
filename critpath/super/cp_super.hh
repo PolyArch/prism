@@ -34,15 +34,13 @@ public:
   }
 
   //Things from CP_Node image
-  uint16_t _opclass=0;
-  bool _isload=0;
-  bool _isstore=0;
   bool _isctrl=0;
   bool _ctrl_miss=0;
   uint16_t _icache_lat=0;
   uint16_t _prod[7]={0,0,0,0,0,0,0};
   uint16_t _mem_prod=0;
   uint16_t _cache_prod=0;
+  uint64_t _true_cache_prod=false;
   uint16_t _ex_lat=0;
   bool _serialBefore=0;
   bool _serialAfter=0;
@@ -57,15 +55,16 @@ public:
 
   SuperInst(const CP_NodeDiskImage &img, uint64_t index):
               dg_inst_base<T,E>(index){
-    _opclass=img._opclass;
-    _isload=img._isload;
-    _isstore=img._isstore;
+    this->_opclass=img._opclass;
+    this->_isload=img._isload;
+    this->_isstore=img._isstore;
     _isctrl=img._isctrl;
     _ctrl_miss=img._ctrl_miss;
     _icache_lat=img._icache_lat;
     std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
     _mem_prod=img._mem_prod;
     _cache_prod=img._cache_prod;
+    _true_cache_prod=img._true_cache_prod;
     _ex_lat=img._cc-img._ec;
     _serialBefore=img._serialBefore;
     _serialAfter=img._serialAfter;
@@ -251,26 +250,19 @@ private:
   }
 
   virtual void checkNumMSHRs(std::shared_ptr<SuperInst>& n) {
-    int mlat;
     assert(n->_isload || n->_isstore);
-    if(n->_isload) {
-      mlat = n->_ex_lat;
-    } else {
-      mlat = n->_st_lat;
-    }
-    if(mlat <= Prof::get().dcache_hit_latency + 
-               Prof::get().dcache_response_latency+3) {
-      //We don't need an MSHR for non-missing loads/stores
-      return;
-    }
+    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+                  n->_cache_prod,n->_true_cache_prod);
 
-    int reqDelayT  = Prof::get().dcache_hit_latency; // # cycles delayed before acquiring the MSHR
-    int respDelayT = Prof::get().dcache_response_latency; // # cycles delayed after releasing the MSHR
-    int mshrT = mlat - reqDelayT - respDelayT;  // the actual time of using the MSHR
- 
-    assert(mshrT>0);
+    int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+                  mlat,reqDelayT,respDelayT,mshrT)) {
+      return;
+    } 
     int rechecks=0;
     uint64_t extraLat=0;
+
+    assert(mshrT>0);
     BaseInst_t* min_node =
          addMSHRResource(reqDelayT + n->cycleOfStage(SuperInst::Execute), 
                          mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
@@ -290,8 +282,11 @@ private:
       getCPDG()->insert_edge(*inst, SuperInst::Execute,
                              *inst, SuperInst::Complete, inst->_st_lat);
     } else {
+      int lat=epLat(inst->_ex_lat,inst->_opclass,inst->_isload,
+                    inst->_isstore,inst->_cache_prod,inst->_true_cache_prod);
+
       getCPDG()->insert_edge(*inst, SuperInst::Execute,
-                             *inst, SuperInst::Complete, inst->_ex_lat);
+                             *inst, SuperInst::Complete, lat);
     }
 
 /*  if(cur_bb_end) {
@@ -307,7 +302,7 @@ private:
       
     }*/
 
-    if(si._index % 10000 == 0) {
+    if(si._index % 1024 == 0) {
       min_cycle = si.cycleOfStage(SuperInst::Execute);
     }
 

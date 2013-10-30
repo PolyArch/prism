@@ -53,15 +53,20 @@ X(SQUA, "SQUA","Squash Penalty")\
 X(CC,   "CC",  "Commit to Commit")\
 X(CBW,  "CBW", "Commit B/W")\
 X(SER,  "SER", "serialize this instruction")\
-X(CXFR, "CXFR","CCores Control Transfer:")\
-X(BBA,  "BBA", "Activate CCores Basic Block")\
-X(BBE,  "BBR", "Basic Block Ready")\
-X(SEBS, "SEBS", "SEB Region Start")\
-X(SEBA, "SEBA", "Activate SEB")\
-X(SEBE, "SEBE", "SEB Execute")\
-X(SEBC, "SEBC", "SEB Execute to Complete")\
+X(CXFR, "CXFR","CCores Control Transfer")\
+X(CSBB, "CSBB","CCores Seralize BB Activation")\
+X(BBA,  "BBA", "CCores Activate Basic Block")\
+X(BBE,  "BBR", "CCores Basic Block Ready")\
+X(BBC,  "BBC", "CCores Basic Block Complete")\
+X(SEBB, "SEBB", "SEB Region Begin")\
+X(SEBA, "SEBA", "SEB Activate")\
+X(SEBW, "SEBW", "SEB Writeback")\
+X(SEBS, "SEBS", "SEB Serialization")\
+X(SEBL, "SEBL", "SEB Execute to Complete Latency")\
+X(SEB,  "SEB", "???")\
 X(SEBD, "SEBD", "SEB Data Dependence")\
 X(BREP, "BREP", "Beret Replay")\
+X(BXFR, "BXFR", "Beret Data Transfer")\
 X(CHT,  "CHT",  "cheat edge for super insts")
 
 #define X(a, b, c) E_ ## a,
@@ -365,7 +370,7 @@ public:
   uint64_t _index;
   uint64_t _cycle;
   int _ty;
-  EPtr ff_edge;
+  //EPtr ff_edge;
   bool _load, _store, _ctrl;
   dg_inst<NodeTy, E> *_inst;
 
@@ -373,16 +378,21 @@ public:
   //std::map<dg_event_base*, EPtr> _pred_edge_map;
   std::vector<EPtr> _pred_edges; //predecessor edges
 
-  dg_event_impl_t(): _index(0), _cycle(0), _ty(0), ff_edge(0),
+  dg_event_impl_t(): _index(0), _cycle(0), _ty(0), //ff_edge(0),
                       _load(false), _store(0), _ctrl(false),
                       _inst(0) {
   }
   dg_event_impl_t(uint64_t index, int ty): 
-                   _index(index), _cycle(0), _ty(ty), ff_edge(0),
+                   _index(index), _cycle(0), _ty(ty), //ff_edge(0),
                    _load(false), _store(0), _ctrl(false), _inst(0) {
   }
 
+  virtual int numPredEdges() {
+    return _pred_edges.size();
+  }
+
   virtual ~dg_event_impl_t() {
+    //std::cout << "deleting event" << _index << "\n";
     remove_all_edges();
     //_edges.clear();
   }
@@ -424,6 +434,16 @@ public:
   typename std::vector<EPtr>::iterator pebegin() { return _pred_edges.begin(); }
   typename std::vector<EPtr>::iterator peend() { return _pred_edges.end(); }
 
+  virtual bool has_pred(TPtr pred, unsigned type) {
+    for(auto i = _pred_edges.begin(), e=_pred_edges.end();i!=e;++i){
+      EPtr edge = *i;
+      if(edge->src() == pred && edge->type()==type) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   virtual void add_edge(EPtr e) {
     _edges.push_back(e);
     //create_pred_edge(e);
@@ -431,10 +451,10 @@ public:
     compute_cycle(e);
   }
   //fetch fetch edge
-  virtual void add_ff_edge(EPtr e) {
+/*  virtual void add_ff_edge(EPtr e) {
     ff_edge = e;
     this->add_edge(e);
-  }
+  }*/
 //  virtual void create_pred_edge(EPtr e) = 0;
 
   static void compute_cycle(EPtr e) {
@@ -570,6 +590,8 @@ public:
   virtual ~dep_graph_t() {};
   virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,uint64_t index) = 0;
 
+  virtual E* insert_edge(T& event1, T& event2,
+                         int len, unsigned etype=E_NONE) = 0;
 
   virtual E* insert_edge(T& event,
                          dg_inst_base<T,E>& destnodes,
@@ -717,6 +739,15 @@ public:
   //KernelMarkerList  _kernel_markers;
   //typedef typename KernelMarkerList::iterator KernelMarkerListIterator;
 public:
+
+  E* insert_edge(T& event1, T& event2,
+                     int len, 
+                     unsigned etype=E_NONE) {
+    E* edge = new E(&event1,&event2, len, etype);
+    event1.add_edge(edge);
+    return edge;
+  }
+
 
   E* insert_edge(T& event,
                      dg_inst_base<T,E>& destnodes,
