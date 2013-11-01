@@ -16,59 +16,66 @@
 
 // Terminology:
 // "event" refers to individual instruction "stages" like fetch/decode/etc..
-// "edge" is a dependency between events 
+// "edge" is a dependency between events
 // "inst" is simply a group of events
 
 //
-#define EDGE_TABLE \
-X(DEF,  "DEF", "Default Type")\
-X(NONE, "NONE","Type Not Specified")\
-X(FF,   "FF",  "Fetch to Fetch")\
-X(IC,   "IC",  "ICache Miss")\
-X(FBW,  "FBW", "Fetch Bandwidth")\
-X(FPip, "FPip","Frontend Pipe BW")\
-X(BP,   "BP",  "Branch Predict (in-order)")\
-X(CM,   "CM",  "Control Miss (OoO)")\
-X(IQ,   "IQ",  "Instruction Queue Full")\
-X(LSQ,  "LSQ", "LoadStore Queue Full")\
-X(FD,   "FD",  "Fetch to Dispatch")\
-X(DBW,  "DBW", "Dispatch Bandwidth")\
-X(DD,   "DD",  "Dispatch Inorder")\
-X(ROB,  "ROB", "ROB Full")\
-X(DR,   "DR",  "Dispatch to Ready")\
-X(NSpc, "NSpc","non-speculative inst")\
-X(RDep, "RDep","Register Dependence")\
-X(MDep, "MDep","Memory Dependnece")\
-X(EPip, "EPip","Execution Pipeline BW")\
-X(EE,   "EE",  "Execute to Execute")\
-X(IBW,  "IBW", "Issue Width")\
-X(RE,   "RE",  "Ready to Execute")\
-X(FU,   "FU",  "Functional Unit Hazard")\
-X(EP,   "EP",  "Execute to Complete")\
-X(WBBW, "WBBW","WriteBack BandWidth")\
-X(MSHR, "MSHR","MSHR Resource")\
-X(WB,   "WB",  "Writeback")\
-X(PP,   "PP",  "Cache Dep (w/e)")\
-X(PC,   "PC",  "Complete To Commit")\
-X(SQUA, "SQUA","Squash Penalty")\
-X(CC,   "CC",  "Commit to Commit")\
-X(CBW,  "CBW", "Commit B/W")\
-X(SER,  "SER", "serialize this instruction")\
-X(CXFR, "CXFR","CCores Control Transfer")\
-X(CSBB, "CSBB","CCores Seralize BB Activation")\
-X(BBA,  "BBA", "CCores Activate Basic Block")\
-X(BBE,  "BBR", "CCores Basic Block Ready")\
-X(BBC,  "BBC", "CCores Basic Block Complete")\
-X(SEBB, "SEBB", "SEB Region Begin")\
-X(SEBA, "SEBA", "SEB Activate")\
-X(SEBW, "SEBW", "SEB Writeback")\
-X(SEBS, "SEBS", "SEB Serialization")\
-X(SEBL, "SEBL", "SEB Execute to Complete Latency")\
-X(SEB,  "SEB", "???")\
-X(SEBD, "SEBD", "SEB Data Dependence")\
-X(BREP, "BREP", "Beret Replay")\
-X(BXFR, "BXFR", "Beret Data Transfer")\
-X(CHT,  "CHT",  "cheat edge for super insts")
+#define EDGE_TABLE                                      \
+  X(DEF,  "DEF", "Default Type")                        \
+  X(NONE, "NONE","Type Not Specified")                  \
+  X(FF,   "FF",  "Fetch to Fetch")                      \
+  X(IC,   "IC",  "ICache Miss")                         \
+  X(FBW,  "FBW", "Fetch Bandwidth")                     \
+  X(FPip, "FPip","Frontend Pipe BW")                    \
+  X(BP,   "BP",  "Branch Predict (in-order)")           \
+  X(CM,   "CM",  "Control Miss (OoO)")                  \
+  X(IQ,   "IQ",  "Instruction Queue Full")              \
+  X(LSQ,  "LSQ", "LoadStore Queue Full")                \
+  X(FD,   "FD",  "Fetch to Dispatch")                   \
+  X(DBW,  "DBW", "Dispatch Bandwidth")                  \
+  X(DD,   "DD",  "Dispatch Inorder")                    \
+  X(ROB,  "ROB", "ROB Full")                            \
+  X(DR,   "DR",  "Dispatch to Ready")                   \
+  X(NSpc, "NSpc","non-speculative inst")                \
+  X(RDep, "RDep","Register Dependence")                 \
+  X(MDep, "MDep","Memory Dependnece")                   \
+  X(EPip, "EPip","Execution Pipeline BW")               \
+  X(EE,   "EE",  "Execute to Execute")                  \
+  X(IBW,  "IBW", "Issue Width")                         \
+  X(RE,   "RE",  "Ready to Execute")                    \
+  X(FU,   "FU",  "Functional Unit Hazard")              \
+  X(EP,   "EP",  "Execute to Complete")                 \
+  X(WBBW, "WBBW","WriteBack BandWidth")                 \
+  X(MSHR, "MSHR","MSHR Resource")                       \
+  X(WB,   "WB",  "Writeback")                           \
+  X(PP,   "PP",  "Cache Dep (w/e)")                     \
+  X(PC,   "PC",  "Complete To Commit")                  \
+  X(SQUA, "SQUA","Squash Penalty")                      \
+  X(CC,   "CC",  "Commit to Commit")                    \
+  X(CBW,  "CBW", "Commit B/W")                          \
+  X(SER,  "SER", "serialize this instruction")          \
+  X(CXFR, "CXFR","CCores Control Transfer")             \
+  X(CSBB, "CSBB","CCores Seralize BB Activation")       \
+  X(BBA,  "BBA", "CCores Activate Basic Block")         \
+  X(BBE,  "BBR", "CCores Basic Block Ready")            \
+  X(BBC,  "BBC", "CCores Basic Block Complete")         \
+  X(SEBB, "SEBB", "SEB Region Begin")                   \
+  X(SEBA, "SEBA", "SEB Activate")                       \
+  X(SEBW, "SEBW", "SEB Writeback")                      \
+  X(SEBS, "SEBS", "SEB Serialization")                  \
+  X(SEBL, "SEBL", "SEB Execute to Complete Latency")    \
+  X(SEB,  "SEB", "???")                                 \
+  X(SEBD, "SEBD", "SEB Data Dependence")                \
+  X(BREP, "BREP", "Beret Replay")                               \
+  X(BXFR, "BXFR", "Beret Data Transfer")                        \
+  X(CHT,  "CHT",  "cheat edge for super insts")                 \
+  X(DyDep, "DyDep", "DySER Dependence")                         \
+  X(DyRR,  "DyRR", "DySER Functional unit ready queue")         \
+  X(DyRE,  "DyRE",  "DySER Ready to Execute")                   \
+  X(DyFU,  "DyFU", "DySER Functional unit pipelined")           \
+  X(DyEC,  "DyEC", "DySER Functional Execute to complete")      \
+  X(DyCC, "DyCC", "DySER Complete To Complete")
+
 
 #define X(a, b, c) E_ ## a,
 enum EDGE_TYPE {
@@ -142,6 +149,8 @@ public:
 */
   }
 
+  virtual bool hasDisasm() const { return false; }
+  virtual std::string getDisasm() const { return std::string(""); }
 protected:
 
   dg_inst_base(uint64_t index):
@@ -327,6 +336,7 @@ public:
   dg_inst(): dg_inst_base<T,E>() {}
 
   virtual uint64_t cycleOfStage(const unsigned i) {
+    assert(i < NumStages);
     return events[i].cycle(); 
   }
 
@@ -622,7 +632,8 @@ public:
   virtual uint64_t getMaxCycles() =0;
   //virtual void printInstEvents(uint64_t index, std::ostream& out) = 0;
 
-  virtual Inst_t* peekPipe(int offset) = 0; 
+  virtual uint64_t getPipeLoc() const = 0;
+  virtual Inst_t* peekPipe(int offset) = 0;
   virtual void pushPipe(std::shared_ptr<Inst_t> dg) = 0;
   virtual void done(std::shared_ptr<Inst_t> dg) = 0;
 
@@ -714,6 +725,8 @@ public:
   }
 
   virtual void remove_instr(dg_inst_base<T, E>* ptr) { }
+
+  virtual uint64_t getPipeLoc() const { return _pipeLoc; }
 
   virtual Inst_t* peekPipe(int offset) {  
     if(_pipeLoc+offset > (uint64_t)-1000) {

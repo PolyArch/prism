@@ -19,6 +19,19 @@ namespace DySER {
 
     dyser_inst(const CP_NodeDiskImage &img, uint64_t index):
       dg_inst<T, E>(img, index) {}
+
+    bool hasDisasm() const { return true; }
+    std::string getDisasm() const {
+      return "dyser_inst";
+    }
+
+    enum EventTy {
+      DyReady = 0,
+      DyExecute = 1,
+      DyComplete = 2,
+      DyNumStages = 3
+    };
+
   };
 
   // Instructions that execute inside dyser.
@@ -30,40 +43,44 @@ namespace DySER {
 
     dyser_compute_inst(): dyser_inst() {}
 
-    enum EventTy {
-      OpReady = 0,
-      Execute = 1,
-      Complete = 2,
-      NumStages = 3
-    };
 
     T& operator[](const unsigned i) {
-      if (i == dyser_inst::Ready)
-        return events[OpReady];
-      if (i == dyser_inst::Execute)
-        return events[Execute];
-      if (i == dyser_inst::Complete)
-        return events[Complete];
+      if (i == dyser_compute_inst::DyReady)
+        return events[DyReady];
+      if (i == dyser_compute_inst::DyExecute)
+        return events[DyExecute];
+      if (i == dyser_compute_inst::DyComplete)
+        return events[DyComplete];
       assert(0);
       return events[0];
     }
 
 
     void reCalculate() {
-      for(int i = 0; i < NumStages; ++i) {
+      for(int i = 0; i < DyNumStages; ++i) {
         events[i].reCalculate();
       }
     }
 
     virtual unsigned numStages() {
-      return NumStages;
+      return DyNumStages;
     }
     virtual uint64_t cycleOfStage(const unsigned i) {
       return events[i].cycle();
     }
     virtual unsigned eventComplete() {
-      return Complete;
+      return DyComplete;
     }
+
+    bool hasDisasm() const { return true; }
+    std::string getDisasm() const {
+      static char buf[256];
+      sprintf(buf, "dyser_compute %p: %s",
+              (void*)this,
+              ExecProfile::getDisasm(this->_pc, this->_upc).c_str());
+      return std::string(buf);
+    }
+
   };
 
   class dyser_pipe_inst : public dyser_inst {
@@ -97,11 +114,17 @@ namespace DySER {
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
-      for (int i = 0; i < NumStages; ++i) {
+      for (int i = 0; i < DyNumStages; ++i) {
         events[i].set_inst(this);
         events[i].prop_changed();
       }
     }
+    bool hasDisasm() const { return true; }
+
+    std::string getDisasm() const {
+      return "dyser_pipe_inst";
+    }
+
   };
 
   // DySER send instruction.
@@ -114,6 +137,11 @@ namespace DySER {
       // one source reg
       _numSrcRegs = 1;
     }
+
+    std::string getDisasm() const {
+      return "dyser_send 1";
+    }
+
   };
 
   class dyser_recv : public dyser_pipe_inst {
@@ -122,6 +150,10 @@ namespace DySER {
     dyser_recv(): dyser_pipe_inst() {
       // It producer is in dyser??
       _numIntDestRegs = 1;
+    }
+
+    std::string getDisasm() const {
+      return "dyser_recv";
     }
 
   };

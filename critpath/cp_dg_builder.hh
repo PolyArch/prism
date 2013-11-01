@@ -1,27 +1,10 @@
 #ifndef CP_DG_BUILDER_HH
 #define CP_DG_BUILDER_HH
 
-#if 0
-extern int FETCH_TO_DISPATCH_STAGES;
-extern int FETCH_WIDTH;
-extern int D_WIDTH;
-extern int ISSUE_WIDTH;
-extern int EXECUTE_WIDTH;
-extern int WRITEBACK_WIDTH;
-extern int COMMIT_WIDTH;
-extern int SQUASH_WIDTH;
-extern int IQ_WIDTH;
-
-extern int ROB_SIZE;
-
-extern int BR_MISS_PENALTY;
-extern int IN_ORDER_BR_MISS_PENALTY;
-extern int LQ_SIZE;
-extern int SQ_SIZE;
-#endif
-
 #include "cp_dep_graph.hh"
 #include "critpath.hh"
+#include "exec_profile.hh"
+
 #include <memory>
 #include "op.hh"
 
@@ -36,6 +19,7 @@ class CP_DG_Builder : public CriticalPath {
 public:
   typedef dg_inst_base<T, E> BaseInst_t;
   typedef dg_inst<T, E> Inst_t;
+  typedef std::shared_ptr<Inst_t> InstPtr;
 
   CP_DG_Builder() : CriticalPath() {
      fuUsage.resize(MAX_FU_POOLS);
@@ -60,6 +44,31 @@ public:
   }
 
   virtual ~CP_DG_Builder() {
+  }
+
+
+
+  virtual void dumpInst(InstPtr inst) {
+    if (!inst.get()) {
+      std::cout << "<null>\n";
+      return;
+    }
+    for (unsigned j = 0; j < inst->numStages(); ++j) {
+      std::cout << std::setw(5) << inst->cycleOfStage(j) << " ";
+    }
+
+    if (inst->hasDisasm()) {
+      std::cout << inst->getDisasm() << "\n";
+      return ;
+    }
+
+    printDisasmPC(inst->_pc, inst->_upc);
+  }
+
+
+  virtual void printDisasmPC(uint64_t pc, int upc) {
+    std::cout << pc << "," << upc << " : "
+              << ExecProfile::getDisasm(pc, upc) << "\n";
   }
 
   virtual void setWidth(int i) {
@@ -102,7 +111,7 @@ public:
   }
 
 
-  void insert_inst(const CP_NodeDiskImage &img,
+  virtual void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
 
     Inst_t* inst = new Inst_t(img,index);
@@ -703,33 +712,33 @@ protected:
     //HANDLE LSQ HEADS
     //Loads leave at complete
     do {
-      Inst_t* depInst = LQ[lq_head_at_dispatch].get();
-      if(!depInst) {
+      auto depInst = LQ[lq_head_at_dispatch];
+      if (depInst.get() == 0) {
         break;
       }
-      if(depInst->cycleOfStage(Inst_t::Commit) < dispatch_cycle ) {
-        lq_head_at_dispatch+=1;
-        lq_head_at_dispatch%=LQ_SIZE; 
+      if (depInst->cycleOfStage(Inst_t::Commit) < dispatch_cycle ) {
+        LQ[lq_head_at_dispatch] = 0;
+        lq_head_at_dispatch += 1;
+        lq_head_at_dispatch %= LQ_SIZE;
       } else {
         break;
       }
-    } while(lq_head_at_dispatch!=LQind);
+    } while (lq_head_at_dispatch != LQind);
 
     do {
-      Inst_t* depInst = SQ[sq_head_at_dispatch].get();
-      if(!depInst) {
+      auto depInst = SQ[sq_head_at_dispatch];
+      if(depInst.get() == 0) {
         break;
       }
-      if(depInst->cycleOfStage(Inst_t::Writeback) < dispatch_cycle ) {
-        sq_head_at_dispatch+=1;
-        sq_head_at_dispatch%=SQ_SIZE; 
+      if (depInst->cycleOfStage(Inst_t::Writeback) < dispatch_cycle ) {
+        SQ[sq_head_at_dispatch] = 0;
+        sq_head_at_dispatch += 1;
+        sq_head_at_dispatch %= SQ_SIZE;
       } else {
         break;
       }
-    } while(sq_head_at_dispatch!=SQind);
-  
+    } while (sq_head_at_dispatch != SQind);
   }
-  
 
   virtual void setReadyCycle(Inst_t &inst) {
     checkDR(inst);
@@ -886,8 +895,7 @@ protected:
       return n;
     }
     int lat=n._icache_lat;
-    
-    
+
     if(depInst->_isctrl) {
       //check if previous inst was a predict taken branch
       bool predict_taken = false;
@@ -900,7 +908,7 @@ protected:
       if(predict_taken && lat==0) {
         lat+=1;
       }
-      
+
 /*
       if(lat==0) { //fetch ends at a control inst
         Inst_t* depInst2 = getCPDG()->peekPipe(-2);

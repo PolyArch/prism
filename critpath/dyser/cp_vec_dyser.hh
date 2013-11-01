@@ -34,7 +34,7 @@ namespace DySER {
     void handle_argument(const char *name, const char *optarg) {
       cp_dyser::handle_argument(name, optarg);
 
-      if (strcmp(name, "dyser-vec-len")) {
+      if (strcmp(name, "dyser-vec-len") == 0) {
         _dyser_vec_len = atoi(optarg);
         if (_dyser_vec_len == 0)
           _dyser_vec_len = 16;
@@ -60,9 +60,22 @@ namespace DySER {
       return false;
     }
 
+    void dumpCloneOp2InstMap() {
+      for (auto I = cloneOp2InstMap.begin(), E = cloneOp2InstMap.end();
+           I != E; ++I) {
+        Op *op = I->first;
+        std::cout << "Op: " << op << "\n";
+        for (auto J = I->second.begin(), JE = I->second.end();
+             J != JE; ++J) {
+          InstPtr inst = J->second;
+          std::cout << "\t\t" << J->first;
+          dumpInst(inst);
+        }
+      }
+    }
 
-    void completeDySERLoopWithIT(LoopInfo *DyLoop,
-                           unsigned curLoopIter)
+    virtual void completeDySERLoopWithIT(LoopInfo *DyLoop,
+                                         unsigned curLoopIter)
     {
       if (!(curLoopIter && ((curLoopIter % _dyser_vec_len) == 0))) {
         cp_dyser::completeDySERLoopWithIT(DyLoop,
@@ -71,7 +84,7 @@ namespace DySER {
       }
 
       assert(DyLoop);
-      SliceInfo *SI = SliceInfo::get(DyLoop);
+      SI = SliceInfo::get(DyLoop, _dyser_size);
       assert(SI);
 
       unsigned cssize = SI->cs_size();
@@ -114,23 +127,44 @@ namespace DySER {
     unsigned pipeId = 0;
     std::map<Op*, std::map<unsigned, InstPtr > > cloneOp2InstMap;
     InstPtr getInstForOp(Op* op) {
-      if (!useCloneOpMap)
-        return cp_dyser::getInstForOp(op);
-      if (cloneOp2InstMap.count(op) == 0 || pipeId == 0)
-        return cp_dyser::getInstForOp(op);
-      return cloneOp2InstMap[op][pipeId];
+      bool dumpClone = true;
+      InstPtr ret = 0;
+      if (!useCloneOpMap || SI->isInLoadSlice(op, true)) {
+        ret =  cp_dyser::getInstForOp(op);
+        dumpClone = false;
+      } else if (cloneOp2InstMap.count(op) != 0 &&
+                 cloneOp2InstMap[op].count(pipeId) != 0) {
+        ret = cloneOp2InstMap[op][pipeId];
+        dumpClone = false;
+      }
+      if (getenv("MAFIA_DUMP_DEP")) {
+        std::cout << "   inst< " << ret.get() << "> op:";
+        printDisasmPC(op->cpc().first, op->cpc().second);
+      }
+      if (dumpClone) {
+        // we are here because of phi??
+        // dumpCloneOp2InstMap();
+      }
+      return ret;
+#if 0
+      assert(0);
+
+      InstPtr retInst = cp_dyser::getInstForOp(op);
+      //cache it here
+      cloneOp2InstMap[op][0] = retInst;
+      return retInst;
+#endif
     }
 
-
-    void completeDySERLoopWithLI(LoopInfo *LI,
-                                 unsigned curLoopIter)
+    virtual void completeDySERLoopWithLI(LoopInfo *LI,
+                                         int curLoopIter)
     {
       if (!(curLoopIter && ((curLoopIter % _dyser_vec_len) == 0))) {
         cp_dyser::completeDySERLoopWithLI(LI, curLoopIter);
         return;
       }
       assert(LI);
-      SliceInfo *SI = SliceInfo::get(LI);
+      SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
 
       unsigned cssize = SI->cs_size();
@@ -153,26 +187,40 @@ namespace DySER {
 
       DySERizingLoop = true;
 
-      for (auto I = LI->rpo_begin(), E = LI->rpo_end(); I != E; ++I) {
+      for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
-          InstPtr inst = InstPtr(new Inst_t(op->img, 0));
+          InstPtr inst = createInst(op->img, 0, op);
+
+          //dumpInst(inst);
+
           if (!SI->isInLoadSlice(op)) {
+            if (cloneOp2InstMap.count(op) == 0) {
+              for (unsigned j = 0; j < depth; ++j) {
+                cloneOp2InstMap[op][j] = 0;
+              }
+            }
+
             // Emit dyser_vec_len nodes for compute slice
             for (unsigned clone = 0; clone < numClones; ++clone) {
               for (unsigned j = 0; j < depth; ++j) {
                 useCloneOpMap = true;
                 pipeId = j;
-                InstPtr dy_inst = insert_sliced_inst(SI, op, inst,
-                                                     false);
+                InstPtr dy_inst =
+                  insert_sliced_inst(SI, op, inst,
+                                     false,
+                                     ((j == 0)
+                                      ? cloneOp2InstMap[op][depth-1]
+                                      : cloneOp2InstMap[op][j-1]),
+                                     (clone+1 == numClones && j+1 == depth));
                 pipeId = 0;
                 useCloneOpMap = false;
                 cloneOp2InstMap[op][j] = dy_inst;
-                if (j != 0) {
-                  setExecuteToExecute(cloneOp2InstMap[op][j-1],
-                                      dy_inst);
-                }
+                //if (j != 0) {
+                //  setExecuteToExecute(cloneOp2InstMap[op][j-1],
+                //                      dy_inst);
+                //}
               }
             }
           } else {
@@ -182,6 +230,11 @@ namespace DySER {
         }
       }
       DySERizingLoop = false;
+
+      if (getenv("MAFIA_DYSER_DUMP_CLONE_OP_MAP")){
+        dumpCloneOp2InstMap();
+      }
+
       loop_InstTrace.clear();
     }
 

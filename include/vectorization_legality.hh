@@ -12,6 +12,7 @@ class VectorizationLegality {
   LoopInfo *_cached_curloop = 0;
 
   std::map<LoopInfo *, bool> hasVectorizableMemAccessMap;
+  std::map<LoopInfo *, bool> hasNonStridedMemAccessMap;
 
 protected:
 
@@ -48,12 +49,14 @@ protected:
 
   // utility function to check whether the loop is legally
   // vectorizable with respect to memory access.
-  virtual bool hasVectorizableMemAccess(LoopInfo *li) {
+  virtual bool hasVectorizableMemAccess(LoopInfo *li,
+                                        bool nonStrideAccessLegal) {
     auto I = hasVectorizableMemAccessMap.find(li);
     if (I != hasVectorizableMemAccessMap.end())
       return I->second;
 
     bool vectorizableMemAccess = true;
+    bool hasNonStridedMemAccess = false;
     for (auto BBI = li->body_begin(), BBE = li->body_end();
          BBI != BBE && vectorizableMemAccess; ++BBI) {
 
@@ -65,9 +68,19 @@ protected:
 
         int stride = 0;
         if (!(*I)->getStride(&stride)) {
-          vectorizableMemAccess = false;
-          break;
+          hasNonStridedMemAccess = true;
+        } else if (stride > 16) { // more than 16 bytes
+          hasNonStridedMemAccess = true;
         }
+
+        if (!nonStrideAccessLegal) {
+          if (hasNonStridedMemAccess)
+            vectorizableMemAccess = false;
+        }
+
+        // FIXME:: we do not handle non strided stores yet.
+        if ((*I)->isStore() && hasNonStridedMemAccess)
+          vectorizableMemAccess = false;
 
         for (auto DI = (*I)->m_begin(), DE = (*I)->m_end(); DI != DE; ++DI) {
           Op *DepOp = *DI;
@@ -102,12 +115,15 @@ protected:
     }
     hasVectorizableMemAccessMap.insert(std::make_pair(li,
                                                       vectorizableMemAccess));
+    hasNonStridedMemAccessMap.insert(std::make_pair(li,
+                                                    hasNonStridedMemAccess));
     return vectorizableMemAccess;
   }
 
   // Can we vectorize the loop?
   // clients override this
-  virtual bool canVectorize(LoopInfo *li) {
+  virtual bool canVectorize(LoopInfo *li,
+                            bool nonStrideAccessLegal) {
     // no loop.
     if (!li)
       return false;
@@ -117,8 +133,18 @@ protected:
       return false;
     }
 
-    return hasVectorizableMemAccess(li);
+    return hasVectorizableMemAccess(li,
+                                    nonStrideAccessLegal);
   }
+
+#if 0
+  virtual bool hasNonStridedMemAccess(LoopInfo *li) {
+    if (!hasNonStridedMemAccessMap.count(li))
+      hasVectorizableMemAccess(li);
+    assert(hasNonStridedMemAccessMap.count(li));
+    return hasNonStridedMemAccessMap[li];
+  }
+#endif
 
 };
 

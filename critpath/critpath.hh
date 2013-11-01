@@ -19,7 +19,7 @@ protected:
   std::string _run_name = "";
   std::string _name = "";
   uint64_t _last_index;
-  bool _isInOrder;
+  bool _isInOrder = false;
   bool _setInOrder = false;
 
   //careful, these are not necessarily the defaults...
@@ -161,11 +161,11 @@ public:
     if (cycles != 0) {
       out << " " << (double)baseline_cycles/ (double)cycles;
     }
-    accelSpecificStats(out);
+    accelSpecificStats(out, name);
     out << "\n";
   }
 
-  virtual void accelSpecificStats(std::ostream& out) {
+  virtual void accelSpecificStats(std::ostream& out, std::string &name) {
   }
 
   void setTraceOutputs(bool t) {

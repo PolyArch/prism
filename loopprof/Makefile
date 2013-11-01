@@ -12,8 +12,8 @@ CFLAGS :=  -std=c++11 ${OPT} -ggdb -gdwarf-3 -g -I. -Wall -Werror -Wno-unused-lo
 LIBS := -lz -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -lboost_serialization
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 #LDFLAGS := $(EXFLAGS) -ltcmalloc_minimal -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/ -L. -Wl,-rpath,$(shell pwd)
-LDFLAGS := $(EXFLAGS) -ltcmalloc -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/ -L. -Wl,-rpath,$(shell pwd) -Wl,-rpath,/s/boost-1.54.0/lib 
-
+#LDFLAGS := $(EXFLAGS) -ltcmalloc -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/ -L. -Wl,-rpath,$(shell pwd) -Wl,-rpath,/s/boost-1.54.0/lib 
+LDFLAGS := $(EXFLAGS)  -L. -Wl,-rpath,$(shell pwd) -Wl,-rpath,/s/boost-1.54.0/lib 
 
 quiet	= quiet_
 

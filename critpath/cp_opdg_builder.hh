@@ -3,12 +3,31 @@
 #define CP_OPDG_BUILDER_HH
 
 #include "cp_dg_builder.hh"
+#include "exec_profile.hh"
 
 template<typename T, typename E>
 class CP_OPDG_Builder : public CP_DG_Builder<T, E> {
 
   typedef dg_inst<T, E> Inst_t;
   typedef std::shared_ptr<Inst_t> InstPtr;
+protected:
+  bool  usePipeDeps = false;
+  bool  useOpDeps   = false;
+
+  virtual bool usePipeDependence() const { return usePipeDeps; }
+  virtual bool useOpDependence() const   { return useOpDeps; }
+
+  virtual void addPipeDeps(InstPtr &n, Op *op) {
+    usePipeDeps = true;
+    this->addDeps(n, op);
+    usePipeDeps = false;
+  }
+
+public:
+  virtual void printDisasm(Op *op) {
+    std::cout << "<" << op << ">: ";
+    this->printDisasmPC(op->cpc().first, (int)op->cpc().second);
+  }
 
 public:
   CP_OPDG_Builder() : CP_DG_Builder<T, E> () {}
@@ -17,13 +36,38 @@ public:
   void pushPipe(InstPtr &inst) {
     CP_DG_Builder<T, E>::pushPipe(inst);
     _lastInst = inst;
+    if (getenv("DUMP_MAFIA_PIPE"))
+      this->dumpInst(inst);
   }
+
+  void insert_inst(const CP_NodeDiskImage &img,
+                   uint64_t index, Op* op) {
+    InstPtr sh_inst = createInst(img, index, op);
+    getCPDG()->addInst(sh_inst, index);
+    this->addDeps(sh_inst, op);
+    this->pushPipe(sh_inst);
+    this->inserted(sh_inst);
+  }
+
 
   virtual dep_graph_t<Inst_t, T, E> *getCPDG() = 0;
 
   virtual Inst_t &checkRegisterDependence(Inst_t &n) {
-    if (!useOpDependence())
+    if (!(useOpDependence() || usePipeDependence()))
       return CP_DG_Builder<T, E>::checkRegisterDependence(n);
+
+    if (usePipeDependence()) {
+      const int NumProducer = 7; // X86 dep
+      for (int i = 0; i < NumProducer; ++i) {
+        unsigned prod = n._prod[i];
+        Inst_t *inst = getCPDG()->peekPipe(-prod);
+        if (!inst)
+          continue;
+        getCPDG()->insert_edge(*inst, inst->eventComplete(),
+                               n, Inst_t::Ready, 0, E_RDep);
+      }
+      return n;
+    }
 
     Op *op = getOpForInst(n);
     assert(op);
@@ -64,7 +108,6 @@ protected:
   std::map<Op *, InstPtr> _op2InstPtr;
   std::map<Inst_t *, Op*> _inst2Op;
 
-  virtual bool useOpDependence() const = 0;
 
   virtual InstPtr createInst(const CP_NodeDiskImage &img,
                              uint64_t index,
@@ -87,11 +130,12 @@ protected:
     _inst2Op[ret.get()] = op;
   }
 
-  virtual Op* getOpForInst(Inst_t &n) {
+  virtual Op* getOpForInst(Inst_t &n, bool allowNull = false) {
     auto I2Op = _inst2Op.find(&n);
     if (I2Op != _inst2Op.end())
       return I2Op->second;
-    assert(0 && "inst2Op map does not have inst??");
+    if (!allowNull)
+      assert(0 && "inst2Op map does not have inst??");
     return 0;
   }
 

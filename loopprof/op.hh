@@ -340,7 +340,9 @@ public:
   
   Deps::iterator u_begin() {return _uses.begin();}
   Deps::iterator u_end() {return _uses.end();}
-  int numUses() {return _uses.size();}
+  unsigned numDeps()  { return _deps.size(); }
+  unsigned numMemDeps()  { return _memDeps.size(); }
+  unsigned numUses() {return _uses.size();}
   uint32_t avg_lat() {return _totLat / _times;}
 
 };

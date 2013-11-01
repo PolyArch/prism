@@ -43,9 +43,49 @@ namespace simd {
 
     virtual void traceOut(uint64_t index,
                           const CP_NodeDiskImage &img, Op* op) {
+      //printDisasm(op);
+      //CP_OPDG_Builder<T, E>::traceOut(index, img, op);
     }
 
 
+
+    unsigned _startPipe = 0;
+    virtual void markStartPipe() {
+      _startPipe = getCPDG()->getPipeLoc();
+    }
+
+    void dumpPipe() {
+      return ;
+      int offset = getCPDG()->getPipeLoc() - _startPipe;
+      assert(offset > 0);
+      for (int i = offset; i >= 0; --i) {
+        assert(i >= 0);
+        Inst_t *ptr = getCPDG()->peekPipe(-i);
+        if (!ptr)
+          continue;
+        InstPtr inst = InstPtr(ptr);
+
+
+        for (unsigned j = 0; j < inst->numStages(); ++j) {
+          std::cout << std::setw(5) << inst->cycleOfStage(j) << " ";
+        }
+        std::cout << "\n";
+        continue;
+
+        if (inst->hasDisasm()) {
+          std::cout << inst->getDisasm() << "\n";
+          continue;
+        }
+
+        //Inst_t *n = inst.get();
+        Op *op = getOpForInst(*inst, true);
+        if (op)
+          printDisasm(op);
+        else
+          std::cout << "\n";
+      }
+      _startPipe = 0;
+    }
   protected:
     bool VectorizingLoop = false;
 
@@ -82,14 +122,6 @@ namespace simd {
 
     std::map<Op*, unsigned> _op2Count;
 
-    void printDisasm(uint64_t pc, int upc) {
-      std::cout << pc << "," << upc << " : "
-                << ExecProfile::getDisasm(pc, upc) << "\n";
-    }
-    void printDisasm(Op *op) {
-      std::cout << "<" << op << ">: ";
-      printDisasm(op->cpc().first, op->cpc().second);
-    }
 
     void printLoop(LoopInfo *li) {
 
@@ -137,6 +169,7 @@ namespace simd {
           std::cout << pc << "," <<upc << " : "
                     << "<" << op << "> "
                     << ((op == (*BBI)->lastOp())?" L ": "  ")
+                    << (isStrideAccess(op)?" S ": "  ")
                     << ExecProfile::getDisasm(pc, upc) << "\n";
         }
         std::cout << "\n";
@@ -155,6 +188,14 @@ namespace simd {
       return ret;
     }
 
+    InstPtr createPackInst(int prod1, int prod2, Op *op = 0)
+    {
+      InstPtr ret = InstPtr(new pack_inst(prod1, prod2));
+      if (op)
+        keepTrackOfInstOpMap(ret, op);
+      return ret;
+    }
+
     InstPtr createSIMDInst(Op *op)
     {
       InstPtr ret = InstPtr(new Inst_t(op->img, 0));
@@ -162,6 +203,10 @@ namespace simd {
       return ret;
     }
 
+    bool isStrideAccess(Op *op) {
+      int stride = 0;
+      return op->getStride(&stride);
+    }
     bool isStrideAccess(Op *op, int chkStride) {
       int stride = 0;
       if (!op->getStride(&stride)) {
@@ -215,11 +260,20 @@ namespace simd {
       VectorizingLoop = false;
     }
 
+
     void completeSIMDLoop(LoopInfo *li, int CurLoopIter, bool useIT) {
-      if (_useInstTrace || li->body_size() == 1 || useIT)
+      static std::set<LoopInfo*> dumped;
+      markStartPipe();
+      if (_useInstTrace || useIT
+          || (li->body_size() == 1 && !hasNonStridedMemAccess(li)))
         completeSIMDLoopWithInstTrace(li, CurLoopIter);
       else
         completeSIMDLoopWithLI(li, CurLoopIter);
+      if (!dumped.count(li)) {
+        dumped.insert(li);
+        dumpPipe();
+      }
+
     }
 
     void completeSIMDLoopWithInstTrace(LoopInfo *li, int CurLoopIter) {
@@ -246,6 +300,8 @@ namespace simd {
         emitted.insert(std::make_pair(op, true));
 
         InstPtr inst = I->second;
+        keepTrackOfInstOpMap(inst, op);
+
         // update for SIMD
         updateForSIMD(op, inst, true);
 
@@ -253,13 +309,44 @@ namespace simd {
         pushPipe(inst);
         inserted(inst);
 
-        // handle broadcast_loads
+        // handle broadcast_loads or non strided loads
         //  load followed by shuffles ...
-        if (op->isLoad() && isStrideAccess(op, 0)) {
-          inst = createShuffleInst(inst);
-          addDeps(inst);
-          pushPipe(inst);
-          inserted(inst); // bookkeeping
+        if (op->isLoad()) {
+          if (isStrideAccess(op, 0)) {
+            InstPtr sh_inst = createShuffleInst(inst);
+            addPipeDeps(sh_inst, 0);
+            pushPipe(sh_inst);
+            inserted(sh_inst); // bookkeeping
+          }
+          // Non strided -- create more loads
+          if (!isStrideAccess(op)) {
+            std::vector<unsigned> loadInsts(_simd_len);
+            loadInsts[0] =  0;
+            for (unsigned i = 1; i < _simd_len; ++i) {
+              InstPtr tmpInst = createInst(op->img, inst->index(), op);
+              addDeps(tmpInst);
+              pushPipe(tmpInst);
+              inserted(tmpInst);
+              loadInsts[i] = i;
+            }
+            unsigned InstIdx = _simd_len;
+            unsigned numInst = _simd_len;
+            while (numInst > 1) {
+              for (unsigned i = 0, j = 0; i < numInst; i += 2, ++j) {
+                unsigned op0Idx = loadInsts[i];
+                unsigned op1Idx = loadInsts[i+1];
+
+                InstPtr tmpInst = createPackInst(InstIdx - op0Idx,
+                                                 InstIdx - op1Idx,
+                                                 op);
+                addPipeDeps(tmpInst, op);
+                pushPipe(tmpInst);
+                inserted(tmpInst);
+                loadInsts[j] = InstIdx++;
+              }
+              numInst = numInst/2;
+            }
+          }
         }
       }
       //std::cout << "<<<====== completeSIMDLoopWithIT ======\n";
@@ -361,11 +448,46 @@ namespace simd {
           pushPipe(inst);
           inserted(inst);
 
-          if (op->isLoad() && isStrideAccess(op, 0)) {
-            inst = createShuffleInst(inst, op);
-            addDeps(inst);
-            pushPipe(inst);
-            inserted(inst);
+          if (op->isLoad()) {
+            if (isStrideAccess(op, 0)) {
+              InstPtr sh_inst = createShuffleInst(inst, op);
+              addPipeDeps(sh_inst, 0);
+              pushPipe(sh_inst);
+              inserted(sh_inst);
+            }
+            // Non strided -- create more loads
+            if (!isStrideAccess(op)) {
+              std::vector<unsigned> loadInsts(_simd_len);
+              loadInsts[0] =  0;
+              for (unsigned i = 1; i < _simd_len; ++i) {
+                InstPtr tmpInst = createInst(op->img, inst->index(), op);
+                // // They should atleas tmpInst
+                // for (unsigned j = 0; j < tmpInst->numStages(); ++j) {
+                //  tmpInst[j]->setCycle(inst->cycleOfStage(j));
+                //}
+                addSIMDDeps(tmpInst, op);
+                pushPipe(tmpInst);
+                inserted(tmpInst);
+                loadInsts[i] = i;
+              }
+              unsigned InstIdx = _simd_len;
+              unsigned numInst = _simd_len;
+              while (numInst > 1) {
+                for (unsigned i = 0, j = 0; i < numInst; i += 2, ++j) {
+                  unsigned op0Idx = loadInsts[i];
+                  unsigned op1Idx = loadInsts[i+1];
+
+                  InstPtr tmpInst = createPackInst(InstIdx - op0Idx,
+                                                   InstIdx - op1Idx,
+                                                   op);
+                  addPipeDeps(tmpInst, 0);
+                  pushPipe(tmpInst);
+                  inserted(tmpInst);
+                  loadInsts[j] = InstIdx ++;
+                }
+                numInst = numInst/2;
+              }
+            }
           }
         }
       }
