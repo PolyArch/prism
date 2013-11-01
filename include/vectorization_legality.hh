@@ -137,14 +137,14 @@ protected:
                                     nonStrideAccessLegal);
   }
 
-#if 0
-  virtual bool hasNonStridedMemAccess(LoopInfo *li) {
+
+  virtual bool hasNonStridedMemAccess(LoopInfo *li,
+                                      bool nonStrideAccessLegal) {
     if (!hasNonStridedMemAccessMap.count(li))
-      hasVectorizableMemAccess(li);
+      hasVectorizableMemAccess(li, nonStrideAccessLegal);
     assert(hasNonStridedMemAccessMap.count(li));
     return hasNonStridedMemAccessMap[li];
   }
-#endif
 
 };
 

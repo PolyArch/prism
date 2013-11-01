@@ -34,6 +34,7 @@ namespace simd {
 
     unsigned _simd_len = 4;
     bool _useInstTrace = false;
+    bool nonStrideAccessLegal = false;
 
   public:
     cp_simd() : CP_OPDG_Builder<T, E> () {
@@ -111,6 +112,8 @@ namespace simd {
       if (strcmp(name, "simd-use-inst-trace") == 0) {
         _useInstTrace = true;
       }
+      if (strcmp(name, "allow-non-stride-vec") == 0)
+        nonStrideAccessLegal = true;
     }
 
     virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
@@ -143,7 +146,7 @@ namespace simd {
         std::cout << "Not an inner Loop\n";
 
 
-      if (canVectorize(li))
+      if (canVectorize(li, nonStrideAccessLegal))
         std::cout << "Vectorizable\n";
       else
         std::cout << "Nonvectorizable\n";
@@ -265,7 +268,8 @@ namespace simd {
       static std::set<LoopInfo*> dumped;
       markStartPipe();
       if (_useInstTrace || useIT
-          || (li->body_size() == 1 && !hasNonStridedMemAccess(li)))
+          || (li->body_size() == 1
+              && !hasNonStridedMemAccess(li, nonStrideAccessLegal)))
         completeSIMDLoopWithInstTrace(li, CurLoopIter);
       else
         completeSIMDLoopWithLI(li, CurLoopIter);
@@ -525,7 +529,9 @@ namespace simd {
 
       if (CurLoop != li) {
 
-        if (isLastInstACall && CurLoop && canVectorize(CurLoop)) {
+        if (isLastInstACall
+            && CurLoop
+            && canVectorize(CurLoop, nonStrideAccessLegal)) {
           if (op->func()->nice_name() == "__libm_sse2_sincosf") {
             // We can vectorize this function as well.
             StackLoop = CurLoop;
@@ -545,7 +551,9 @@ namespace simd {
         }
         #endif
 
-        if (!StackLoop && CurLoop && canVectorize(CurLoop)) {
+        if (!StackLoop
+            && CurLoop
+            && canVectorize(CurLoop, nonStrideAccessLegal)) {
           completeSIMDLoop(CurLoop, CurLoopIter, forceCompleteWithIT);
           forceCompleteWithIT = false;
         }
@@ -597,7 +605,7 @@ namespace simd {
             #endif
           }
         // set insertSIMDInstr if curloopiter is a multiple of _simd_len.
-        insertSIMDInst =  (canVectorize(CurLoop)
+        insertSIMDInst =  (canVectorize(CurLoop, nonStrideAccessLegal)
                            && CurLoopIter && (CurLoopIter % _simd_len == 0)
                            && !StackLoop);
       }
@@ -607,7 +615,7 @@ namespace simd {
         isLastInstAReturn = op->isReturn();
       }
 
-      if (!StackLoop && !canVectorize(li)) {
+      if (!StackLoop && !canVectorize(li, nonStrideAccessLegal)) {
 
         // Create the instruction
         InstPtr inst = createInst(img, index, op);

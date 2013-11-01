@@ -265,7 +265,8 @@ public:
     void insert_inst_to_default_pipe()
     {
       if (getenv("DUMP_MAFIA_PIPE") != 0) {
-        _default_cp._dump_inst_flag = false;
+        if (getenv("DUMP_MAFIA_DEBUG_PIPE") != 0)
+          _default_cp._dump_inst_flag = true;
         std::cout << " =========== Begin Default Pipe ========\n";
       }
 
@@ -287,6 +288,7 @@ public:
         ++_num_config;
         ++_num_config_loop_switching;
         PrevLoop = DyLoop;
+        std::cout << "Loop Switching\n";
       }
       insert_inst_to_default_pipe();
 

@@ -12,7 +12,16 @@ static RegisterCP<DySER::cp_vec_dyser> VecIn("vec-dyser", true);
 __attribute__((__constructor__))
 static void init()
 {
+
+  CPRegistry::get()->register_argument("dyser-size", true, &VecOut.cp_obj);
   CPRegistry::get()->register_argument("dyser-vec-len", true, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
+                                       &VecOut.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-size", true, &VecIn.cp_obj);
   CPRegistry::get()->register_argument("dyser-vec-len", true, &VecIn.cp_obj);
+  CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
+                                       &VecIn.cp_obj);
+
 }
 

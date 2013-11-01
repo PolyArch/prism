@@ -16,4 +16,9 @@ static void init()
   CPRegistry::get()->register_argument("simd-use-inst-trace",
                                        false, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("allow-non-stride-vec",
+                                       false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("allow-non-stride-vec",
+                                       false, &In.cp_obj);
+
 }

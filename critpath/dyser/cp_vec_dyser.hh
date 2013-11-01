@@ -26,6 +26,7 @@ namespace DySER {
 
   protected:
     unsigned _dyser_vec_len = 16;
+    bool nonStrideAccessLegal = true;
 
   public:
     cp_vec_dyser() : cp_dyser() { }
@@ -39,6 +40,8 @@ namespace DySER {
         if (_dyser_vec_len == 0)
           _dyser_vec_len = 16;
       }
+      if (strcmp(name, "disallow-non-stride-vec") == 0)
+        nonStrideAccessLegal = false;
     }
 
     virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,
@@ -52,7 +55,7 @@ namespace DySER {
         return false;
       // complete this as soon as it completes a iteration
       // we cannot vectorize this.
-      if (!canVectorize(CurLoop))
+      if (!canVectorize(CurLoop, nonStrideAccessLegal))
         return true;
       // wait until we _dyser_vec_len worth of iteration
       if ( (CurLoopIter % _dyser_vec_len) == 0)
@@ -159,13 +162,31 @@ namespace DySER {
     virtual void completeDySERLoopWithLI(LoopInfo *LI,
                                          int curLoopIter)
     {
-      if (!(curLoopIter && ((curLoopIter % _dyser_vec_len) == 0))) {
+      if (getenv("MAFIA_DYSER_LOOP_ARG") != 0) {
+        if (canVectorize(LI, nonStrideAccessLegal)) {
+          std::cout << "Vectorizable: curLoopIter:" << curLoopIter << "\n";
+        } else {
+          std::cout << "NonVectorizable:" << curLoopIter << "\n";
+        }
+      }
+      // we can vectorize 2, 4, 8, 16 .. to max _dyser_vec_len
+
+      if (curLoopIter <= 1
+          || (curLoopIter & (curLoopIter - 1))) {
         cp_dyser::completeDySERLoopWithLI(LI, curLoopIter);
         return;
       }
+
       assert(LI);
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
+
+      if (getenv("DUMP_MAFIA_PIPE")) {
+        std::cout << "=========Sliceinfo =========\n";
+        SI->dump();
+        std::cout << "============================\n";
+      }
+
 
       unsigned cssize = SI->cs_size();
 
@@ -177,11 +198,12 @@ namespace DySER {
       if (numClones == 0)
         numClones = 1;
 
-      unsigned depth = (_dyser_vec_len / numClones);
+      unsigned vec_len = curLoopIter;
+      unsigned depth = (vec_len / numClones);
       if (depth == 0)
         depth = 1;
 
-      assert(numClones*depth == _dyser_vec_len);
+      assert(numClones*depth == vec_len);
 
       _num_config += extraConfigRequired;
 
@@ -202,7 +224,7 @@ namespace DySER {
               }
             }
 
-            // Emit dyser_vec_len nodes for compute slice
+            // Emit vec_len nodes for compute slice
             for (unsigned clone = 0; clone < numClones; ++clone) {
               for (unsigned j = 0; j < depth; ++j) {
                 useCloneOpMap = true;
