@@ -34,6 +34,9 @@ int main(int argc, char *argv[])
   int oooWidth=0;
   bool traceOutputs = false;
   int gen_loop_prof = 0;
+  int nm = 22;
+  int max_mem_lat=1073741824; //some big numbers that will never make sense
+  int max_ex_lat=1073741824;
 
   load_plugins(argv[0]);
 
@@ -55,6 +58,9 @@ int main(int argc, char *argv[])
       {"gen-loop-prof", no_argument, &gen_loop_prof, 1},
       {"run-name", required_argument, 0, 5},
       {"binary", required_argument, 0, 'b'},
+      {"max-ex-lat", required_argument, 0, 6},
+      {"max-mem-lat", required_argument, 0, 7},
+      {"nm", required_argument, 0, 8},
       {0,0,0,0}
     };
 
@@ -100,6 +106,17 @@ int main(int argc, char *argv[])
     case 5:
       run_name=string(optarg);
       break;
+    case 6:
+      max_ex_lat=atoi(optarg);
+      break;
+    case 7:
+      max_mem_lat=atoi(optarg);
+      break;
+    case 8:
+      nm=atoi(optarg);
+      break;
+
+
     case 'b': binary_name = std::string(optarg); break;
     case 'h':
       std::cout << argv[0] << " [options] file\n";
@@ -193,6 +210,7 @@ int main(int argc, char *argv[])
     CPRegistry::get()->setWidth(oooWidth, false);
   }
   CPRegistry::get()->setTraceOutputs(traceOutputs);
+  CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat);
 
   uint64_t count = 0;
   uint64_t numCycles =  0;

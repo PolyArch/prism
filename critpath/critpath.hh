@@ -28,6 +28,7 @@ protected:
   int FETCH_WIDTH = 4;
   int D_WIDTH = 4;
   int ISSUE_WIDTH = 4;
+  int PEAK_ISSUE_WIDTH = 6;
   int WRITEBACK_WIDTH = 4;
   int COMMIT_WIDTH = 4;
   int SQUASH_WIDTH = 4;
@@ -40,13 +41,28 @@ protected:
   int FETCH_TO_DISPATCH_STAGES = 4;
   int INORDER_EX_DEPTH = 4; 
 
+  int N_ALUS=6;
+  int N_MUL=1;
+  int N_FPU=2;
+  int RW_PORTS=2;
+
+  int IBUF_SIZE=32;
+  int PIPE_DEPTH=16;      
+  int PHYS_REGS=256;
+
+  bool applyMaxLatToAccel=true;
+  int _max_mem_lat=1073741824; //some big numbers that will never make sense
+  int _max_ex_lat=1073741824;
+  int _nm=22;
+
+
   //------- energy events -----------
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
   uint64_t committed_branch_insts=0, mispeculatedInstructions=0;
   uint64_t committed_load_insts=0, committed_store_insts=0;
   uint64_t squashed_insts=0;
 
-  uint64_t mult_ops=0;
+  uint64_t int_ops=0,mult_ops=0,fp_ops=0;
   uint64_t func_calls=0;
   uint64_t idleCycles=0;
   uint64_t nonPipelineCycles=0;
@@ -164,6 +180,7 @@ public:
     FETCH_WIDTH = Prof::get().fetchWidth;
     D_WIDTH = Prof::get().dispatchWidth;
     ISSUE_WIDTH = Prof::get().issueWidth;
+    PEAK_ISSUE_WIDTH = Prof::get().issueWidth+1;
     WRITEBACK_WIDTH = Prof::get().wbWidth;
     COMMIT_WIDTH = Prof::get().commitWidth;
     SQUASH_WIDTH = Prof::get().squashWidth;
@@ -176,6 +193,10 @@ public:
     FETCH_TO_DISPATCH_STAGES = Prof::get().fetchToDecodeDelay +
                                    Prof::get().decodeToRenameDelay +
                                    Prof::get().renameToIEWDelay;
+
+    N_ALUS=Prof::get().int_alu_count;
+    N_FPU=Prof::get().mul_div_count;
+    RW_PORTS=Prof::get().fp_alu_count;
   }
 
   virtual ~CriticalPath() {
@@ -185,10 +206,9 @@ public:
     assert(!_setInOrder),
     _isInOrder=inOrder;
     _setInOrder=true;
-    if(_isInOrder) {
-      FETCH_TO_DISPATCH_STAGES=3;
-    }
   }
+
+ 
 
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
 
@@ -247,12 +267,18 @@ public:
     temp.attribute("value").set_value(sval.c_str());
   }
 
+  virtual void set_max_mem_lat(int maxMem) {_max_mem_lat=maxMem;}
+  virtual void  set_max_ex_lat(int maxEx)  {_max_ex_lat=maxEx;}
+  virtual void  set_nm(int nm)  {_nm=nm;}
 
   virtual void setEnergyEvents(pugi::xml_document& doc) {
     std::stringstream ss;
-    pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
+    pugi::xml_node system_node = 
+      doc.child("component").find_child_by_attribute("name","system");
 
     uint64_t busyCycles=Prof::get().numCycles-Prof::get().idleCycles;
+
+    sa(system_node,"core_tech_node",_nm);
 
     //base stuff
     sa(system_node,"total_cycles",Prof::get().numCycles);
@@ -266,24 +292,28 @@ public:
     sa(core_node,"fetch_width",FETCH_WIDTH);
     sa(core_node,"decode_width",D_WIDTH);
     sa(core_node,"issue_width",ISSUE_WIDTH);
+    sa(core_node,"peak_issue_width",PEAK_ISSUE_WIDTH);
     sa(core_node,"commit_width",COMMIT_WIDTH);
-    sa(core_node,"fp_issue_width",ISSUE_WIDTH);
+    sa(core_node,"fp_issue_width",N_FPU);
 
-    sa(core_node,"ALU_per_core", Prof::get().int_alu_count);
-    sa(core_node,"MUL_per_core", Prof::get().mul_div_count);
-    sa(core_node,"FPU_per_core", Prof::get().fp_alu_count);
+    sa(core_node,"ALU_per_core", N_ALUS);
+    sa(core_node,"MUL_per_core", N_FPU);
+    sa(core_node,"FPU_per_core", RW_PORTS);
 
-    sa(core_node,"instruction_window_size", Prof::get().numIQEntries);
-    sa(core_node,"fp_instruction_window_size", Prof::get().numIQEntries);
-    sa(core_node,"ROB_size", Prof::get().numROBEntries);
+    sa(core_node,"instruction_window_size", IQ_WIDTH);
+    sa(core_node,"fp_instruction_window_size", IQ_WIDTH);
+    sa(core_node,"ROB_size", ROB_SIZE);
 
-    sa(core_node,"phy_Regs_IRF_size", Prof::get().numPhysIntRegs);
-    sa(core_node,"phy_Regs_FRF_size", Prof::get().numPhysFloatRegs);
+    sa(core_node,"phy_Regs_IRF_size", PHYS_REGS);
+    sa(core_node,"phy_Regs_FRF_size", PHYS_REGS);
 
-    sa(core_node,"store_buffer_size", Prof::get().SQEntries);
-    sa(core_node,"load_buffer_size", Prof::get().LQEntries);
+    sa(core_node,"store_buffer_size", SQ_SIZE);
+    sa(core_node,"load_buffer_size", LQ_SIZE);
 
-    sa(core_node,"memory_ports", Prof::get().read_write_port_count);
+    sa(core_node,"instruction_buffer_size", IBUF_SIZE);
+    sa(core_node,"decoded_stream_buffer_size", IBUF_SIZE);
+
+    sa(core_node,"memory_ports", RW_PORTS);
     sa(core_node,"RAS_size", Prof::get().RASSize);
 
     //set stats:
@@ -311,6 +341,10 @@ public:
 
     sa(core_node,"ROB_reads",Prof::get().rob_reads);
     sa(core_node,"ROB_writes",Prof::get().rob_writes);
+
+    ss.str("");
+    ss << PIPE_DEPTH << "," << PIPE_DEPTH;
+    sa(core_node,"pipeline_depth",ss.str());
 
     sa(core_node,"rename_reads",Prof::get().rename_reads);
     sa(core_node,"rename_writes",Prof::get().rename_writes);
@@ -351,7 +385,7 @@ public:
     //               1 -- write-back with write-allocate
 
     ss << Prof::get().icache_size << "," << Prof::get().cache_line_size
-      << "," << Prof::get().icache_assoc << "," << 8 /*banks*/ << "," << 1 /*thr*/
+      << "," << Prof::get().icache_assoc << "," << 1 /*banks*/ << "," << 4 /*thr*/
       << "," << Prof::get().icache_response_latency
       << "," << 32 /*out*/ << "," << 0 /*policy*/;
     sa(icache_node,"icache_config",ss.str());

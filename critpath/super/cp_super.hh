@@ -252,10 +252,12 @@ private:
   virtual void checkNumMSHRs(std::shared_ptr<SuperInst>& n) {
     assert(n->_isload || n->_isstore);
     int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-                  n->_cache_prod,n->_true_cache_prod);
+                  n->_cache_prod,n->_true_cache_prod,true);
+    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
+
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
-    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,st_lat,
                   mlat,reqDelayT,respDelayT,mshrT)) {
       return;
     } 
@@ -279,11 +281,12 @@ private:
 
   virtual void setCompleteCycle_s(std::shared_ptr<SuperInst>& inst, const CP_NodeDiskImage &img) {
     if(inst->_isstore) {
+      int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod);
       getCPDG()->insert_edge(*inst, SuperInst::Execute,
-                             *inst, SuperInst::Complete, inst->_st_lat);
+                             *inst, SuperInst::Complete, st_lat,true);
     } else {
       int lat=epLat(inst->_ex_lat,inst->_opclass,inst->_isload,
-                    inst->_isstore,inst->_cache_prod,inst->_true_cache_prod);
+                    inst->_isstore,inst->_cache_prod,inst->_true_cache_prod,true);
 
       getCPDG()->insert_edge(*inst, SuperInst::Execute,
                              *inst, SuperInst::Complete, lat);

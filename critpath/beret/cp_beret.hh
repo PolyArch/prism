@@ -612,7 +612,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
         //this sets the latency for a beret instruction
         int lat=epLat(img._cc-img._ec,img._opclass,img._isload,
-               img._isstore,img._cache_prod,img._true_cache_prod);
+               img._isstore,img._cache_prod,img._true_cache_prod,true);
         b_inst->updateLat(lat);
         b_inst->updateImg(img);
         b_inst->_index=index;
@@ -637,11 +637,13 @@ private:
 
   virtual void checkNumMSHRs(std::shared_ptr<BeretInst>& n, uint64_t minT=0) {
     int ep_lat=n->ex_lat();
+    
  //epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
                //   n->_cache_prod,n->_true_cache_prod);
+    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
-    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,st_lat,
                   mlat,reqDelayT,respDelayT,mshrT)) {
       return;
     } 
@@ -779,10 +781,6 @@ private:
                            inst, BeretInst::Complete, inst._ex_lat);
   }
 */
-  uint64_t numCycles() {
-    getCPDG()->finish(maxIndex);
-    return getCPDG()->getMaxCycles();
-  }
 
   // Handle enrgy events for McPAT XML DOC
   virtual void setEnergyEvents(pugi::xml_document& doc) {
@@ -800,9 +798,19 @@ private:
       pugi::xml_node system_node = accel_doc.child("component").find_child_by_attribute("name","system");
       //set the total_cycles so that we get power correctly
       sa(system_node,"total_cycles",numCycles());
-  
+      sa(system_node,"busy_cycles",0);
+      sa(system_node,"idle_cycles",numCycles());
+
+      sa(system_node,"core_tech_node",_nm);
+      sa(system_node,"device_type",0);
+
+
       pugi::xml_node core_node =
                 system_node.find_child_by_attribute("name","core0");
+      sa(core_node,"total_cycles",numCycles());
+      sa(core_node,"busy_cycles",0);
+      sa(core_node,"idle_cycles",numCycles());
+
       sa(core_node,"ALU_per_core", Prof::get().int_alu_count);
       sa(core_node,"MUL_per_core", Prof::get().mul_div_count);
       sa(core_node,"FPU_per_core", Prof::get().fp_alu_count);
@@ -844,11 +852,11 @@ private:
     std::cout.flush();
 
     execMcPAT(mcpat_xml_accel_fname,outf);
-    float reg   = stof(grepF(outf,"Register Files",7,5));
     float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
     float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
     float calu  = stof(grepF(outf,"Complex ALUs",7,5));
-    std::cout << ialu << ", " << fpalu << ", " << calu << ", " << reg << "\n";
+    float reg   = stof(grepF(outf,"Register Files",7,5));
+    std::cout << ialu << ", " << fpalu << ", " << calu << ", " << reg*4 << "\n";
 
   }
 

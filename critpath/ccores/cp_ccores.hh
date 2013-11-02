@@ -517,7 +517,7 @@ private:
 
   virtual void setCompleteCycle_cc(CCoresInst& inst, const CP_NodeDiskImage &img) {
     int lat=epLat(inst._ex_lat,inst._opclass,inst._isload,
-                  inst._isstore,inst._cache_prod,inst._true_cache_prod);
+                  inst._isstore,inst._cache_prod,inst._true_cache_prod,true);
 
     getCPDG()->insert_edge(inst, CCoresInst::Execute,
                            inst, CCoresInst::Complete, lat);
@@ -543,25 +543,24 @@ private:
     }
   }
 
-  uint64_t numCycles() {
-    getCPDG()->finish(maxIndex);
-    uint64_t curCycle = getCPDG()->getMaxCycles();
+  virtual uint64_t numCycles() {
+    uint64_t curCycle = CP_DG_Builder::numCycles();
 
      if(_startCCoresCycle!=0) {
        _totalCCoresCycles+= curCycle-_startCCoresCycle;
        _startCCoresCycle=curCycle;
      }
 
-
     return curCycle;
   }
 
   virtual void checkNumMSHRs(std::shared_ptr<CCoresInst>& n,uint64_t minT=0) {
     int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-                  n->_cache_prod,n->_true_cache_prod);
+                  n->_cache_prod,n->_true_cache_prod,true);
+    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
-    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,st_lat,
                   mlat,reqDelayT,respDelayT,mshrT)) {
       return;
     } 
@@ -610,9 +609,19 @@ private:
       pugi::xml_node system_node = accel_doc.child("component").find_child_by_attribute("name","system");
       //set the total_cycles so that we get power correctly
       sa(system_node,"total_cycles",numCycles());
- 
+      sa(system_node,"busy_cycles",0);
+      sa(system_node,"idle_cycles",numCycles());
+
+      sa(system_node,"core_tech_node",_nm);
+      sa(system_node,"device_type",0);
+
       pugi::xml_node core_node =
                 system_node.find_child_by_attribute("name","core0");
+
+      sa(core_node,"total_cycles",numCycles());
+      sa(core_node,"busy_cycles",0);
+      sa(core_node,"idle_cycles",numCycles());
+
       sa(core_node,"ALU_per_core", Prof::get().int_alu_count);
       sa(core_node,"MUL_per_core", Prof::get().mul_div_count);
       sa(core_node,"FPU_per_core", Prof::get().fp_alu_count);
@@ -620,7 +629,8 @@ private:
       sa(core_node,"ialu_accesses",_ccores_int_ops);
       sa(core_node,"fpu_accesses",_ccores_fp_ops);
       sa(core_node,"mul_accesses",_ccores_mult_ops);
- 
+      sa(system_node,"",0);
+
     } else {
       std::cerr << "XML Malformed\n";
       return;
@@ -637,6 +647,7 @@ private:
     std::cout << _name << " accel: ... ";
     std::cout.flush();
 
+    execMcPAT(mcpat_xml_accel_fname,outf);
     float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
     float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
     float calu  = stof(grepF(outf,"Complex ALUs",7,5));

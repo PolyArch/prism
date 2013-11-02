@@ -50,6 +50,7 @@ public:
      MSHRResp[(uint64_t)-10000];
      LQ.resize(LQ_SIZE);
      SQ.resize(SQ_SIZE);
+     activityMap.insert(1);
      rob_head_at_dispatch=0;
      lq_head_at_dispatch=0;
      sq_head_at_dispatch=0;
@@ -68,6 +69,36 @@ public:
     WRITEBACK_WIDTH = i;
     COMMIT_WIDTH = i;
     SQUASH_WIDTH = i;
+
+    if(_isInOrder) {
+      FETCH_TO_DISPATCH_STAGES=3;
+
+      N_ALUS=ISSUE_WIDTH; //only need 1-issue, 2-issue
+      N_FPU=1;
+      RW_PORTS=1;
+
+      IBUF_SIZE=16;
+      PIPE_DEPTH=16;
+      PHYS_REGS=90;
+
+      //overide incoming defaults
+      IQ_WIDTH=8;
+      ROB_SIZE=80;
+      PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
+
+    } else {
+      N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
+      N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),2);
+      RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),2);
+
+      IBUF_SIZE=32;
+      PIPE_DEPTH=20;
+      PHYS_REGS=256;
+      PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
+
+    }
+
+    //IBUF_SIZE=FETCH_TO_DISPATCH_STAGES * ISSUE_WIDTH;
   }
 
 
@@ -99,9 +130,13 @@ public:
 
   virtual dep_graph_t<Inst_t,T,E> * getCPDG() = 0;
 
-  uint64_t numCycles() {
+  virtual uint64_t numCycles() {
     getCPDG()->finish(maxIndex);
-    return getCPDG()->getMaxCycles();
+    uint64_t final_cycle = getCPDG()->getMaxCycles();
+    activityMap.insert(final_cycle);
+    activityMap.insert(final_cycle+1);
+    cleanUp(final_cycle+2000);
+    return final_cycle;
   }
 
   virtual void printEdgeDep(Inst_t& inst, int ind,
@@ -228,41 +263,15 @@ protected:
   uint64_t maxIndex;
   uint64_t _curCycle;
 
-  virtual void inserted(std::shared_ptr<Inst_t>& inst) {
-    maxIndex = inst->index();
-    _curCycle = inst->cycleOfStage(Inst_t::Fetch);
-
-    //Update Queues: IQ, LQ, SQ
-    if (inst->_isload) {
-      LQ[LQind]=inst;
-      LQind=(LQind+1)%LQ_SIZE;
-    }
-    if (inst->_isstore) {
-      SQ[SQind]=inst;
-      SQind=(SQind+1)%SQ_SIZE;
-    }
-
-    //delete irrelevent 
-    typename SingleCycleRes::iterator upperbound_sc;
-    upperbound_sc = wbBusRes.upper_bound(_curCycle);
-    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
-    upperbound_sc = issueRes.upper_bound(_curCycle);
-    issueRes.erase(issueRes.begin(),upperbound_sc); 
-
-     
-    //add to activity
-    for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
-      activityMap.insert(inst->cycleOfStage(i));
-    }
-
+  virtual void cleanUp(uint64_t curCycle) {
     //summing up idle cycles
     uint64_t prevCycle=0;
     for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
       uint64_t cycle=*I;
-      if(prevCycle!=0 && cycle-prevCycle>14) {
-        idleCycles+=(cycle-prevCycle-14);
+      if(prevCycle!=0 && cycle-prevCycle>16) {
+        idleCycles+=(cycle-prevCycle-16);
       }
-      if (cycle + 50  < _curCycle && activityMap.size() > 2) {
+      if (cycle + 100  < curCycle && activityMap.size() > 2) {
         I = activityMap.erase(I);
         prevCycle=cycle;
       } else {
@@ -277,7 +286,7 @@ protected:
       for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
         uint64_t cycle = i->first;
         assert(cycle!=0);
-        if (cycle + 50  < _curCycle) {
+        if (cycle + 50  < curCycle) {
           i = fuUseMap.erase(i);
         } else {
           //++i;
@@ -301,14 +310,14 @@ protected:
 
 
     //delete irrelevent
-    auto upperMSHRUse = --MSHRUseMap.upper_bound(_curCycle);
+    auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
     auto firstMSHRUse = MSHRUseMap.begin();
     if(upperMSHRUse->first > firstMSHRUse->first) {
       MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
     }
 
     //delete irrelevent 
-    auto upperMSHRResp = MSHRResp.upper_bound(_curCycle-200);
+    auto upperMSHRResp = MSHRResp.upper_bound(curCycle-200);
     auto firstMSHRResp = MSHRResp.begin();
     if(upperMSHRResp->first > firstMSHRResp->first) {
       MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
@@ -320,7 +329,7 @@ protected:
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
 /*
-        std::cout << "remove? (" << i->first << "," << _curCycle << ") " << i->second->_index << " " << i->second->_isload << " " << i->second->_isstore << "nri: " << nri << " " << i->second << i->second->cycleOfStage(0) << " " << i->second->cycleOfStage(5);
+        std::cout << "remove? (" << i->first << "," << curCycle << ") " << i->second->_index << " " << i->second->_isload << " " << i->second->_isstore << "nri: " << nri << " " << i->second << i->second->cycleOfStage(0) << " " << i->second->cycleOfStage(5);
         if(i->second->_isstore) {
           std::cout << " " << i->second->cycleOfStage(6);
         }
@@ -332,7 +341,7 @@ protected:
           assert(0);
         }*/
 
-        if (cycle  < _curCycle) {
+        if (cycle  < curCycle) {
           //std::cout << respMap.size() << " (yes)\n";
           i = respMap.erase(i);
           //std::cout << respMap.size() << "\n";
@@ -344,6 +353,35 @@ protected:
       }
     }
 
+  }
+
+
+  virtual void inserted(std::shared_ptr<Inst_t>& inst) {
+    maxIndex = inst->index();
+    _curCycle = inst->cycleOfStage(Inst_t::Fetch);
+
+    //Update Queues: IQ, LQ, SQ
+    if (inst->_isload) {
+      LQ[LQind]=inst;
+      LQind=(LQind+1)%LQ_SIZE;
+    }
+    if (inst->_isstore) {
+      SQ[SQind]=inst;
+      SQind=(SQind+1)%SQ_SIZE;
+    }
+
+    //delete irrelevent 
+    typename SingleCycleRes::iterator upperbound_sc;
+    upperbound_sc = wbBusRes.upper_bound(_curCycle);
+    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
+    upperbound_sc = issueRes.upper_bound(_curCycle);
+    issueRes.erase(issueRes.begin(),upperbound_sc); 
+
+    //add to activity
+    for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
+      activityMap.insert(inst->cycleOfStage(i));
+    }
+    cleanUp(_curCycle);
   }
 
   //Adds a resource to the resource utilization map.
@@ -587,7 +625,7 @@ protected:
     if(inst._icache_lat>0) {
       icache_read_accesses++;
     }
-    if(inst._icache_lat>1) {
+    if(inst._icache_lat>20) {
       icache_read_misses++;
     }
 
@@ -726,9 +764,9 @@ protected:
     } else {
       //TODO: below two things should be merged
       checkIssueWidth(*inst);
-      checkFuncUnits(*inst);
     }
 
+    checkFuncUnits(*inst);
     if(inst->_isload) {
       //loads acquire MSHR at execute
       checkNumMSHRs(inst,false);
@@ -804,11 +842,17 @@ protected:
         uint64_t prevCycle = prevInst->cycleOfStage(Inst_t::Commit);
         uint64_t curCycle = inst.cycleOfStage(Inst_t::Commit);
         if(prevCycle!=curCycle && widthCycle + 1 != curCycle) {
-          rob_reads+=curCycle-prevCycle;
+          int newReads=curCycle-prevCycle;
+
+          assert(prevCycle!=0);
+
+/*          if(newReads > 10) {
+            std::cout << newReads << "reads: " << prevCycle << " " << curCycle << "\n";
+          }*/
+          rob_reads+=newReads;
         }
       }
     }
-
 
     committed_insts++;
     committed_int_insts+=!inst._floating;
@@ -822,8 +866,9 @@ protected:
   virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {
     if(!_isInOrder) {
       if(inst->_isstore) {
+        int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod);
         getCPDG()->insert_edge(*inst, Inst_t::Commit,
-                               *inst, Inst_t::Writeback, 2+inst->_st_lat, E_WB);
+                               *inst, Inst_t::Writeback, 2+st_lat, E_WB);
         checkNumMSHRs(inst,true);
         checkPP(*inst);
       }
@@ -1262,27 +1307,28 @@ protected:
     case 0: //No_OpClass
       return ROB_SIZE+IQ_WIDTH;
     case 1: //IntALU
-      return 6;
+      return N_ALUS;
 
     case 2: //IntMult
     case 3: //IntDiv
-      return 2;
+      return N_MUL;
 
     case 4: //FloatAdd
     case 5: //FloatCmp
     case 6: //FloatCvt
-      return 4;
+      return N_FPU;
     case 7: //FloatMult
     case 8: //FloatDiv
     case 9: //FloatSqrt
-      return 2;
+      return N_FPU;
     case 30: //MemRead
     case 31: //MemWrite
-      return 2;
+      return RW_PORTS;
+
     default:
-      return 4;
+      return 4; //hopefully this never happens
     }
-    return 4;
+    return 4; //and this!
   }
 
   virtual unsigned getFUIssueLatency(int opclass) {
@@ -1345,6 +1391,40 @@ protected:
     return 1;
   }
 
+  void countOpclassEnergy(int opclass) {
+    switch(opclass) {
+
+    case 0: //No_OpClass
+      return;
+
+    case 1: //IntALU
+      int_ops++;
+      return;
+    case 2: //IntMult
+      int_ops++;
+      mult_ops++;
+      return;
+    case 3: //IntDiv
+      int_ops++;
+      return;
+
+    case 4: //FloatAdd
+    case 5: //FloatCmp
+    case 6: //FloatCvt
+    case 7: //FloatMult
+    case 8: //FloatDiv
+    case 9: //FloatSqrt
+      fp_ops++;
+      return;
+
+    default:
+      return;
+    }
+    assert(0);
+    return;
+  }
+
+
 
   //KNOWN_HOLE: SSE Issue Latency Missing
   virtual unsigned getFUIssueLatency(Inst_t &n) {
@@ -1353,15 +1433,19 @@ protected:
 
   //Check Functional Units to see if they are full
   virtual Inst_t &checkFuncUnits(Inst_t &n) {
+    countOpclassEnergy(n._opclass);
+
     // no func units if load, store, or if it has no opclass
     //if (n._isload || n._isstore || n._opclass==0)
     if (n._opclass==0) {
       return n;
     }
-
-    if (n._opclass==2) {
+    
+/*    if (n._opclass==2) {
       mult_ops++;
-    }
+    }*/
+ 
+
 
     Inst_t* min_node = static_cast<Inst_t*>(
          addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
@@ -1400,10 +1484,12 @@ protected:
   //check MSHRs to see if they are full
   virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
     int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-                  n->_cache_prod,n->_true_cache_prod);
+                  n->_cache_prod,n->_true_cache_prod,false);
+    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod);
+
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
-    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,n->_st_lat,
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,st_lat,
                   mlat,reqDelayT,respDelayT,mshrT)) {
       return;
     } 
@@ -1413,6 +1499,8 @@ protected:
     if(!store) { //if load
 
       //have to wait this long before each event
+      
+#if 0
       int insts_to_squash=instsToSquash();
       int squash_cycles = squashCycles(insts_to_squash);
       int recheck_cycles = squash_cycles-1;
@@ -1421,6 +1509,10 @@ protected:
       if(recheck_cycles < 3) {
         recheck_cycles=3;
       }
+#else
+      int insts_to_squash=FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH;
+      int recheck_cycles=FETCH_TO_DISPATCH_STAGES;
+#endif
 
       assert(recheck_cycles>=1); 
       BaseInst_t* min_node =
@@ -1440,8 +1532,9 @@ protected:
         //Inst_t* dummy_inst = new Inst_t(*n);
         std::shared_ptr<Inst_t> sh_dummy_inst(dummy_inst);
         
+        n->saveInst(sh_dummy_inst);
 
-        pushPipe(sh_dummy_inst);
+        //pushPipe(sh_dummy_inst);
         //assert(min_node); 
         if(!min_node) {
         }
@@ -1458,7 +1551,10 @@ protected:
         setReadyCycle(*n);
         checkRE(*n);
 
-        squashed_insts+=rechecks*insts_to_squash;
+        //std::cout << insts_to_squash << "," << rechecks << "\n";
+        //squashed_insts+=rechecks*(insts_to_squash*0.8);
+        squashed_insts+=(rechecks*insts_to_squash)/(FETCH_TO_DISPATCH_STAGES+1);
+
       }
     } else { //if store
        BaseInst_t* min_node =
@@ -1570,11 +1666,27 @@ protected:
   }
 #endif
 
-  //logic to determine ep latency based on information in the trace
-  static int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
-                   bool cache_prod, bool true_cache_prod, 
-                   bool inorder_pipeline=false) {
+  int stLat(int st_lat, bool cache_prod, 
+            bool true_cache_prod, bool isAccelerator=false) {
+    int lat = st_lat;
+ /*
+    if(cache_prod && true_cache_prod) {
+      lat = Prof::get().dcache_hit_latency + 
+            Prof::get().dcache_response_latency;
+    }
+ */
+    if( (applyMaxLatToAccel && isAccelerator ) ||
+        !applyMaxLatToAccel) {
+      if(lat > _max_mem_lat) {
+        lat = _max_mem_lat;
+      }
+    }
+    return lat;
+  }
 
+  //logic to determine ep latency based on information in the trace
+  int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
+            bool cache_prod, bool true_cache_prod, bool isAccelerator=false) {
     //memory instructions bear their memory latency here.  If we have a cache
     //producer, that means we should be in the cache, so drop the latency
     int lat;
@@ -1590,6 +1702,20 @@ protected:
       //lat = n._ex_lat;
       lat = getFUOpLatency(opclass);
     }
+
+    if( (applyMaxLatToAccel && isAccelerator ) ||
+        !applyMaxLatToAccel) {
+      //check if latencies are bigger than max
+      if(isload || isstore) { //if it's a mem
+        if(lat > _max_mem_lat) {
+          lat = _max_mem_lat;
+        }
+      } else { //if it's an ex
+        if(lat > _max_ex_lat) {
+          lat = _max_ex_lat;
+        }
+      }
+    }
     return lat;
   }
 
@@ -1597,8 +1723,7 @@ protected:
   //Complete After Execute
   virtual Inst_t &checkEP(Inst_t &n) {
     int lat=epLat(n._ex_lat,n._opclass,n._isload,
-                  n._isstore,n._cache_prod,n._true_cache_prod,
-                  _isInOrder);
+                  n._isstore,n._cache_prod,n._true_cache_prod,false);
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Complete, lat, E_EP);
     return n;
@@ -1765,6 +1890,9 @@ protected:
     if(committed_insts!=0) {
       squashRatio =(double)squashed_insts/(double)committed_insts;
     }
+    if(!_isInOrder) {
+      std::cout << "Squash Ratio for \"" << _name << "\" is " << squashRatio << "\n";
+    }
     double highSpecFactor = 1.00+1.5*squashRatio;
     double specFactor = 1.00+squashRatio;
     double halfSpecFactor = 1.00+0.5*squashRatio;
@@ -1773,11 +1901,12 @@ protected:
     double sixteenthSpecFactor = 1.00+0.0625*squashRatio;
 
 
-    uint64_t intOps=committed_int_insts-committed_load_insts-committed_store_insts;
+    //uint64_t intOps=committed_int_insts-committed_load_insts-committed_store_insts;
+    //uint64_t intOps=committed_int_insts;
 
     sa(core_node,"total_instructions",(uint64_t)(committed_insts*specFactor));
-    sa(core_node,"int_instructions",(uint64_t)(intOps*specFactor));
-    sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts*specFactor));
+    sa(core_node,"int_instructions",(uint64_t)(int_ops*specFactor));
+    sa(core_node,"fp_instructions",(uint64_t)(fp_ops*specFactor));
     sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts*highSpecFactor));
     sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions*sixteenthSpecFactor));
     sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*fourthSpecFactor));

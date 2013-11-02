@@ -12,6 +12,7 @@
 #include <iostream>
 #include <stdio.h>
 #include <memory>
+#include <set> 
 
 // Terminology:
 // "event" refers to individual instruction "stages" like fetch/decode/etc..
@@ -191,6 +192,7 @@ public:
 
 protected:
   T events[NumStages];
+  std::set<std::shared_ptr<dg_inst_base<T,E>>> _savedInsts;
 
 public:
   bool iqOpen=false;
@@ -201,6 +203,10 @@ public:
     /*for (int i = 0; i < NumStages; ++i) {
       events[i].remove_all_edges();
     }*/
+  }
+
+  virtual void saveInst(std::shared_ptr<dg_inst_base<T,E>> inst) {
+    _savedInsts.insert(inst);
   }
 
   //Copy events from another Inst_t

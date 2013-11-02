@@ -21,11 +21,11 @@ static const char * xml_str = R"(
 		<param name="homogeneous_ccs" value="1"/><!--cache coherence hardware -->
 		<param name="homogeneous_NoCs" value="1"/>
 		<param name="core_tech_node" value="22"/><!-- nm -->
-		<param name="target_core_clockrate" value="3700"/><!--MHz -->
-		<param name="temperature" value="380"/> <!-- Kelvin -->
+		<param name="target_core_clockrate" value="2000"/><!--MHz -->
+		<param name="temperature" value="310"/> <!-- Kelvin -->
 		<param name="number_cache_levels" value="2"/>
-		<param name="interconnect_projection_type" value="0"/><!--0: aggressive wire technology; 1: conservative wire technology -->
-		<param name="device_type" value="0"/><!--0: HP(High Performance Type); 1: LSTP(Low standby power) 2: LOP (Low Operating Power)  -->
+		<param name="interconnect_projection_type" value="1"/><!--0: aggressive wire technology; 1: conservative wire technology -->
+		<param name="device_type" value="2"/><!--0: HP(High Performance Type); 1: LSTP(Low standby power) 2: LOP (Low Operating Power)  -->
 		<param name="longer_channel_device" value="1"/><!-- 0 no use; 1 use when aggressive -->
 		<param name="power_gating" value="1"/><!-- 0 not enabled; 1 enabled -->
 		<param name="machine_bits" value="64"/>
@@ -42,7 +42,7 @@ static const char * xml_str = R"(
 		<!-- *********************** cores ******************* -->
 		<component id="system.core0" name="core0">
 			<!-- Core property -->
-			<param name="clock_rate" value="3700"/>
+			<param name="clock_rate" value="2000"/>
 			<!-- for cores with unknown timing, set to 0 to force off the opt flag -->
 			<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 			<param name="opt_local" value="1"/>
@@ -76,14 +76,14 @@ static const char * xml_str = R"(
 			Theses parameters are reserved for future use.--> 
 			<param name="pipelines_per_core" value="1,1"/>
 			<!--integer_pipeline and floating_pipelines, if the floating_pipelines is 0, then the pipeline is shared-->
-			<param name="pipeline_depth" value="14,14"/>
+			<param name="pipeline_depth" value="16,16"/>
 			<!-- pipeline depth of int and fp, if pipeline is shared, the second number is the average cycles of fp ops -->
 			<!-- issue and exe unit-->
 			<param name="ALU_per_core" value="6"/>
 			<!-- contains an adder, a shifter, and a logical unit -->
 			<param name="MUL_per_core" value="1"/>
 			<!-- For MUL and Div -->
-			<param name="FPU_per_core" value="2"/>		
+			<param name="FPU_per_core" value="2"/>	
 			<!-- buffer between IF and ID stage -->
 			<param name="instruction_buffer_size" value="32"/><!--Inst. + micro-op -->
 			<!-- buffer between ID and sche/exe stage -->
@@ -268,11 +268,11 @@ static const char * xml_str = R"(
 				<!-- the parameters are capacity,block_width, associativity,bank, throughput w.r.t. core clock, latency w.r.t. core clock,-->
 			    <param name="buffer_sizes" value="8, 8, 8, 8"/>	
 				<!-- all the buffer related are optional -->
-			    <param name="clockrate" value="3400"/>
+			    <param name="clockrate" value="2000"/>
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw search ports -->
-				<param name="device_type" value="0"/>
+				<param name="device_type" value="2"/>
 				<!-- although there are multiple access types, 
 				Performance simulator needs to cast them into reads or writes
 				e.g. the invalidates can be considered as writes -->
@@ -289,11 +289,11 @@ static const char * xml_str = R"(
 				<!-- the parameters are capacity,block_width, associativity,bank, throughput w.r.t. core clock, latency w.r.t. core clock,-->
 			    <param name="buffer_sizes" value="8, 8, 8, 8"/>	
 				<!-- all the buffer related are optional -->
-			    <param name="clockrate" value="3400"/>
+			    <param name="clockrate" value="2000"/>
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw search ports -->
-				<param name="device_type" value="0"/>
+				<param name="device_type" value="2"/>
 				<!-- altough there are multiple access types, 
 				Performance simulator needs to cast them into reads or writes
 				e.g. the invalidates can be considered as writes -->
@@ -309,11 +309,11 @@ static const char * xml_str = R"(
 				<!-- the parameters are capacity,block_width, associativity, bank, throughput w.r.t. core clock, latency w.r.t. core clock,output_width, cache policy -->
 				<param name="buffer_sizes" value="16, 16, 16, 16"/>
 				<!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->	
-				<param name="clockrate" value="3700"/>
+				<param name="clockrate" value="2000"/>
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw ports -->
-				<param name="device_type" value="0"/>
+				<param name="device_type" value="2"/>
 				<stat name="read_accesses" value="0"/>
 				<stat name="write_accesses" value="0"/>
 				<stat name="read_misses" value="0"/>
@@ -329,7 +329,7 @@ static const char * xml_str = R"(
 				<param name="clockrate" value="850"/>
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw ports -->
-				<param name="device_type" value="0"/>
+				<param name="device_type" value="2"/>
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="buffer_sizes" value="16, 16, 16, 16"/>
 				<!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->	
@@ -342,7 +342,7 @@ static const char * xml_str = R"(
 		</component>
 <!--**********************************************************************-->
 		<component id="system.NoC0" name="noc0">
-			<param name="clockrate" value="3400"/>
+			<param name="clockrate" value="2000"/>
 			<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 			<param name="type" value="0"/>
 			<!--0:bus, 1:NoC , for bus no matter how many nodes sharing the bus

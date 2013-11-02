@@ -40,7 +40,7 @@ static void execMcPAT(std::string& inf, std::string& outf) {
   const char *mcpat = getenv("MCPAT");
   if (!mcpat) {
     mcpat = "mcpat";
-    std::string ms = std::string(mcpat) + std::string(" -print_level 5 -infile ") 
+    std::string ms = std::string(mcpat) + std::string(" -opt_for_clk 0 -print_level 5 -infile ") 
                    + inf + std::string(" 2>&1 > ") + outf;
     //std::cout << ms << "\n";
     system(ms.c_str());
@@ -101,6 +101,15 @@ public:
       }
     }
   }
+
+  void setGlobalParams(int nm, int maxEx, int maxMem) {
+    for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
+      i->second->set_nm(nm);
+      i->second->set_max_mem_lat(maxMem);
+      i->second->set_max_ex_lat(maxEx);
+    }
+  }
+
 
   void setTraceOutputs(bool t) {
     for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
@@ -193,8 +202,10 @@ public:
 
       execMcPAT(inf,outf);
 
-      float rund = stof(grepF(outf,"Processor:",9,5));
-      std::cout << rund << "\n";
+      float tot_dyn_p = stof(grepF(outf,"Processor:",9,5));
+      float tot_leak_p = stof(grepF(outf,"Processor:",4,5));
+
+      std::cout << tot_dyn_p << " " << tot_leak_p << "\n";
 
       I->second->calcAccelEnergy();
     }
