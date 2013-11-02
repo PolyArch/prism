@@ -855,9 +855,9 @@ private:
     float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
     float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
     float calu  = stof(grepF(outf,"Complex ALUs",7,5));
-    float reg   = stof(grepF(outf,"Register Files",7,5));
-    std::cout << ialu << ", " << fpalu << ", " << calu << ", " << reg*4 << "\n";
-
+    float reg   = stof(grepF(outf,"Register Files",7,5)) * 4;
+    float total = ialu + fpalu + calu + reg;
+    std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
   }
 
 
