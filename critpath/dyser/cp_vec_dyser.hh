@@ -187,7 +187,7 @@ namespace DySER {
         std::cout << "============================\n";
       }
 
-
+      unsigned vec_len = curLoopIter;
       unsigned cssize = SI->cs_size();
 
       // 19/16 = 1 extraConfigRequired
@@ -198,7 +198,9 @@ namespace DySER {
       if (numClones == 0)
         numClones = 1;
 
-      unsigned vec_len = curLoopIter;
+      if (numClones > vec_len)
+        numClones = vec_len;
+
       unsigned depth = (vec_len / numClones);
       if (depth == 0)
         depth = 1;
@@ -207,6 +209,8 @@ namespace DySER {
 
       _num_config += extraConfigRequired;
 
+      std::map<Op*, InstPtr> memOp2Inst;
+
       DySERizingLoop = true;
 
       for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
@@ -214,12 +218,12 @@ namespace DySER {
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
           InstPtr inst = createInst(op->img, 0, op);
-
+          updateForDySER(op, inst, false);
           //dumpInst(inst);
 
           if (!SI->isInLoadSlice(op)) {
             if (cloneOp2InstMap.count(op) == 0) {
-              for (unsigned j = 0; j < depth; ++j) {
+              for (unsigned j = 0; j < depth*numClones; ++j) {
                 cloneOp2InstMap[op][j] = 0;
               }
             }
@@ -228,17 +232,23 @@ namespace DySER {
             for (unsigned clone = 0; clone < numClones; ++clone) {
               for (unsigned j = 0; j < depth; ++j) {
                 useCloneOpMap = true;
-                pipeId = j;
+
+                //printDisasmPC(op->cpc().first, op->cpc().second);
+
+                pipeId = clone*depth + j;
+                unsigned prevPipeId = ((j == 0)
+                                       ? clone*depth + depth - 1
+                                       : pipeId - 1);
+
                 InstPtr dy_inst =
                   insert_sliced_inst(SI, op, inst,
                                      false,
-                                     ((j == 0)
-                                      ? cloneOp2InstMap[op][depth-1]
-                                      : cloneOp2InstMap[op][j-1]),
+                                     cloneOp2InstMap[op][prevPipeId],
                                      (clone+1 == numClones && j+1 == depth));
-                pipeId = 0;
                 useCloneOpMap = false;
-                cloneOp2InstMap[op][j] = dy_inst;
+                cloneOp2InstMap[op][pipeId] = dy_inst;
+                pipeId = 0;
+
                 //if (j != 0) {
                 //  setExecuteToExecute(cloneOp2InstMap[op][j-1],
                 //                      dy_inst);
@@ -247,7 +257,19 @@ namespace DySER {
             }
           } else {
             // emit one node for load slice
-            insert_sliced_inst(SI, op, inst);
+            if (op->isLoad() || op->isStore()) {
+              Op *firstOp = SI->getFirstMemNode(op);
+              if (memOp2Inst.count(firstOp) == 0) {
+                // create the inst
+                insert_sliced_inst(SI, op, inst);
+                memOp2Inst[firstOp] = inst;
+              } else {
+                // we already created the inst
+                this->keepTrackOfInstOpMap(memOp2Inst[firstOp], op);
+              }
+            } else {
+              insert_sliced_inst(SI, op, inst);
+            }
           }
         }
       }
@@ -260,6 +282,12 @@ namespace DySER {
       loop_InstTrace.clear();
     }
 
+    bool isThisOpCoalesced(Op *op) {
+      // only load and store can be coalesced.
+      if (!(op->isLoad() || op->isStore()))
+        return false;
+
+    }
   };
 }
 

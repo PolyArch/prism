@@ -63,6 +63,7 @@ public:
 
     // dyser size : default: 5x5
     unsigned _dyser_size = 25;
+    unsigned _dyser_fu_fu_lat = 1;
 
     InstPtr createDyComputeInst(Op *op, uint64_t index) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
@@ -74,7 +75,7 @@ public:
     }
 
     InstPtr createDySendInst(Op *op) {
-      InstPtr dy_send = InstPtr(new dyser_send());
+            InstPtr dy_send = InstPtr(new dyser_send());
       if (op) {
         keepTrackOfInstOpMap(dy_send, op);
       }
@@ -96,18 +97,20 @@ public:
         InstPtr depInst = getInstForOp(DepOp);
         if (!depInst.get())
           continue;
-        if (getenv("DUMP_MAFIA_PIPE")) {
+        if (getenv("DUMP_MAFIA_PIPE_DEP")) {
           std::cout << "\t:";  dumpInst(depInst);
         }
         // FIXME:: Assumption - 2 cycle to get to next functional unit.
         getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
-                               *dyInst, dyser_inst::DyReady, 2, E_DyDep);
+                               *dyInst, dyser_inst::DyReady,
+                               _dyser_fu_fu_lat,
+                               E_DyDep);
       }
       if (prevInst.get() != 0) {
-        // N will ready after 1 cycle
+        // Ready is inorder
         getCPDG()->insert_edge(*prevInst, dyser_inst::DyReady,
                                *dyInst, dyser_inst::DyReady,
-                               1,
+                               0,
                                E_DyRR);
       }
     }
@@ -119,19 +122,32 @@ public:
                              E_DyRE);
 
       if (prevInst.get() != 0) {
+
+        unsigned issueLat = (SI->shouldIncludeInCSCount(op)
+                             ? getFUIssueLatency(op->img._opclass)
+                             : 0);
+        if (issueLat && (op->img._opclass ==  9 || op->img._opclass == 8))
+          //override issueLatency for NBody: (fsqrt,fdiv -> rsqrt)
+          issueLat = issueLat / 2;
+
+
         // Execute to Execute
         getCPDG()->insert_edge(*prevInst, dyser_inst::DyExecute,
                                *dyInst, dyser_inst::DyExecute,
-                               getFUIssueLatency(op->img._opclass),
+                               issueLat,
                                E_DyFU);
       }
     }
 
     virtual void setExecuteToComplete(InstPtr dyInst, Op *op,
                                       InstPtr prevInst) {
+
+      unsigned op_lat = (SI->shouldIncludeInCSCount(op)
+                         ? getFUOpLatency(op->img._opclass)
+                         : 0);
       getCPDG()->insert_edge(*dyInst, dyser_inst::DyExecute,
                              *dyInst, dyser_inst::DyComplete,
-                             getFUOpLatency(op->img._opclass),
+                             op_lat,
                              E_DyEC);
 
       if (prevInst.get() != 0) {
@@ -225,6 +241,9 @@ public:
         if (_dyser_size < 16)
           _dyser_size = 16; //minimum size
       }
+      if (strcmp(name, "dyser-fu-fu-latency") == 0) {
+        _dyser_fu_fu_lat = atoi(optarg);
+      }
     }
 
 
@@ -241,7 +260,14 @@ public:
     }
     virtual bool canDySERize(LoopInfo *li) {
       // all inner loops are candidate for dyserization.
-      return (li && li->isInnerLoop());
+      if (!li)
+        return false;
+      if (!li->isInnerLoop())
+        return false;
+      SliceInfo *si = SliceInfo::get(li, _dyser_size);
+      if (si->cs_size() == 0)
+        return false;
+      return true;
     }
 
     virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,
@@ -258,9 +284,28 @@ public:
 
 
     std::vector<std::pair<Op*, InstPtr> > loop_InstTrace;
+
+    std::map<Op*, uint16_t> _cacheLat;
     virtual void trackDySERLoop(LoopInfo *li, Op *op, InstPtr inst) {
       loop_InstTrace.push_back(std::make_pair(op, inst));
+      if (op->isLoad()) {
+        _cacheLat[op] = std::max(inst->_ex_lat, _cacheLat[op]);
+      } else if (op->isStore()) {
+        _cacheLat[op] = std::max(inst->_st_lat, _cacheLat[op]);
+      }
     }
+
+    void updateForDySER(Op *op, InstPtr inst, bool useInst = true) {
+      if (op->isLoad()) {
+        uint16_t inst_lat = useInst ? inst->_ex_lat : 0;
+        inst->_ex_lat = std::max(inst_lat, _cacheLat[op]);
+      }
+      if (op->isStore()) {
+        uint16_t inst_lat = useInst ? inst->_st_lat : 0;
+        inst->_st_lat = std::max(inst_lat, _cacheLat[op]);
+      }
+    }
+
 
     void insert_inst_to_default_pipe()
     {
@@ -301,12 +346,20 @@ public:
 
       static uint64_t numCompleted = 0;
       if (getenv("MAFIA_DEBUG_DYSER_LOOP")) {
+        unsigned break_at_config = 1;
+
+        if (getenv("MAFIA_DEBUG_NUM_CONFIG")) {
+          break_at_config = atoi(getenv("MAFIA_DEBUG_NUM_CONFIG"));
+        }
+
         SliceInfo *s = SliceInfo::get(DyLoop, _dyser_size);
         std::cout << "cs_size : " << s->cs_size() << "  dyser_size: "  << _dyser_size << "\n";
         unsigned configParam = atoi(getenv("MAFIA_DEBUG_DYSER_LOOP"));
-        ++numCompleted;
-        if (configParam < numCompleted)
-          exit(0);
+        if (break_at_config == _num_config_loop_switching) {
+          ++numCompleted;
+          if (configParam < numCompleted)
+            exit(0);
+        }
       }
     }
 
@@ -351,11 +404,14 @@ public:
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
           InstPtr inst = createInst(op->img, 0, op);
+          // update cache execution delay if necessary
+          updateForDySER(op, inst, false);
           insert_sliced_inst(SI, op, inst);
         }
       }
       DySERizingLoop = false;
       loop_InstTrace.clear();
+      _cacheLat.clear();
     }
 
     virtual InstPtr insertDySend(Op *op) {
@@ -416,8 +472,7 @@ public:
 
 
       if (getenv("DUMP_MAFIA_PIPE") != 0) {
-        std::cout << "CS::"; dumpInst(inst);
-        std::cout << "      ---> "; dumpInst(dy_inst);
+        std::cout << "      "; dumpInst(dy_inst);
       }
 
       keepTrackOfInstOpMap(dy_inst, op);

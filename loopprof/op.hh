@@ -160,7 +160,7 @@ public:
     return ;
 #if 0
     int i = 0;
-    std::cout << "size: " << _size << "\n";
+    std::cout << "size: " << _acc_size << "\n";
     for (auto I = effAddrAccessed.begin(), E = effAddrAccessed.end(); I != E; ++I) {
       std::cout << I->addr << ":" << I->itercnt << ":"
                 << ((I->sty == st_Constant)?"C"
@@ -172,13 +172,14 @@ public:
     }
 #endif
   }
-  unsigned _size = 0;
+  unsigned _acc_size = 4;
   uint64_t _first_effAddr = 0;
   void initEffAddr(uint64_t addr, unsigned size, int iterCnt) {
-    //effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
     _first_effAddr = addr;
     _effAddr = addr;
-    _size = size;
+    _acc_size = size;
+
+    assert(_acc_size != 0);
   }
 
   uint64_t getCurEffAddr() const {
@@ -209,25 +210,24 @@ public:
         }
       }
     }
-    //effAddrAccessed.emplace_back(eainfo(addr, iterCnt, stride_ty, stride));
+
   }
 
-  std::set<Op*> _sameEffAddrOpSet;
-  bool isSameEffAddrAccessed(Op *op) const {
+  std::set<Op*> _sameEffAddrOpSet; // keeps track of same addr
+  std::set<Op*> _nextEffAddrOpSet; // keeps track of next addr for
+                                   //coalescing purpose
 
+  bool isSameEffAddrAccessed(Op *op) const {
     // check whether the same effective addr accessed map
     return (_sameEffAddrOpSet.count(op) != 0);
+  }
 
-    #if 0
-    std::vector<eainfo> &That = Op->effAddrAccessed;
-    if (effAddrAccessed.size() != That.size())
-      return false;
-    for (unsigned i = 0, e = effAddrAccessed.size(); i != e; ++i) {
-      if (effAddrAccessed[i] != That[i])
-        return false;
-    }
-    return true;
-    #endif
+  Op *getCoalescedOp() const {
+    if (_nextEffAddrOpSet.size() == 0)
+      return 0;
+    if (_nextEffAddrOpSet.size() == 1)
+      return *_nextEffAddrOpSet.begin();
+    return 0;
   }
 
   void set_intersect_inplace(std::set<Op*> &this_set,
@@ -260,14 +260,43 @@ public:
     // atleast this op will be there.
     assert (_effAddr2Op.count(getCurEffAddr()));
 
-    const std::set<Op*> &opSet = _effAddr2Op[getCurEffAddr()];
+    {
+      const std::set<Op*> &opSet = _effAddr2Op[getCurEffAddr()];
 
-    if (_sameEffAddrOpSet.size() == 0)
-      _sameEffAddrOpSet.insert(opSet.begin(), opSet.end());
-    else
-      set_intersect_inplace(_sameEffAddrOpSet,
-                            opSet);
-    assert(_sameEffAddrOpSet.size() != 0);
+      if (_sameEffAddrOpSet.size() == 0)
+        _sameEffAddrOpSet.insert(opSet.begin(), opSet.end());
+      else
+        set_intersect_inplace(_sameEffAddrOpSet,
+                              opSet);
+      assert(_sameEffAddrOpSet.size() != 0);
+    }
+
+    {
+      assert(_acc_size != 0);
+      uint64_t nextEffAddr = getCurEffAddr() + _acc_size;
+
+      //std::cout << "ca: " << getCurEffAddr() << ", size = " << _acc_size
+      //<< " := na = " << nextEffAddr << "\n";
+
+
+      if (_effAddr2Op.count(nextEffAddr) != 0) {
+        const std::set<Op*> &nextOpSet = _effAddr2Op[nextEffAddr];
+        if (_nextEffAddrOpSet.size() == 0)
+          _nextEffAddrOpSet.insert(nextOpSet.begin(), nextOpSet.end());
+        else
+          set_intersect_inplace(_nextEffAddrOpSet, nextOpSet);
+      }
+
+      if (_nextEffAddrOpSet.size() == 0)
+        _nextEffAddrOpSet.insert(0); // tombstone
+
+      /*
+      if (_nextEffAddrOpSet.size() == 1) {
+        Op *nextOp = *_nextEffAddrOpSet.begin();
+        std::cout << "mem:" << this << "--" << nextOp << "\n";
+      }
+      */
+    }
   }
 
   bool getStride(int *strideLen) const {
@@ -337,7 +366,7 @@ public:
   Deps::iterator m_end() { return _memDeps.end(); }
   Deps::iterator d_begin() {return _deps.begin();}
   Deps::iterator d_end() {return _deps.end();}
-  
+
   Deps::iterator u_begin() {return _uses.begin();}
   Deps::iterator u_end() {return _uses.end();}
   unsigned numDeps()  { return _deps.size(); }
