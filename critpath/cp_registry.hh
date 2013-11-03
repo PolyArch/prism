@@ -41,7 +41,7 @@ static void execMcPAT(std::string& inf, std::string& outf) {
   if (!mcpat) {
     mcpat = "mcpat";
     std::string ms = std::string(mcpat) + std::string(" -opt_for_clk 0 -print_level 5 -infile ") 
-                   + inf + std::string(" 2>&1 > ") + outf;
+                   + inf + std::string(" > ") + outf;
     //std::cout << ms << "\n";
     system(ms.c_str());
   }
