@@ -387,6 +387,7 @@ public:
           getCPDG()->insert_edge(*prev_bb_end,
                                  *cur_bb_end, 1, E_CSBB); 
         }
+        cleanUp(prev_bb_end->cycle()-1000);
       }
       addCCoreDeps(sh_inst,img);
 
