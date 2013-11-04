@@ -410,7 +410,6 @@ public:
   SubgraphVec::iterator sg_end() {return _subgraphVec.end();}
 
   bool canFlowOP(std::vector<Op*>& worklist, Op* dest_op, bool from);
-
 };
 
 //Class which describes properties of a dynamic iteration;
