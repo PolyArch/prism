@@ -1870,9 +1870,9 @@ protected:
 
 
   // Handle enrgy events for McPAT XML DOC
-  virtual void setEnergyEvents(pugi::xml_document& doc) {
+  virtual void setEnergyEvents(pugi::xml_document& doc, int nm) {
     //set the normal events based on the m5out/stats file
-    CriticalPath::setEnergyEvents(doc);
+    CriticalPath::setEnergyEvents(doc,nm);
 
     uint64_t totalCycles=numCycles();
     uint64_t busyCycles=totalCycles-idleCycles;

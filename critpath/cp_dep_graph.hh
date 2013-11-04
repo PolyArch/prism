@@ -432,7 +432,6 @@ public:
     _cycle=0;
     for (auto i = _pred_edges.begin(), e = _pred_edges.end(); i!=e; ++i) {
       compute_cycle(*i); 
-      //  E* edge = *i;
     }
   }
 
@@ -453,16 +452,9 @@ public:
 
   virtual void add_edge(EPtr e) {
     _edges.push_back(e);
-    //create_pred_edge(e);
     e->dest()->add_pred_edge(e);
     compute_cycle(e);
   }
-  //fetch fetch edge
-/*  virtual void add_ff_edge(EPtr e) {
-    ff_edge = e;
-    this->add_edge(e);
-  }*/
-//  virtual void create_pred_edge(EPtr e) = 0;
 
   static void compute_cycle(EPtr e) {
 
@@ -514,7 +506,8 @@ public:
   }
 
   virtual void remove_edge(EPtr rem_e) {
-    for (PredEdgeIterator I = _edges.begin(), e=_edges.end(); I != e; ++I) {
+    _dirty=true;
+    for (EdgeIterator I = _edges.begin(), e=_edges.end(); I != e; ++I) {
       if ((*I) == rem_e) {
         //delete (*I);
         _edges.erase(I);
@@ -526,22 +519,20 @@ public:
 
   virtual void remove_all_edges() {
     //remove predecessor edges
-    for (EdgeIterator I = _pred_edges.begin(), e = _pred_edges.end(); I != e; ++I) {
+    for (auto I = _pred_edges.begin(), e = _pred_edges.end(); I != e; ++I) {
       EPtr edge = *I;
       edge->src()->remove_edge(edge);
       delete (*I);
     }
     _pred_edges.clear();
     //remove dependent edges
-    for (EdgeIterator I = _edges.begin(), e = _edges.end(); I != e; ++I) {
+    for (auto I = _edges.begin(), e = _edges.end(); I != e; ++I) {
       EPtr edge = *I;
       edge->dest()->remove_pred_edge(edge);
       delete (*I);
     }
     _edges.clear();
   }
-
-
 
   virtual void print(const CP_NodeDiskImage &img) {
     std::cout << _cycle << " ";

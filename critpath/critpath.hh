@@ -226,13 +226,13 @@ public:
 
   virtual uint64_t numCycles() = 0;
 
-  virtual void calcAccelEnergy() {
+  virtual void calcAccelEnergy(std::string fname_base,int nm) {
     return;
   }
 
   std::string mcpat_xml_fname;
   std::string mcpat_xml_accel_fname;
-  virtual void printMcPATxml(const char* filename) {
+  virtual void printMcPATxml(const char* filename,int nm) {
     #include "mcpat-defaults.hh"
     pugi::xml_document doc;
     std::istringstream ss(xml_str);
@@ -241,13 +241,18 @@ public:
 
     //pugi::xml_parse_result result = doc.load_file("tony-ooo.xml");
     if(result) {
-      setEnergyEvents(doc);
+      setEnergyEvents(doc,nm);
     } else {
       std::cerr << "XML Malformed\n";
       return;
     }
     doc.save_file(filename);
   }
+
+  virtual void printAccelMcPATxml(std::string filename,int nm) {
+    return;
+  }
+
 
   //sets a particular energy event attribute of the mcpat xml doc
   //"sa" for conciseness (set attribute)
@@ -271,14 +276,14 @@ public:
   virtual void  set_max_ex_lat(int maxEx)  {_max_ex_lat=maxEx;}
   virtual void  set_nm(int nm)  {_nm=nm;}
 
-  virtual void setEnergyEvents(pugi::xml_document& doc) {
+  virtual void setEnergyEvents(pugi::xml_document& doc,int nm) {
     std::stringstream ss;
     pugi::xml_node system_node = 
       doc.child("component").find_child_by_attribute("name","system");
 
     uint64_t busyCycles=Prof::get().numCycles-Prof::get().idleCycles;
 
-    sa(system_node,"core_tech_node",_nm);
+    sa(system_node,"core_tech_node",nm);
 
     //base stuff
     sa(system_node,"total_cycles",Prof::get().numCycles);

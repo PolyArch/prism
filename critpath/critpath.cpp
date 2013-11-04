@@ -34,7 +34,7 @@ int main(int argc, char *argv[])
   int oooWidth=0;
   bool traceOutputs = false;
   int gen_loop_prof = 0;
-  int nm = 22;
+  int nm = 0;
   int max_mem_lat=1073741824; //some big numbers that will never make sense
   int max_ex_lat=1073741824;
 

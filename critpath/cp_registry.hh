@@ -102,14 +102,26 @@ public:
     }
   }
 
+  int _nm=0;
+  std::vector<int> nm_vec;
+
   void setGlobalParams(int nm, int maxEx, int maxMem) {
+    _nm=nm;
+    if(_nm==0) {
+      nm_vec.push_back(65);
+      nm_vec.push_back(45);
+      nm_vec.push_back(32);
+      nm_vec.push_back(22);
+    } else {
+      nm_vec.push_back(nm);
+    }
+
     for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
       i->second->set_nm(nm);
       i->second->set_max_mem_lat(maxMem);
       i->second->set_max_ex_lat(maxEx);
     }
   }
-
 
   void setTraceOutputs(bool t) {
     for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
@@ -183,31 +195,44 @@ public:
   }
 
   void printMcPATFiles() {
-    for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      I->second->printMcPATxml((std::string("mcpat/") + _run_name +
-                                I->first + std::string(".xml")).c_str() );
+    for(auto i = nm_vec.begin(),e=nm_vec.end();i!=e;++i) {
+      int nm = *i;
+      for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
+        I->second->set_nm(nm);  
+        std::string mcpat_fname=std::string("mcpat/") + _run_name + 
+                                  std::to_string(nm) + std::string(".") +
+                                  I->first + std::string(".xml");
+        I->second->printMcPATxml(mcpat_fname.c_str(),nm);
+        I->second->printAccelMcPATxml(mcpat_fname.c_str(),nm);
+      }
     }
   }
 
   void runMcPAT() {
-    // look up env
-    for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
-      std::cout << I->first << " Dynamic Power(W)... ";
-      std::cout.flush();
-
-      std::string inf = std::string("mcpat/") + _run_name + 
-                         I->first + std::string(".xml");
-      std::string outf = std::string("mcpat/") + _run_name + 
-                         I->first + std::string(".out");
-
-      execMcPAT(inf,outf);
-
-      float tot_dyn_p = stof(grepF(outf,"Processor:",9,5));
-      float tot_leak_p = stof(grepF(outf,"Processor:",4,5));
-
-      std::cout << tot_dyn_p << " " << tot_leak_p << "\n";
-
-      I->second->calcAccelEnergy();
+    for(auto i = nm_vec.begin(),e=nm_vec.end();i!=e;++i) {
+      int nm = *i;
+ 
+      // look up env
+      for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
+        I->second->set_nm(nm);   
+        std::cout << I->first << " Dynamic Power(" << nm << "nm)... ";
+        std::cout.flush();
+  
+        std::string inf = std::string("mcpat/") + _run_name + 
+                           std::to_string(nm) + std::string(".") +
+                           I->first + std::string(".xml");
+        std::string outf = std::string("mcpat/") + _run_name + 
+                           I->first + std::string(".out");
+  
+        execMcPAT(inf,outf);
+  
+        float tot_dyn_p = stof(grepF(outf,"Processor:",9,5));
+        float tot_leak_p = stof(grepF(outf,"Processor:",4,5));
+  
+        std::cout << tot_dyn_p << " " << tot_leak_p << "\n";
+  
+        I->second->calcAccelEnergy(inf,nm);
+      }
     }
   }
 

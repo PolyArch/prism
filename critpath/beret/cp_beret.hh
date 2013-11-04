@@ -782,10 +782,7 @@ private:
 */
 
   // Handle enrgy events for McPAT XML DOC
-  virtual void setEnergyEvents(pugi::xml_document& doc) {
-    //set the normal events based on the m5out/stats file
-    CP_DG_Builder::setEnergyEvents(doc);
-  
+  virtual void printAccelMcPATxml(std::string fname_base, int nm) {
     #include "mcpat-defaults.hh"
     pugi::xml_document accel_doc;
     std::istringstream ss(xml_str);
@@ -800,7 +797,7 @@ private:
       sa(system_node,"busy_cycles",0);
       sa(system_node,"idle_cycles",numCycles());
 
-      sa(system_node,"core_tech_node",_nm);
+      sa(system_node,"core_tech_node",nm);
       sa(system_node,"device_type",0);
 
 
@@ -839,18 +836,19 @@ private:
       return;
     }
 
-    mcpat_xml_accel_fname = 
-           std::string(mcpat_xml_fname) + std::string(".accel");
-    accel_doc.save_file(mcpat_xml_accel_fname.c_str());
+    std::string fname=fname_base + std::string(".accel");
+    accel_doc.save_file(fname.c_str());
   }
 
-  virtual void calcAccelEnergy() {
-    std::string outf = mcpat_xml_accel_fname + ".out";
+  virtual void calcAccelEnergy(std::string fname_base,int nm) {
+    std::string fname=fname_base + std::string(".accel");
 
-    std::cout << _name << " accel: ... ";
+    std::string outf = fname + std::string(".out");
+
+    std::cout << _name << " accel(" << nm << "nm)... ";
     std::cout.flush();
 
-    execMcPAT(mcpat_xml_accel_fname,outf);
+    execMcPAT(fname,outf);
     float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
     float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
     float calu  = stof(grepF(outf,"Complex ALUs",7,5));
