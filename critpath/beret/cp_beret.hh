@@ -619,7 +619,6 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
         //std::cout << "adding index: " << b_inst->_index << "\n";
 
-
         if(_beret_dataflow_pure) {
           add_dataflow_pure_dep(*b_inst);
         } else if (_beret_dataflow_seb) {

@@ -264,6 +264,13 @@ protected:
   uint64_t _curCycle;
 
   virtual void cleanUp(uint64_t curCycle) {
+    //delete irrelevent 
+    typename SingleCycleRes::iterator upperbound_sc;
+    upperbound_sc = wbBusRes.upper_bound(curCycle);
+    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
+    upperbound_sc = issueRes.upper_bound(curCycle);
+    issueRes.erase(issueRes.begin(),upperbound_sc); 
+
     //summing up idle cycles
     uint64_t prevCycle=0;
     for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
@@ -371,13 +378,6 @@ protected:
       SQ[SQind]=inst;
       SQind=(SQind+1)%SQ_SIZE;
     }
-
-    //delete irrelevent 
-    typename SingleCycleRes::iterator upperbound_sc;
-    upperbound_sc = wbBusRes.upper_bound(_curCycle);
-    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
-    upperbound_sc = issueRes.upper_bound(_curCycle);
-    issueRes.erase(issueRes.begin(),upperbound_sc); 
 
     //add to activity
     for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
