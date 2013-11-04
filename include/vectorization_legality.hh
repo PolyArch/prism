@@ -146,6 +146,20 @@ protected:
     return hasNonStridedMemAccessMap[li];
   }
 
+  // utility functions
+  bool isStrideAccess(Op *op) {
+    int stride = 0;
+    return op->getStride(&stride);
+  }
+
+  bool isStrideAccess(Op *op, int chkStride) {
+    int stride = 0;
+    if (!op->getStride(&stride)) {
+      return false;
+    }
+    return stride == chkStride;
+  }
+
 };
 
 #endif

@@ -57,6 +57,11 @@ public:
       std::cout << std::setw(5) << inst->cycleOfStage(j) << " ";
     }
 
+    std::cout << (inst->_isload?"L":" ")
+              << (inst->_isstore?"S":" ")
+              << (inst->_isctrl?"C":" ")
+              << (inst->_ctrl_miss?"M": " ")
+              << " ";
     if (inst->hasDisasm()) {
       std::cout << inst->getDisasm() << "\n";
       return ;

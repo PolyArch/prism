@@ -181,7 +181,7 @@ namespace DySER {
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
 
-      if (getenv("DUMP_MAFIA_PIPE")) {
+      if (getenv("MAFIA_DEBUG_DYSER_SLICE_INFO")) {
         std::cout << "=========Sliceinfo =========\n";
         SI->dump();
         std::cout << "============================\n";
@@ -261,7 +261,17 @@ namespace DySER {
               Op *firstOp = SI->getFirstMemNode(op);
               if (memOp2Inst.count(firstOp) == 0) {
                 // create the inst
-                insert_sliced_inst(SI, op, inst);
+                if (isStrideAccess(op)) {
+                  insert_sliced_inst(SI, op, inst);
+                } else {
+                  for (unsigned i = 0; i < _dyser_vec_len-1; ++i) {
+                    InstPtr tmpInst = createInst(op->img, 0, op);
+                    insert_sliced_inst(SI, op, tmpInst);
+                    updateForDySER(op, inst, false);
+                  }
+                  insert_sliced_inst(SI, op, inst);
+                  this->keepTrackOfInstOpMap(inst, op);
+                }
                 memOp2Inst[firstOp] = inst;
               } else {
                 // we already created the inst

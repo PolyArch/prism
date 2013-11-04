@@ -286,12 +286,16 @@ public:
     std::vector<std::pair<Op*, InstPtr> > loop_InstTrace;
 
     std::map<Op*, uint16_t> _cacheLat;
+    std::map<Op*, bool> _ctrlMiss;
     virtual void trackDySERLoop(LoopInfo *li, Op *op, InstPtr inst) {
       loop_InstTrace.push_back(std::make_pair(op, inst));
       if (op->isLoad()) {
         _cacheLat[op] = std::max(inst->_ex_lat, _cacheLat[op]);
       } else if (op->isStore()) {
         _cacheLat[op] = std::max(inst->_st_lat, _cacheLat[op]);
+      } else if (op->isCtrl()) {
+        // optimistic : If one succeeds, all succeeds.
+        _ctrlMiss[op] &= inst->_ctrl_miss;
       }
     }
 
@@ -303,6 +307,12 @@ public:
       if (op->isStore()) {
         uint16_t inst_lat = useInst ? inst->_st_lat : 0;
         inst->_st_lat = std::max(inst_lat, _cacheLat[op]);
+      }
+      if (op->isCtrl()) {
+        if (useInst)
+          inst->_ctrl_miss &= _ctrlMiss[op];
+        else
+          inst->_ctrl_miss = _ctrlMiss[op];
       }
     }
 
@@ -412,6 +422,7 @@ public:
       DySERizingLoop = false;
       loop_InstTrace.clear();
       _cacheLat.clear();
+      _ctrlMiss.clear();
     }
 
     virtual InstPtr insertDySend(Op *op) {

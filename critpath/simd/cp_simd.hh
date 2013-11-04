@@ -206,17 +206,6 @@ namespace simd {
       return ret;
     }
 
-    bool isStrideAccess(Op *op) {
-      int stride = 0;
-      return op->getStride(&stride);
-    }
-    bool isStrideAccess(Op *op, int chkStride) {
-      int stride = 0;
-      if (!op->getStride(&stride)) {
-        return false;
-      }
-      return stride == chkStride;
-    }
 
     std::vector<std::pair<Op*, InstPtr> > vecloop_InstTrace;
     std::map<Op*, uint16_t> _cacheLat;
@@ -541,15 +530,15 @@ namespace simd {
         }
 
         //std::cout << "\n";
-        #ifdef TRACE_INST
-        // We switched to a different loop, complete simd_loop
-        std::cout << "Diff Loop<" << li << ">" << CurLoopIter << ":: StackLoop <" << StackLoop << ">" << StackLoopIter << "::"
-                  << ((isLastInstACall)?"L..Call":"") << ((isLastInstAReturn)?"L..Return":"");
-        printDisasm(op);
-        if (op == op->bb()->lastOp()) {
-          std::cout << "\n";
+        if (getenv("MAFIA_DUMP_SIMD_LOOP")) {
+          // We switched to a different loop, complete simd_loop
+          std::cout << "Diff Loop<" << li << ">" << CurLoopIter << ":: StackLoop <" << StackLoop << ">" << StackLoopIter << "::"
+                    << ((isLastInstACall)?"L..Call":"") << ((isLastInstAReturn)?"L..Return":"");
+          printDisasm(op);
+          if (op == op->bb()->lastOp()) {
+            std::cout << "\n";
+          }
         }
-        #endif
 
         if (!StackLoop
             && CurLoop
@@ -565,30 +554,30 @@ namespace simd {
           StackLoop = 0;
           CurLoopIter = StackLoopIter;
           StackLoopIter = 0;
-#ifdef TRACE_INST
-          // We switched to a different loop, complete simd_loop
-          std::cout << "  Reset Loop<" << li << ">" << CurLoopIter << ":: StackLoop <" << StackLoop << ">" << StackLoopIter << "::";
-#endif
+          if (getenv("MAFIA_DUMP_SIMD_LOOP")) {
+            // We switched to a different loop, complete simd_loop
+            std::cout << "  Reset Loop<" << li << ">" << CurLoopIter << ":: StackLoop <" << StackLoop << ">" << StackLoopIter << "::";
+          }
 
         }
 
       } else if (!CurLoop) {
 
-        #ifdef TRACE_INST
-        std::cout << "SameLoop<" << CurLoop << ">" << CurLoopIter << ":: " << ">:: StackLoop<" << StackLoop << ">" << StackLoopIter << "::";
-        printDisasm(op);
-        if (op == op->bb()->lastOp()) {
-          std::cout << "\n";
+        if (getenv("MAFIA_DUMP_SIMD_LOOP")) {
+          std::cout << "SameLoop<" << CurLoop << ">" << CurLoopIter << ":: " << ">:: StackLoop<" << StackLoop << ">" << StackLoopIter << "::";
+          printDisasm(op);
+          if (op == op->bb()->lastOp()) {
+            std::cout << "\n";
+          }
         }
-        #endif
       } else if (CurLoop) {
-        #ifdef TRACE_INST
-        std::cout << "SameLoop<" << CurLoop << ">" << CurLoopIter<< ":: " << ">:: StackLoop<" << StackLoop << ">" << StackLoopIter << "::";
-        printDisasm(op);
-        if (op == op->bb()->lastOp()) {
-          std::cout << "\n";
+        if (getenv("MAFIA_DUMP_SIMD_LOOP")) {
+          std::cout << "SameLoop<" << CurLoop << ">" << CurLoopIter<< ":: " << ">:: StackLoop<" << StackLoop << ">" << StackLoopIter << "::";
+          printDisasm(op);
+          if (op == op->bb()->lastOp()) {
+            std::cout << "\n";
+          }
         }
-        #endif
         // Same Loop, incr iteration
         if (op == op->bb()->lastOp() // last instruction in the bb
             && CurLoop->isLatch(op->bb())) // Latch in the current loop)
