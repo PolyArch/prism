@@ -413,7 +413,6 @@ public:
 
 };
 
-
 //Class which describes properties of a dynamic iteration;
 class LoopIter {
 public:
