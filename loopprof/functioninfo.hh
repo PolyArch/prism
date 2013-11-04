@@ -425,8 +425,12 @@ public:
         calculateRPO(bb);
       }
     }
-    if(_rpo.size()==0 && _bbMap.size()!=0) {
-      calculateRPO(_firstBB);
+    if(_rpo.size()!=_bbMap.size()) {
+      if( _firstBB->rpoNum() == -1) {
+        calculateRPO(_firstBB);
+      }  else {
+        assert(0 && "rpo calc error: this should never happen");
+      }
     }
 
     std::reverse(_rpo.begin(), _rpo.end());

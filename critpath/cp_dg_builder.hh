@@ -310,10 +310,12 @@ protected:
 
 
     //delete irrelevent
-    auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
-    auto firstMSHRUse = MSHRUseMap.begin();
-    if(upperMSHRUse->first > firstMSHRUse->first) {
-      MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
+    if(MSHRUseMap.begin()->first < curCycle) {
+      auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
+      auto firstMSHRUse = MSHRUseMap.begin();
+      if(upperMSHRUse->first > firstMSHRUse->first) {
+        MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
+      }
     }
 
     //delete irrelevent 
@@ -399,7 +401,9 @@ protected:
     uint64_t cur_cycle=min_cycle;
     std::map<uint64_t,std::set<uint64_t>>::iterator
                        cur_cycle_iter,next_cycle_iter,last_cycle_iter;
-   
+  
+    assert(MSHRUseMap.begin()->first < min_cycle);
+ 
     cur_cycle_iter = --MSHRUseMap.upper_bound(min_cycle);
 
     uint64_t filter_addr=(((uint64_t)-1)^(Prof::get().cache_line_size-1));
@@ -526,7 +530,6 @@ protected:
   //Adds a resource to the resource utilization map.
   BaseInst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
                        BaseInst_t* cpnode) { 
-    return NULL;
 
     int fuIndex = fuPoolIdx(opclass);
     FuUsageMap& fuUseMap = fuUsage[fuIndex];
@@ -1524,7 +1527,7 @@ protected:
                *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
         }*/
         //don't do anything!
-
+        
       } else { //rechecks > 0 -- time to refetch
         //create a copy of the instruction to serve as a dummy
         Inst_t* dummy_inst = new Inst_t();
@@ -1870,14 +1873,15 @@ protected:
   virtual void setEnergyEvents(pugi::xml_document& doc) {
     //set the normal events based on the m5out/stats file
     CriticalPath::setEnergyEvents(doc);
- 
-    uint64_t busyCycles=numCycles()-idleCycles;
+
+    uint64_t totalCycles=numCycles();
+    uint64_t busyCycles=totalCycles-idleCycles;
 
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
     pugi::xml_node core_node = 
               system_node.find_child_by_attribute("name","core0");
    
-    sa(system_node,"total_cycles",numCycles());
+    sa(system_node,"total_cycles",totalCycles);
     sa(system_node,"idle_cycles", idleCycles);
     sa(system_node,"busy_cycles",busyCycles);
 
@@ -1916,7 +1920,7 @@ protected:
     sa(core_node,"committed_int_instructions", committed_int_insts);
     sa(core_node,"committed_fp_instructions", committed_fp_insts);
 
-    sa(core_node,"total_cycles",numCycles());
+    sa(core_node,"total_cycles",totalCycles);
     sa(core_node,"idle_cycles", idleCycles); //TODO: how to get this?
     sa(core_node,"busy_cycles",busyCycles);
 

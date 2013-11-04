@@ -378,6 +378,7 @@ public:
   int _ty;
   //EPtr ff_edge;
   bool _load, _store, _ctrl;
+  bool _dirty=false;
   dg_inst<NodeTy, E> *_inst;
 
   std::vector<EPtr> _edges; //forward edges
@@ -501,6 +502,7 @@ public:
   }
 
   virtual void remove_pred_edge(EPtr rem_e) {
+    _dirty=true;
     for (PredEdgeIterator I = _pred_edges.begin(), e=_pred_edges.end(); I != e; ++I) {
       if ((*I) == rem_e) {
         //delete (*I);

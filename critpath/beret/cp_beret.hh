@@ -506,7 +506,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
               config_time=1;
             }
           
-            Inst_t* prevInst = getCPDG()->peekPipe(-D_WIDTH); 
+            Inst_t* prevInst = getCPDG()->peekPipe(-1); 
  
             T* iterStartEv=NULL;
             if(prevInst) {
