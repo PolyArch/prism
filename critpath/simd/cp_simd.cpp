@@ -36,4 +36,9 @@ static void init()
   CPRegistry::get()->register_argument("disallow-splitted-op",
                                        false, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("disallow-merge-op",
+                                       false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("disallow-merge-op",
+                                       false, &In.cp_obj);
+
 }

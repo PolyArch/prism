@@ -38,6 +38,8 @@ namespace simd {
     bool unalignedVecAccess = false;
     bool useReductionTree = false;
     bool useSplittedOps   = true;
+    bool useMergeOps = true;
+
   public:
     cp_simd() : CP_OPDG_Builder<T, E> () {
     }
@@ -186,6 +188,8 @@ namespace simd {
         useReductionTree = true;
       if (strcmp(name, "disallow-splitted-op") == 0)
         useSplittedOps = false;
+      if (strcmp(name, "disallow-merge-op") == 0)
+        useMergeOps = false;
     }
 
     virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
@@ -613,6 +617,9 @@ namespace simd {
           if (internalCtrlOps.count(op)) {
             continue;
           }
+          // if this op will be merged to others in SIMD event graph, skip
+          if (isOpMerged(op))
+            continue;
 #if 0
           if (!op_printed.count(op)) {
             printDisasm(op);
