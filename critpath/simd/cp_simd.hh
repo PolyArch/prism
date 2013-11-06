@@ -67,6 +67,7 @@ namespace simd {
       if ((disasm.find("ADDSS_XMM_XMM") != std::string::npos)
           || (disasm.find("SUBSS_XMM_XMM") != std::string::npos)
           || (disasm.find("MULSS_XMM_XMM") != std::string::npos)
+          || (disasm.find("MULSS_XMM_M") != std::string::npos && upc == 1)
           || (disasm.find("SUBSS_XMM_M") != std::string::npos && upc == 1)
           || (disasm.find("SUBSS_XMM_P") != std::string::npos && upc == 2)
           || (disasm.find("RSQRTSS_XMM_XMM") != std::string::npos)) {
@@ -75,6 +76,24 @@ namespace simd {
 
       splittedOpMap[op] = splitted;
       return splitted;
+    }
+
+    std::map<Op*, bool> mergedOpMap;
+    bool isOpMerged(Op *op) {
+      if (!useMergeOps)
+        return false;
+      auto I = mergedOpMap.find(op);
+      if (I != mergedOpMap.end())
+        return I->second;
+      bool merged = false;
+      uint64_t pc = op->cpc().first;
+      uint64_t upc = op->cpc().second;
+      std::string disasm = ExecProfile::getDisasm(pc, upc);
+      if ((disasm.find("MOVSS_XMM_M") != std::string::npos && upc == 0))
+        merged = true;
+
+      mergedOpMap[op] = merged;
+      return merged;
     }
 
 
@@ -334,7 +353,7 @@ namespace simd {
           || (li->body_size() == 1
               && !hasNonStridedMemAccess(li, nonStrideAccessLegal)))
 #endif
-        completeSIMDLoopWithInstTrace(li, CurLoopIter);
+        completeSIMDLoopWithInstTrace(li, CurLoopIter, useIT);
       else
         completeSIMDLoopWithLI(li, CurLoopIter, loopDone);
       if (!dumped.count(li)) {
@@ -351,7 +370,8 @@ namespace simd {
     }
   }
 
-    void completeSIMDLoopWithInstTrace(LoopInfo *li, int CurLoopIter) {
+    void completeSIMDLoopWithInstTrace(LoopInfo *li, int CurLoopIter,
+                                       bool forceIT) {
       //if (vecloop_InstTrace.size() != 0) {
       // std::cout << "Completing SIMD Loop:" << li
       //          << " with iterCnt: " << CurLoopIter << "\n";
@@ -377,7 +397,7 @@ namespace simd {
 
         unpackInsts.clear();
         unpackInsts.resize(_simd_len);
-        if (op->isLoad()) {
+        if (!forceIT && op->isLoad()) {
           if (!isStrideAccess(op)) {
             // we need to create unpack instruction for the loads
             uint64_t maxDepCycle = 0;
@@ -429,6 +449,15 @@ namespace simd {
         // handle broadcast_loads or non strided loads
         //  load followed by shuffles ...
         if (op->isLoad()) {
+            if (unalignedVecAccess) {
+              // Create another instruction to simulate the unaligned access
+              InstPtr inst = createSIMDInst(op);
+              updateInstWithTraceInfo(op, inst, false);
+              addSIMDDeps(inst, op);
+              pushPipe(inst);
+              inserted(inst);
+            }
+
           if (isStrideAccess(op, 0)) {
             InstPtr sh_inst = createShuffleInst(inst);
             addPipeDeps(sh_inst, 0);
@@ -436,7 +465,7 @@ namespace simd {
             inserted(sh_inst); // bookkeeping
           }
           // Non strided -- create more loads
-          if (!isStrideAccess(op)) {
+          if (!forceIT && !isStrideAccess(op)) {
             std::vector<unsigned> loadInsts(_simd_len);
             loadInsts[0] =  0;
             for (unsigned i = 1; i < _simd_len; ++i) {
@@ -526,7 +555,7 @@ namespace simd {
             }
           }
         }
-        completeSIMDLoopWithInstTrace(li, CurLoopIter);
+        completeSIMDLoopWithInstTrace(li, CurLoopIter, true);
         return;
       }
 
