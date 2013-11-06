@@ -12,6 +12,13 @@ public:
   }
 
   dep_graph_impl_t<Inst_t, dg_event, dg_edge_impl_t<dg_event>> cpdg;
+
+  void pushPipe(InstPtr &inst) {
+    CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event> >::pushPipe(inst);
+    if (getenv("MAFIA_DUMP_BASE_PIPE"))
+      this->dumpInst(inst);
+  }
+
 };
 
 

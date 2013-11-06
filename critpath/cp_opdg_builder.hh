@@ -5,6 +5,34 @@
 #include "cp_dg_builder.hh"
 #include "exec_profile.hh"
 
+namespace DEBUG_CPDG {
+  class default_cpdg_t : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>>
+  {
+public:
+    bool _dump_inst_flag = false;
+
+    default_cpdg_t() {
+      _isInOrder = false;
+      _setInOrder = true;
+    }
+    typedef dg_event T;
+    typedef dg_edge_impl_t<T> E;
+
+    dep_graph_t<Inst_t, T, E> *getCPDG()
+      {
+        return &cpdg;
+      }
+
+    dep_graph_impl_t<Inst_t, T, E> cpdg;
+
+    virtual void pushPipe(InstPtr &inst) {
+      CP_DG_Builder<T, E>::pushPipe(inst);
+      if (_dump_inst_flag)
+        dumpInst(inst);
+    }
+  };
+}
+
 template<typename T, typename E>
 class CP_OPDG_Builder : public CP_DG_Builder<T, E> {
 
@@ -13,14 +41,26 @@ class CP_OPDG_Builder : public CP_DG_Builder<T, E> {
 protected:
   bool  usePipeDeps = false;
   bool  useOpDeps   = false;
+  bool  useInstList = false;
 
   virtual bool usePipeDependence() const { return usePipeDeps; }
   virtual bool useOpDependence() const   { return useOpDeps; }
+  virtual bool useInstListDependence() const { return useInstList;}
 
   virtual void addPipeDeps(InstPtr &n, Op *op) {
     usePipeDeps = true;
     this->addDeps(n, op);
     usePipeDeps = false;
+  }
+
+  virtual void addInstListDeps(InstPtr &n, Op *op) {
+    useInstList = true;
+    this->addDeps(n, op);
+    useInstList = false;
+  }
+
+  virtual void addInstToProducerList(InstPtr n) {
+    _producerInsts.push_back(n);
   }
 
 public:
@@ -49,11 +89,13 @@ public:
     this->inserted(sh_inst);
   }
 
+  std::vector<InstPtr> _producerInsts;
 
   virtual dep_graph_t<Inst_t, T, E> *getCPDG() = 0;
 
   virtual Inst_t &checkRegisterDependence(Inst_t &n) {
-    if (!(useOpDependence() || usePipeDependence()))
+    if (!(useOpDependence() || usePipeDependence()
+          || useInstListDependence()))
       return CP_DG_Builder<T, E>::checkRegisterDependence(n);
 
     if (usePipeDependence()) {
@@ -66,6 +108,19 @@ public:
         getCPDG()->insert_edge(*inst, inst->eventComplete(),
                                n, Inst_t::Ready, 0, E_RDep);
       }
+      return n;
+    }
+
+    if (useInstListDependence()) {
+      for (auto I = _producerInsts.begin(), IE = _producerInsts.end();
+           I != IE; ++I) {
+        InstPtr inst = *I;
+        if (inst.get() == 0)
+          continue;
+        getCPDG()->insert_edge(*inst.get(), inst->eventComplete(),
+                               n, Inst_t::Ready, 0, E_RDep);
+      }
+      _producerInsts.clear();
       return n;
     }
 
@@ -145,6 +200,94 @@ protected:
       return Op2I->second;
     return 0;
   }
+
+
+protected:
+  std::vector<std::pair<Op*, InstPtr> > _loop_InstTrace;
+  std::map<Op*, uint16_t> _cacheLat;
+  std::map<Op*, bool> _trueCacheProd;
+  std::map<Op*, bool> _ctrlMiss;
+
+  virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst) {
+    _loop_InstTrace.push_back(std::make_pair(op, inst));
+    if (op->isLoad() || op->isStore()) {
+      _cacheLat[op] = std::max( (op->isLoad() ? inst->_ex_lat : inst->_st_lat),
+                                _cacheLat[op]);
+      if (_trueCacheProd.count(op))
+        _trueCacheProd[op] &= inst->_true_cache_prod;
+      else
+        _trueCacheProd[op] = inst->_true_cache_prod;
+
+      // TODO: do something for _cache_prod
+    }
+    if (op->isCtrl()) {
+      // if one missed, simd misses.
+      if (_ctrlMiss.count(op))
+        _ctrlMiss[op] |= inst->_ctrl_miss;
+      else
+        _ctrlMiss[op] = inst->_ctrl_miss;
+    }
+  }
+
+  virtual void updateInstWithTraceInfo(Op *op, InstPtr inst,
+                                       bool useInst) {
+    if (op->isLoad()) {
+      uint16_t inst_lat = useInst ? inst->_ex_lat : 0;
+      inst->_ex_lat = std::max(inst_lat, _cacheLat[op]);
+    }
+    if (op->isStore()) {
+      uint16_t inst_lat = useInst ? inst->_st_lat : 0;
+      inst->_st_lat = std::max(inst_lat, _cacheLat[op]);
+    }
+
+    if (getenv("MAFIA_SIMD_NO_TRUE_CACHEPROD") == 0) {
+      if (op->isLoad() || op->isStore()) {
+        if (useInst)
+          inst->_true_cache_prod &= _trueCacheProd[op];
+        else
+          inst->_true_cache_prod = _trueCacheProd[op];
+      }
+    }
+
+    if (op->isCtrl()) {
+      if (useInst)
+        inst->_ctrl_miss |= _ctrlMiss[op];
+      else
+        inst->_ctrl_miss = _ctrlMiss[op];
+    }
+
+  }
+
+  virtual void cleanupLoopInstTracking() {
+    _loop_InstTrace.clear();
+    _cacheLat.clear();
+    _trueCacheProd.clear();
+    _ctrlMiss.clear();
+  }
+
+
+    void insert_inst_to_default_pipe()
+    {
+      if (getenv("DUMP_MAFIA_PIPE") != 0) {
+        if (getenv("DUMP_MAFIA_DEFAULT_PIPE") != 0)
+          _default_cp._dump_inst_flag = true;
+        std::cout << " =========== Begin Default Pipe ========\n";
+      }
+
+      for (auto I = _loop_InstTrace.begin(), IE = _loop_InstTrace.end();
+           I != IE; ++I) {
+        _default_cp.insert_inst(I->first->img, I->second->index(), I->first);
+      }
+      if (getenv("DUMP_MAFIA_PIPE") != 0) {
+        std::cout << " =========== End Default Pipe =========\n";
+        _default_cp._dump_inst_flag = false;
+      }
+    }
+
+protected:
+  DEBUG_CPDG::default_cpdg_t _default_cp;
+
+
 };
 
 #endif

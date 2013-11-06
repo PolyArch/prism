@@ -57,7 +57,7 @@ public:
       std::cout << std::setw(5) << inst->cycleOfStage(j) << " ";
     }
 
-    std::cout << (inst->_isload?"L":" ")
+    std::cout << (inst->_isload?"L":"  ")
               << (inst->_isstore?"S":" ")
               << (inst->_isctrl?"C":" ")
               << (inst->_ctrl_miss?"M": " ")
@@ -1467,9 +1467,9 @@ protected:
          addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
                                    getFUIssueLatency(n), &n));
 
-    if(min_node) {
+    if (min_node) {
       //TODO: check min->node start
-      getCPDG()->insert_edge(min_node->index(), Inst_t::Execute,
+      getCPDG()->insert_edge(*min_node, Inst_t::Execute,
                         n, Inst_t::Execute, getFUIssueLatency(*min_node),E_FU);
     }
     return n;

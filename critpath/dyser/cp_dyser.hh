@@ -10,31 +10,6 @@
 
 namespace DySER {
 
-  class default_cpdg_t : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>>
-  {
-public:
-    bool _dump_inst_flag = false;
-
-    default_cpdg_t() {
-      _isInOrder = false;
-      _setInOrder = true;
-    }
-    typedef dg_event T;
-    typedef dg_edge_impl_t<T> E;
-
-    dep_graph_t<Inst_t, T, E> *getCPDG()
-      {
-        return &cpdg;
-      }
-
-    dep_graph_impl_t<Inst_t, T, E> cpdg;
-
-    virtual void pushPipe(InstPtr &inst) {
-      CP_DG_Builder<T, E>::pushPipe(inst);
-      if (_dump_inst_flag)
-        dumpInst(inst);
-    }
-  };
 
 
   class cp_dyser : public ArgumentHandler,
@@ -42,7 +17,6 @@ public:
                    public CP_OPDG_Builder<dg_event,
                                         dg_edge_impl_t<dg_event> > {
 
-    default_cpdg_t _default_cp;
 
   protected:
     typedef dg_event T;
@@ -213,7 +187,7 @@ public:
         InstPtr inst = createInst(img, index, 0);
         getCPDG()->addInst(inst, index);
 
-        trackDySERLoop(CurLoop, op, inst);
+        trackLoopInsts(CurLoop, op, inst);
       }
       if (shouldCompleteLoop) {
         completeDySERLoop(CurLoop, CurLoopIter);
@@ -283,6 +257,7 @@ public:
     }
 
 
+#if 0
     std::vector<std::pair<Op*, InstPtr> > loop_InstTrace;
 
     std::map<Op*, uint16_t> _cacheLat;
@@ -315,25 +290,8 @@ public:
           inst->_ctrl_miss = _ctrlMiss[op];
       }
     }
+#endif
 
-
-    void insert_inst_to_default_pipe()
-    {
-      if (getenv("DUMP_MAFIA_PIPE") != 0) {
-        if (getenv("DUMP_MAFIA_DEBUG_PIPE") != 0)
-          _default_cp._dump_inst_flag = true;
-        std::cout << " =========== Begin Default Pipe ========\n";
-      }
-
-      for (auto I = loop_InstTrace.begin(), E = loop_InstTrace.end();
-           I != E; ++I) {
-        _default_cp.insert_inst(I->first->img, I->second->index(), I->first);
-      }
-      if (getenv("DUMP_MAFIA_PIPE") != 0) {
-        std::cout << " =========== End Default Pipe =========\n";
-        _default_cp._dump_inst_flag = false;
-      }
-    }
 
     LoopInfo *PrevLoop = 0;
     virtual void completeDySERLoop(LoopInfo *DyLoop,
@@ -385,14 +343,14 @@ public:
       _num_config_config_switching += (SI->cs_size()/_dyser_size);
       DySERizingLoop = true;
 
-      for (unsigned i = 0, e = loop_InstTrace.size(); i != e; ++i) {
-        auto op_n_Inst  = loop_InstTrace[i];
+      for (unsigned i = 0, e = _loop_InstTrace.size(); i != e; ++i) {
+        auto op_n_Inst  = _loop_InstTrace[i];
         Op *op = op_n_Inst.first;
         InstPtr inst = op_n_Inst.second;
         insert_sliced_inst(SI, op, inst);
       }
       DySERizingLoop = false;
-      loop_InstTrace.clear();
+      cleanupLoopInstTracking();
     }
 
 
@@ -415,14 +373,12 @@ public:
           Op *op = *OI;
           InstPtr inst = createInst(op->img, 0, op);
           // update cache execution delay if necessary
-          updateForDySER(op, inst, false);
+          updateInstWithTraceInfo(op, inst, false);
           insert_sliced_inst(SI, op, inst);
         }
       }
       DySERizingLoop = false;
-      loop_InstTrace.clear();
-      _cacheLat.clear();
-      _ctrlMiss.clear();
+      cleanupLoopInstTracking();
     }
 
     virtual InstPtr insertDySend(Op *op) {

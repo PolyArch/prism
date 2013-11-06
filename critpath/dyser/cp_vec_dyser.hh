@@ -107,8 +107,8 @@ namespace DySER {
       _num_config += extraConfigRequired;
 
       std::map<Op*, unsigned> emitted;
-      for (unsigned i = 0, e = loop_InstTrace.size(); i != e; ++i) {
-        auto op_n_Inst  = loop_InstTrace[i];
+      for (unsigned i = 0, e = _loop_InstTrace.size(); i != e; ++i) {
+        auto op_n_Inst  = _loop_InstTrace[i];
         Op *op = op_n_Inst.first;
 
         // emit one instruction per op for load slice
@@ -122,7 +122,7 @@ namespace DySER {
         InstPtr inst = op_n_Inst.second;
         insert_sliced_inst(SI, op, inst, false);
       }
-      loop_InstTrace.clear();
+      cleanupLoopInstTracking();
     }
 
 
@@ -218,7 +218,7 @@ namespace DySER {
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
           InstPtr inst = createInst(op->img, 0, op);
-          updateForDySER(op, inst, false);
+          updateInstWithTraceInfo(op, inst, false);
           //dumpInst(inst);
 
           if (!SI->isInLoadSlice(op)) {
@@ -267,7 +267,7 @@ namespace DySER {
                   for (unsigned i = 0; i < _dyser_vec_len-1; ++i) {
                     InstPtr tmpInst = createInst(op->img, 0, op);
                     insert_sliced_inst(SI, op, tmpInst);
-                    updateForDySER(op, inst, false);
+                    updateInstWithTraceInfo(op, inst, false);
                   }
                   insert_sliced_inst(SI, op, inst);
                   this->keepTrackOfInstOpMap(inst, op);
@@ -289,7 +289,7 @@ namespace DySER {
         dumpCloneOp2InstMap();
       }
 
-      loop_InstTrace.clear();
+      cleanupLoopInstTracking();
     }
 
     bool isThisOpCoalesced(Op *op) {

@@ -8,10 +8,14 @@ namespace simd {
 
   class simd_inst : public dg_inst<dg_event,
                                    dg_edge_impl_t<dg_event> > {
+  protected:
     typedef dg_event T;
     typedef dg_edge_impl_t<T> E;
     typedef T* TPtr;
     typedef E* EPtr;
+
+    typedef dg_inst<T, E> Inst_t;
+    typedef std::shared_ptr<Inst_t> InstPtr;
 
   public:
     simd_inst() : dg_inst<T, E> () {}
@@ -66,7 +70,7 @@ namespace simd {
   class pack_inst: public simd_inst {
   public:
     pack_inst(int prod1, int prod2) {
-      _opclass = 0;
+      _opclass = 4;
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
       // no icache_miss
@@ -108,6 +112,123 @@ namespace simd {
       return std::string(buf);
     }
   };
+
+  class reduce_inst: public simd_inst {
+    InstPtr _depInst;
+  public:
+    reduce_inst(InstPtr di) {
+      _opclass = 4; // FloatAdd
+      // not a memory or ctrl
+      _isload = _isstore = _isctrl = _ctrl_miss = false;
+      // no icache_miss
+      _icache_lat = 0;
+
+      // Its op is just a node added...
+      // _prod[0] = prod2;
+      _depInst = di;
+
+      // no memory
+      _mem_prod = _cache_prod = 0;
+
+      // usually it FADD
+      // executes in 2 cycle
+      _ex_lat = 2;
+      // not a serialization instruction
+      _serialBefore =  _serialAfter = _nonSpec = false;
+
+      _st_lat = 0;
+      _pc = -1; // what is the pc
+      _upc = -1; // what is the upc
+      _floating = true;
+      _iscall = false;
+      _numSrcRegs = 1;
+      _numFPSrcRegs = 1;
+      _numIntSrcRegs = 0;
+      _numFPDestRegs = 2;
+      _numIntDestRegs = 0;
+      _eff_addr = 0;
+
+      for (int i = 0; i < NumStages; ++i) {
+        events[i].set_inst(this);
+        events[i].prop_changed();
+      }
+    }
+
+    bool hasDisasm() const { return true; }
+
+    std::string getDepDisasm() const {
+      if (_depInst->_pc != 0)
+        return ExecProfile::getDisasm(_depInst->_pc,
+                                      _depInst->_upc);
+      return std::string("");
+    }
+
+    std::string getDisasm() const {
+      static char buf[256];
+      sprintf(buf, "reduce_inst %p (%s)", (void*)_depInst.get(),
+              getDepDisasm().c_str());
+      return std::string(buf);
+    }
+  };
+
+  class unpack_inst: public simd_inst {
+    InstPtr _depInst;
+  public:
+    unpack_inst(InstPtr di) {
+      _opclass = 4; // FloatAdd
+      // not a memory or ctrl
+      _isload = _isstore = _isctrl = _ctrl_miss = false;
+      // no icache_miss
+      _icache_lat = 0;
+
+      // Its op is just a node added...
+      // _prod[0] = prod2;
+      _depInst = di;
+
+      // no memory
+      _mem_prod = _cache_prod = 0;
+
+      // usually it FADD
+      // executes in 2 cycle
+      _ex_lat = 2;
+      // not a serialization instruction
+      _serialBefore =  _serialAfter = _nonSpec = false;
+
+      _st_lat = 0;
+      _pc = -1; // what is the pc
+      _upc = -1; // what is the upc
+      _floating = true;
+      _iscall = false;
+      _numSrcRegs = 1;
+      _numFPSrcRegs = 1;
+      _numIntSrcRegs = 0;
+      _numFPDestRegs = 2;
+      _numIntDestRegs = 0;
+      _eff_addr = 0;
+
+      for (int i = 0; i < NumStages; ++i) {
+        events[i].set_inst(this);
+        events[i].prop_changed();
+      }
+    }
+
+    bool hasDisasm() const { return true; }
+
+    std::string getDepDisasm() const {
+      if (_depInst->_pc != 0)
+        return ExecProfile::getDisasm(_depInst->_pc,
+                                      _depInst->_upc);
+      return std::string("");
+    }
+
+    std::string getDisasm() const {
+      static char buf[256];
+      sprintf(buf, "unpack_inst %p (%s)", (void*)_depInst.get(),
+              getDepDisasm().c_str());
+      return std::string(buf);
+    }
+  };
+
 }
 
 #endif

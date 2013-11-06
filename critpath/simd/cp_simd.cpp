@@ -21,4 +21,19 @@ static void init()
   CPRegistry::get()->register_argument("allow-non-stride-vec",
                                        false, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("unaligned-vec-access",
+                                       false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("unaligned-vec-access",
+                                       false, &In.cp_obj);
+
+  CPRegistry::get()->register_argument("use-reduction-tree",
+                                       false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("use-reduction-tree",
+                                       false, &In.cp_obj);
+
+  CPRegistry::get()->register_argument("disallow-splitted-op",
+                                       false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("disallow-splitted-op",
+                                       false, &In.cp_obj);
+
 }

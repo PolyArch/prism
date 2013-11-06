@@ -69,9 +69,12 @@ protected:
         int stride = 0;
         if (!(*I)->getStride(&stride)) {
           hasNonStridedMemAccess = true;
-        } else if (stride > 16) { // more than 16 bytes
+        }
+#if 0
+        else if (stride > 16) { // more than 16 bytes
           hasNonStridedMemAccess = true;
         }
+#endif
 
         if (!nonStrideAccessLegal) {
           if (hasNonStridedMemAccess)
