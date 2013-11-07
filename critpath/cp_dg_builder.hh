@@ -1019,7 +1019,7 @@ protected:
         getCPDG()->insert_edge(*depInst, Inst_t::Complete,
                                n, Inst_t::Fetch,
                                n._icache_lat + //don't add in the icache latency?
-          prev_squash_penalty + 1); //two to commit, 1 to 
+          prev_squash_penalty + 1,E_CM); //two to commit, 1 to 
 
         //we need to make sure that the processor stays active during squash
         uint64_t i=depInst->cycleOfStage(Inst_t::Complete);
