@@ -261,7 +261,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   }
   
 
-  virtual void accelSpecificStats(std::ostream& out) {
+  virtual void accelSpecificStats(std::ostream& out, std::string& name) {
 //out << "Beret Cycles = " << _totalBeretCycles << "\n";
     out << " (beret-only " << _totalBeretCycles 
         << " beret-insts " << _totalBeretInsts
@@ -524,7 +524,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
           std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
-          cleanUp(beretEndEv->cycle()-1000);
+          cleanUp(beretEndEv->cycle()-std::min((uint64_t)1000,beretEndEv->cycle()));
           beretEndEv=event;
           assert(beretEndEv);
         } else if(op->bb_pos()==0) {

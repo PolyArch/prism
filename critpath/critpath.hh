@@ -166,6 +166,7 @@ public:
   }
 
   virtual void accelSpecificStats(std::ostream& out, std::string &name) {
+    out << "no accel stats";
   }
 
   void setTraceOutputs(bool t) {

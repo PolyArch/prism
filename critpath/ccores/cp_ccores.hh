@@ -39,7 +39,7 @@ public:
   uint64_t _totalCCoresCycles=0, _totalCCoresInsts=0;
   //uint64_t
 
-  virtual void accelSpecificStats(std::ostream& out) {
+  virtual void accelSpecificStats(std::ostream& out, std::string &name) {
     out << " (ccores-only " << _totalCCoresCycles
         << " ccores-insts " << _totalCCoresInsts
        << ")";
@@ -374,7 +374,10 @@ public:
         cur_bb_end.reset(event_ptr);
         getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
                                *cur_bb_end, 8/_ccores_iops, E_CXFR);
-         _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
+        
+        // _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
+         _startCCoresCycle=cur_bb_end->cycle();
+
       }
   
       if(endOfBB(op,img)) {
@@ -386,8 +389,8 @@ public:
         if(prev_bb_end) {
           getCPDG()->insert_edge(*prev_bb_end,
                                  *cur_bb_end, 1, E_CSBB); 
+          cleanUp(prev_bb_end->cycle()-std::min((uint64_t)1000,prev_bb_end->cycle()));
         }
-        cleanUp(prev_bb_end->cycle()-1000);
       }
       addCCoreDeps(sh_inst,img);
 
@@ -414,6 +417,7 @@ public:
               *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
           uint64_t endCCoresCycle=cur_bb_end->cycle();
           _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
+          _startCCoresCycle=0;
         }
       }
       addDeps(sh_inst);
