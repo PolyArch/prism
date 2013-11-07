@@ -883,7 +883,8 @@ protected:
   virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {
     if(!_isInOrder) {
       if(inst->_isstore) {
-        int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod);
+        int st_lat=stLat(inst->_st_lat,inst->_cache_prod,
+                         inst->_true_cache_prod,inst->isAccelerated);
         getCPDG()->insert_edge(*inst, Inst_t::Commit,
                                *inst, Inst_t::Writeback, 2+st_lat, E_WB);
         checkNumMSHRs(inst,true);
@@ -1500,8 +1501,9 @@ protected:
   //check MSHRs to see if they are full
   virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
     int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-                  n->_cache_prod,n->_true_cache_prod,false);
-    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod);
+                  n->_cache_prod,n->_true_cache_prod,n->isAccelerated);
+    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,
+                     n->isAccelerated);
 
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
@@ -1683,7 +1685,7 @@ protected:
 #endif
 
   int stLat(int st_lat, bool cache_prod, 
-            bool true_cache_prod, bool isAccelerator=false) {
+            bool true_cache_prod, bool isAccelerator) {
     int lat = st_lat;
  /*
     if(cache_prod && true_cache_prod) {
@@ -1702,7 +1704,7 @@ protected:
 
   //logic to determine ep latency based on information in the trace
   int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
-            bool cache_prod, bool true_cache_prod, bool isAccelerator=false) {
+            bool cache_prod, bool true_cache_prod, bool isAccelerator) {
     //memory instructions bear their memory latency here.  If we have a cache
     //producer, that means we should be in the cache, so drop the latency
     int lat;
@@ -1739,7 +1741,8 @@ protected:
   //Complete After Execute
   virtual Inst_t &checkEP(Inst_t &n) {
     int lat=epLat(n._ex_lat,n._opclass,n._isload,
-                  n._isstore,n._cache_prod,n._true_cache_prod,false);
+                  n._isstore,n._cache_prod,n._true_cache_prod,
+                  n.isAccelerated);
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Complete, lat, E_EP);
     return n;

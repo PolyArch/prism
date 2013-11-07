@@ -207,7 +207,7 @@ public:
   bool iqOpen=false;
   bool lqOpen=false;
   bool sqOpen=false;
-
+  bool isAccelerated=false;
   virtual ~dg_inst() { 
     /*for (int i = 0; i < NumStages; ++i) {
       events[i].remove_all_edges();

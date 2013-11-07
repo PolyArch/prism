@@ -262,6 +262,7 @@ namespace simd {
     InstPtr createShuffleInst(InstPtr inst, Op *op = 0)
     {
       InstPtr ret = InstPtr(new shuffle_inst());
+      ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
       return ret;
@@ -270,6 +271,7 @@ namespace simd {
     InstPtr createPackInst(int prod1, int prod2, Op *op = 0)
     {
       InstPtr ret = InstPtr(new pack_inst(prod1, prod2));
+      ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
       return ret;
@@ -278,6 +280,7 @@ namespace simd {
     InstPtr createReduceInst(InstPtr di, Op *op = 0)
     {
       InstPtr ret = InstPtr(new reduce_inst(di));
+      ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
       return ret;
@@ -286,6 +289,7 @@ namespace simd {
     InstPtr createUnpackInst(InstPtr di, Op *op = 0)
     {
       InstPtr ret = InstPtr(new unpack_inst(di));
+      ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
       return ret;
@@ -294,6 +298,7 @@ namespace simd {
     InstPtr createSIMDInst(Op *op)
     {
       InstPtr ret = InstPtr(new Inst_t(op->img, 0));
+      ret->isAccelerated=true;
       keepTrackOfInstOpMap(ret, op);
       return ret;
     }
