@@ -281,7 +281,7 @@ private:
 
   virtual void setCompleteCycle_s(std::shared_ptr<SuperInst>& inst, const CP_NodeDiskImage &img) {
     if(inst->_isstore) {
-      int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod);
+      int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod,true);
       getCPDG()->insert_edge(*inst, SuperInst::Execute,
                              *inst, SuperInst::Complete, st_lat,true);
     } else {
