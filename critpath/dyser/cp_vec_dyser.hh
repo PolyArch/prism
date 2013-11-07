@@ -42,6 +42,9 @@ namespace DySER {
       }
       if (strcmp(name, "disallow-non-stride-vec") == 0)
         nonStrideAccessLegal = false;
+      if (strcmp(name, "allow-non-stride-vec") == 0)
+        nonStrideAccessLegal = true;
+
     }
 
     virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,

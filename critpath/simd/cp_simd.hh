@@ -354,7 +354,7 @@ namespace simd {
                           bool useIT, bool loopDone) {
       static std::set<LoopInfo*> dumped;
 
-      insert_inst_to_default_pipe();
+      insert_inst_trace_to_default_pipe();
 
       markStartPipe();
       if (_useInstTrace || useIT)
@@ -641,41 +641,53 @@ namespace simd {
           if (op->isLoad()) {
             if (!isStrideAccess(op)) {
               // we need to create unpack instruction for the loads
-            uint64_t maxDepCycle = 0;
-            InstPtr maxDepInst  = 0;
+              uint64_t maxDepCycle = 0;
+              InstPtr maxDepInst  = 0;
 
-            for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
-              Op *DepOp = *I;
-              InstPtr depInst = getInstForOp(DepOp);
-              if (!depInst.get())
-                continue;
-              uint64_t completeCycle =
-                depInst->cycleOfStage(depInst->eventComplete());
-              if (completeCycle > maxDepCycle) {
-                maxDepCycle = completeCycle;
-                maxDepInst = depInst;
+              for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
+                Op *DepOp = *I;
+                InstPtr depInst = getInstForOp(DepOp);
+                if (!depInst.get())
+                  continue;
+                uint64_t completeCycle =
+                  depInst->cycleOfStage(depInst->eventComplete());
+                if (completeCycle > maxDepCycle) {
+                  maxDepCycle = completeCycle;
+                  maxDepInst = depInst;
+                }
               }
-            }
-            if (maxDepInst.get() != 0) {
-              for (unsigned i = 0; i < _simd_len; ++i) {
-                // create a instruction for depop
-                InstPtr unpack = createUnpackInst(maxDepInst);
-                addInstToProducerList(maxDepInst);
-                addInstListDeps(unpack, 0);
-                pushPipe(unpack);
-                inserted(unpack);
+              if (maxDepInst.get() != 0) {
+                unsigned acc_bits = op->img._acc_size * 8;
+                // FIXME: Decouple _simd_len from number of iterations to be vectorized.
+#if 0
+                //unsigned num_val_per_vec_reg = (32*_simd_len)/acc_bits;
+                //unsigned num_registers_needed = _simd_len / num_val_per_vec_reg;
+#endif
+                unsigned num_registers_needed = acc_bits/32;
+                if (num_registers_needed == 0)
+                  num_registers_needed = 1;
+                num_registers_needed = 2; // Override for TreeSearch ... TOTALLY WRONG THING TO DO
+                for (unsigned i = 0; i < _simd_len; ++i) {
+                  for (unsigned j = 0; j < num_registers_needed; ++j) {
+                    // create a instruction for depop
+                    InstPtr unpack = createUnpackInst(maxDepInst);
+                    addInstToProducerList(maxDepInst);
+                    addInstListDeps(unpack, 0);
+                    pushPipe(unpack);
+                    inserted(unpack);
 
-                // create another instruction to move to integer register
-                InstPtr unpackMov = createUnpackInst(unpack);
-                addInstToProducerList(unpack);
-                addInstListDeps(unpackMov, 0);
-                pushPipe(unpackMov);
-                inserted(unpackMov);
-                unpackInsts[i] = unpackMov;
+                    // create another instruction to move to integer register
+                    InstPtr unpackMov = createUnpackInst(unpack);
+                    addInstToProducerList(unpack);
+                    addInstListDeps(unpackMov, 0);
+                    pushPipe(unpackMov);
+                    inserted(unpackMov);
+                    unpackInsts[i] = unpackMov;
+                  }
+                }
               }
             }
           }
-        }
 #else
           if (op->isLoad()) {
             if (!isStrideAccess(op)) {
@@ -905,7 +917,7 @@ namespace simd {
 
       if (!StackLoop && !canVectorize(li, nonStrideAccessLegal)) {
 
-        _default_cp.insert_inst(img, index, op);
+        insert_inst_to_default_pipe(img, index, op);
 
         // Create the instruction
         InstPtr inst = createInst(img, index, op);

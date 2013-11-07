@@ -248,12 +248,16 @@ int main(int argc, char *argv[])
 
     CPC cpc = make_pair(img._pc, img._upc);
     Op* op = Prof::get().processOpPhase3(cpc, prevCall, prevRet);
+    //if (op && op->img._pc == 0) {
+    //  op->img = img;
+    //}
     prevCall = img._iscall;
     prevRet = img._isreturn;
 
     if (op != NULL) {
-      if (!registry_off)
+      if (!registry_off) {
         CPRegistry::get()->insert(img, count, op);
+      }
 
       numCycles += img._fc;
       ++count;

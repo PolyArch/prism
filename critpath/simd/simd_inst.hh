@@ -141,10 +141,10 @@ namespace simd {
       _upc = -1; // what is the upc
       _floating = true;
       _iscall = false;
-      _numSrcRegs = 1;
-      _numFPSrcRegs = 1;
+      _numSrcRegs = 2;
+      _numFPSrcRegs = 2;
       _numIntSrcRegs = 0;
-      _numFPDestRegs = 2;
+      _numFPDestRegs = 1;
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
@@ -199,10 +199,10 @@ namespace simd {
       _upc = -1; // what is the upc
       _floating = true;
       _iscall = false;
-      _numSrcRegs = 1;
-      _numFPSrcRegs = 1;
+      _numSrcRegs = 2;
+      _numFPSrcRegs = 2;
       _numIntSrcRegs = 0;
-      _numFPDestRegs = 2;
+      _numFPDestRegs = 1;
       _numIntDestRegs = 0;
       _eff_addr = 0;
 

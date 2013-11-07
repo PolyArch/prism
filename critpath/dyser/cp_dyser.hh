@@ -180,7 +180,8 @@ namespace DySER {
         // We are in the CPU mode
         // use the default insert_inst
         CP_OPDG_Builder<T, E>::insert_inst(img, index, op);
-        _default_cp.insert_inst(img, index, op);
+        //_default_cp.insert_inst(img, index, op);
+        insert_inst_to_default_pipe(img, index, op);
       } else {
         // Create the instruction, but add it to the loop trace.
         // but do not map op <-> inst.
@@ -303,7 +304,7 @@ namespace DySER {
         PrevLoop = DyLoop;
         std::cout << "Loop Switching\n";
       }
-      insert_inst_to_default_pipe();
+      insert_inst_trace_to_default_pipe();
 
 
       if (0) {

@@ -266,25 +266,33 @@ protected:
   }
 
 
-    void insert_inst_to_default_pipe()
+    void insert_inst_trace_to_default_pipe()
     {
-      if (getenv("DUMP_MAFIA_PIPE") != 0) {
-        if (getenv("DUMP_MAFIA_DEFAULT_PIPE") != 0)
-          _default_cp._dump_inst_flag = true;
-        std::cout << " =========== Begin Default Pipe ========\n";
-      }
+      if (getenv("DUMP_MAFIA_PIPE") == 0)
+        return ;
+
+      if (getenv("DUMP_MAFIA_DEFAULT_PIPE") != 0)
+        _default_cp._dump_inst_flag = true;
+      std::cout << " =========== Begin Default Pipe ========\n";
 
       for (auto I = _loop_InstTrace.begin(), IE = _loop_InstTrace.end();
            I != IE; ++I) {
         _default_cp.insert_inst(I->first->img, I->second->index(), I->first);
       }
-      if (getenv("DUMP_MAFIA_PIPE") != 0) {
-        std::cout << " =========== End Default Pipe =========\n";
-        _default_cp._dump_inst_flag = false;
-      }
+
+      std::cout << " =========== End Default Pipe =========\n";
+      _default_cp._dump_inst_flag = false;
     }
 
-protected:
+  void insert_inst_to_default_pipe(const CP_NodeDiskImage &img,
+                                   uint64_t index, Op *op) {
+    if (getenv("DUMP_MAFIA_PIPE") == 0)
+      return ;
+
+    _default_cp.insert_inst(img, index, op);
+  }
+
+private:
   DEBUG_CPDG::default_cpdg_t _default_cp;
 
 

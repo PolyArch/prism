@@ -17,10 +17,14 @@ static void init()
   CPRegistry::get()->register_argument("dyser-vec-len", true, &VecOut.cp_obj);
   CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
                                        &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("allow-non-stride-vec", false,
+                                       &VecOut.cp_obj);
 
   CPRegistry::get()->register_argument("dyser-size", true, &VecIn.cp_obj);
   CPRegistry::get()->register_argument("dyser-vec-len", true, &VecIn.cp_obj);
   CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
+                                       &VecIn.cp_obj);
+  CPRegistry::get()->register_argument("allow-non-stride-vec", false,
                                        &VecIn.cp_obj);
 
 }

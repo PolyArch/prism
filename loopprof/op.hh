@@ -75,7 +75,7 @@ private:
   //Subgraph* _subgraph;
   uint64_t _effAddr = 0;
   int stride = 0;
-  int strideCycleDist = 0;
+
   enum stride_value_type { st_Unknown, st_Constant, st_Variable, st_Cycle };
   enum stride_value_type stride_ty = st_Unknown;
   friend class boost::serialization::access;
@@ -95,6 +95,13 @@ private:
     ar & _bb_pos;
     ar & _totLat;
     ar & _times;
+
+    ar & stride;
+    ar & stride_ty;
+    ar & _sameEffAddrOpSet;
+    ar & _nextEffAddrOpSet;
+
+
     //ar & _subgraph;
     _flags = std::bitset<8>(temp_flags);
 
