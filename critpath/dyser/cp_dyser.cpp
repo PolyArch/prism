@@ -49,5 +49,15 @@ static void init()
                                        &VecOut.cp_obj);
   CPRegistry::get()->register_argument("dyser-fu-fu-latency", true,
                                        &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-use-reduction-tree",
+                                       false, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-use-reduction-tree",
+                                       false, &VecIn.cp_obj);
+  CPRegistry::get()->register_argument("dyser-insert-ctrl-miss-penalty",
+                                       false, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-insert-ctrl-miss-penalty",
+                                       false, &VecIn.cp_obj);
+
 }
 

@@ -50,6 +50,8 @@ namespace DySER {
 
     unsigned _num_cycles_switch_config = 3;
     unsigned _num_cycles_to_fetch_config = 64;
+    bool useReductionConfig = false;
+    bool insertCtrlMissConfigPenalty = false;
 
     InstPtr createDyComputeInst(Op *op, uint64_t index) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
@@ -209,6 +211,13 @@ namespace DySER {
         // otherwise, complete DySER Loop
         if (!StackLoop && (CurLoop != 0) & canDySERize(CurLoop)) {
           completeDySERLoop(CurLoop, CurLoopIter);
+
+          if (useReductionConfig) {
+            // Insert dyser config instruction with double the penalty
+            // Coarse model
+            incrConfigSwitch(1, 0);
+            ConfigInst = insertDyConfig(_num_cycles_to_fetch_config);
+          }
         }
         CurLoop = li;
         CurLoopIter = 0;
@@ -286,7 +295,11 @@ namespace DySER {
 
       if (strcmp(name, "dyser-switch-latency") == 0)
         _num_cycles_switch_config = atoi(optarg);
+      if (strcmp(name, "dyser-use-reduction-tree") == 0)
+        useReductionConfig = true;
 
+      if (strcmp(name, "dyser-insert-ctrl-miss-penalty") == 0)
+        insertCtrlMissConfigPenalty = true;
     }
 
 
@@ -409,6 +422,15 @@ namespace DySER {
       }
 
       justSwitchedConfig = false;
+
+      if (_lastInst->_ctrl_miss) {
+        if (insertCtrlMissConfigPenalty) {
+          // We model this with inserting two dyconfig num_cycles..
+          incrConfigSwitch(1, 0);
+          ConfigInst = insertDyConfig(_num_cycles_to_fetch_config);
+        }
+      }
+
       if (getenv("DUMP_MAFIA_PIPE") != 0) {
         std::cout << " ============ completeDySERLoop==========\n";
       }
