@@ -31,8 +31,8 @@ namespace DySER {
 
     std::map<Op*, bool> mergedOpMap;
     bool isOpMerged(Op *op) {
-      //if (!useMergeOps)
-      //  return false;
+      if (!useMergeOps)
+        return false;
       auto I = mergedOpMap.find(op);
       if (I != mergedOpMap.end())
         return I->second;
@@ -74,6 +74,7 @@ namespace DySER {
     bool insertCtrlMissConfigPenalty = false;
     bool coalesceMemOps = true;
     bool tryBundleDySEROps = false;
+    bool useMergeOps = false;
 
     InstPtr createDyComputeInst(Op *op, uint64_t index) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
@@ -331,6 +332,9 @@ namespace DySER {
 
       if (strcmp(name, "dyser-try-bundle-ops") == 0)
         tryBundleDySEROps = true;
+
+      if (strcmp(name, "dyser-allow-merge-ops") == 0)
+        useMergeOps = true;
     }
 
 
