@@ -40,6 +40,11 @@ static void init()
   CPRegistry::get()->register_argument("dyser-switch-latency", true,
                                        &VecIn.cp_obj);
 
+  CPRegistry::get()->register_argument("dyser-ctrl-miss-config-penalty", true,
+                                       &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-ctrl-miss-config-penalty", true,
+                                       &VecIn.cp_obj);
+
   CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,
                                        &VecOut.cp_obj);
   CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,

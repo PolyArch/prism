@@ -29,6 +29,24 @@ namespace DySER {
       IN_DYSER = 1
     };
 
+    std::map<Op*, bool> mergedOpMap;
+    bool isOpMerged(Op *op) {
+      //if (!useMergeOps)
+      //  return false;
+      auto I = mergedOpMap.find(op);
+      if (I != mergedOpMap.end())
+        return I->second;
+      bool merged = false;
+      uint64_t pc = op->cpc().first;
+      uint64_t upc = op->cpc().second;
+      std::string disasm = ExecProfile::getDisasm(pc, upc);
+      if ((disasm.find("MOVSS_XMM_M") != std::string::npos && upc == 2))
+        merged = true;
+
+      mergedOpMap[op] = merged;
+      return merged;
+    }
+
 
   private:
     // number of times dyser configured..
@@ -50,6 +68,8 @@ namespace DySER {
 
     unsigned _num_cycles_switch_config = 3;
     unsigned _num_cycles_to_fetch_config = 64;
+    unsigned _num_cycles_ctrl_miss_penalty = 64;
+
     bool useReductionConfig = false;
     bool insertCtrlMissConfigPenalty = false;
     bool coalesceMemOps = true;
@@ -297,6 +317,9 @@ namespace DySER {
 
       if (strcmp(name, "dyser-switch-latency") == 0)
         _num_cycles_switch_config = atoi(optarg);
+      if (strcmp(name, "dyser-ctrl-miss-config-penalty") == 0)
+        _num_cycles_ctrl_miss_penalty = atoi(optarg);
+
       if (strcmp(name, "dyser-use-reduction-tree") == 0)
         useReductionConfig = true;
 
@@ -435,7 +458,9 @@ namespace DySER {
         if (insertCtrlMissConfigPenalty) {
           // We model this with inserting two dyconfig num_cycles..
           incrConfigSwitch(1, 0);
-          ConfigInst = insertDyConfig(_num_cycles_to_fetch_config);
+          // We will switch to the config and switch back ....
+          ConfigInst = insertDyConfig(_num_cycles_switch_config*2
+                                      + _num_cycles_ctrl_miss_penalty);
         }
       }
 
@@ -501,10 +526,14 @@ namespace DySER {
       std::map<Op*, InstPtr> bundledOp2Inst;
       DySERizingLoop = true;
       for (int idx = 0; idx < curLoopIter; ++idx) {
+        memOp2Inst.clear();
+        bundledOp2Inst.clear();
         for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
           BB *bb = *I;
           for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
             Op *op = *OI;
+            if (isOpMerged(op))
+              continue;
             InstPtr inst = createInst(op->img, 0, op);
             // update cache execution delay if necessary
             updateInstWithTraceInfo(op, inst, false);

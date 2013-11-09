@@ -226,6 +226,8 @@ namespace DySER {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
+          if (isOpMerged(op))
+            continue;
           InstPtr inst = createInst(op->img, 0, op);
           updateInstWithTraceInfo(op, inst, false);
           //dumpInst(inst);
