@@ -73,8 +73,9 @@
   X(DyRR,  "DyRR", "DySER Functional unit ready queue")         \
   X(DyRE,  "DyRE",  "DySER Ready to Execute")                   \
   X(DyFU,  "DyFU", "DySER Functional unit pipelined")           \
-  X(DyEC,  "DyEC", "DySER Functional Execute to complete")      \
-  X(DyCC, "DyCC", "DySER Complete To Complete")
+  X(DyEP,  "DyEP", "DySER Functional Execute to complete")      \
+  X(DyPP,  "DyPP", "DySER Complete To Complete")                \
+  X(DyCR,  "DyCR", "DySER Commit to ready")
 
 
 #define X(a, b, c) E_ ## a,

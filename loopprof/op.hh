@@ -78,7 +78,7 @@ private:
   //Subgraph* _subgraph;
   uint64_t _effAddr = 0;
   int stride = 0;
-
+  std::string _calledFuncName = "";
   enum stride_value_type { st_Unknown, st_Constant, st_Variable, st_Cycle };
   enum stride_value_type stride_ty = st_Unknown;
   friend class boost::serialization::access;
@@ -171,6 +171,13 @@ public:
   };
 
   //std::vector<eainfo> effAddrAccessed;
+
+  void setCalledFuncName(std::string fnname) {
+    _calledFuncName = fnname;
+  }
+  std::string getCalledFuncName() const {
+    return _calledFuncName;
+  }
 
   void printEffAddrs() {
     return ;

@@ -7,6 +7,7 @@
 #include "exec_profile.hh"
 
 namespace DySER {
+
   class SliceInfo {
 
     static std::map<LoopInfo*, SliceInfo*> _info_cache;
@@ -28,6 +29,9 @@ namespace DySER {
     std::set<Op*> coalescedMemFirstNodes;
     LoopInfo *LI = 0;
   public:
+
+    static bool mapInternalControlToDySER;
+
     bool isFirstMemNode(Op* op) const {
       return (coalescedMemFirstNodes.count(op) > 0);
     }
@@ -98,7 +102,7 @@ namespace DySER {
             auto &opSet = pc2Ops[op->cpc().first];
             for (auto OI = opSet.begin(), OE = opSet.end(); OI != OE; ++OI) {
               // Internal control can be mapped to dyser itself
-              if (li->isLatch(op->bb())) {
+              if (!mapInternalControlToDySER || li->isLatch(op->bb())) {
                 workList.push_back(*OI);
                 IsInLoadSlice[*OI] = true;
               } else {
@@ -148,15 +152,23 @@ namespace DySER {
         if (++numTry > 2)
           break;
         _cs_size = 0;
+#if 0
         for (auto I = pc2Ops.begin(), E = pc2Ops.end(); I != E; ++I) {
           Op *op = *I->second.begin();
           if (!isInLoadSlice(op) && shouldIncludeInCSCount(op))
             ++_cs_size;
         }
+#endif
+        for (auto I = OpList.begin(), E = OpList.end(); I != E; ++I) {
+          if (!isInLoadSlice(*I) && shouldIncludeInCSCount(*I))
+            ++ _cs_size;
+        }
+
         if (dyser_size >= _cs_size)
           break;
 
-
+        break;
+#if 0
         // move instruction with no operands to load-slice
         for (auto I = OpList.begin(), E = OpList.end(); I != E; ++I) {
           Op *op = *I;
@@ -170,7 +182,10 @@ namespace DySER {
               break;
           }
         }
+#endif
       } while (true);
+
+
 
       bool dumpIOInfo = (getenv("MAFIA_DEBUG_SLICEINFO_IO") != 0);
       if (dumpIOInfo) {
@@ -230,6 +245,12 @@ namespace DySER {
       }
 
       for (auto I = OpList.begin(), E = OpList.end(); I != E; ++I) {
+
+        if ((*I)->isCall() && !isInLoadSlice(*I)) {
+          if ((*I)->getCalledFuncName() == "sincosf")
+            _hasSinCos = true;
+        }
+
         if (!((*I)->isLoad() || (*I)->isStore()))
           continue;
         if ((*I)->getCoalescedOp() != 0) {
@@ -245,6 +266,7 @@ namespace DySER {
       }
       std::cout << "Number of FirstNodes: " << coalescedMemFirstNodes.size()
                 << "\n";
+
     }
 
 
@@ -384,6 +406,52 @@ namespace DySER {
     iterator begin() { return OpList.begin(); }
     iterator end()   { return OpList.end(); }
 
+
+    bool _hasSinCos = false;
+    bool hasSinCos() const {
+      return _hasSinCos;
+    }
+
+    unsigned getNumInputs() const {
+      unsigned ret = 0;
+      for (auto I = IsInput.begin(), E = IsInput.end(); I != E; ++I) {
+        if (I->second)
+          ++ret;
+      }
+      return ret;
+    }
+    unsigned getNumOutputs() const {
+      unsigned ret = 0;
+      for (auto I = IsOutput.begin(), E = IsOutput.end(); I != E; ++I) {
+        if (I->second)
+          ++ret;
+      }
+      return ret;
+    }
+
+    unsigned getNumLoadSlice() const {
+      unsigned ret = 0;
+      for (auto I = IsInLoadSlice.begin(), E = IsInLoadSlice.end(); I != E; ++I) {
+        if (I->second)
+          ++ret;
+      }
+      return ret;
+    }
+
+
+    bool shouldDySERize(bool vectorizable) {
+      if (vectorizable) {
+        // try dyserization -- vectorizable provides more benefits
+        return true;
+      }
+      int Total = OpList.size();
+      int InSize =  getNumInputs();
+      int OutSize = getNumOutputs();
+      int lssize =  getNumLoadSlice();
+      if (InSize + OutSize > (Total - lssize))
+        return false;
+      return true;
+    }
 
   };
 } // end namespace dyser

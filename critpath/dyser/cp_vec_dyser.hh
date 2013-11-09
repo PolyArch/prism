@@ -26,8 +26,8 @@ namespace DySER {
 
   protected:
     unsigned _dyser_vec_len = 16;
-    bool nonStrideAccessLegal = true;
-
+    bool nonStrideAccessLegal = false;
+    bool countDepthNodesForConfig = false;
   public:
     cp_vec_dyser() : cp_dyser() { }
     virtual ~cp_vec_dyser() { }
@@ -44,7 +44,8 @@ namespace DySER {
         nonStrideAccessLegal = false;
       if (strcmp(name, "allow-non-stride-vec") == 0)
         nonStrideAccessLegal = true;
-
+      if (strcmp(name, "dyser-count-depth-nodes-for-config") == 0)
+        countDepthNodesForConfig = true;
     }
 
     virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,
@@ -107,7 +108,7 @@ namespace DySER {
       if (depth == 0)
         depth = 1;
 
-      _num_config += extraConfigRequired;
+      incrConfigSwitch(0, extraConfigRequired);
 
       std::map<Op*, unsigned> emitted;
       for (unsigned i = 0, e = _loop_InstTrace.size(); i != e; ++i) {
@@ -132,6 +133,8 @@ namespace DySER {
     bool useCloneOpMap = false;
     unsigned pipeId = 0;
     std::map<Op*, std::map<unsigned, InstPtr > > cloneOp2InstMap;
+    //std::map<unsigned, InstPtr > > sincosInstMap;
+
     InstPtr getInstForOp(Op* op) {
       bool dumpClone = true;
       InstPtr ret = 0;
@@ -184,11 +187,6 @@ namespace DySER {
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
 
-      if (getenv("MAFIA_DEBUG_DYSER_SLICE_INFO")) {
-        std::cout << "=========Sliceinfo =========\n";
-        SI->dump();
-        std::cout << "============================\n";
-      }
 
       unsigned vec_len = curLoopIter;
       unsigned cssize = SI->cs_size();
@@ -210,10 +208,18 @@ namespace DySER {
 
       assert(numClones*depth == vec_len);
 
-      _num_config += extraConfigRequired;
+      incrConfigSwitch(0,  extraConfigRequired);
 
-      std::map<Op*, InstPtr> memOp2Inst;
+      if (getenv("MAFIA_DUMP_SLICE_INFO")) {
+        std::cout << "=========Sliceinfo =========\n";
+        std::cout << "=== depth:" << depth << ", num_clones: " << numClones
+                  << " cssize: " << cssize   << "\n";
+        SI->dump();
+        std::cout << "============================\n";
+      }
 
+
+      unsigned numInDySER = 0;
       DySERizingLoop = true;
 
       for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
@@ -234,6 +240,20 @@ namespace DySER {
             // Emit vec_len nodes for compute slice
             for (unsigned clone = 0; clone < numClones; ++clone) {
               for (unsigned j = 0; j < depth; ++j) {
+                if ((j == 0 || countDepthNodesForConfig)
+                    && SI->shouldIncludeInCSCount(op)) {
+                  ++numInDySER;
+                  if (getenv("DUMP_MAFIA_PIPE"))
+                    std::cout << " NumInDySER: " << numInDySER << "\n";
+                }
+                if (numInDySER >= _dyser_size) {
+                  if (_num_cycles_switch_config != 0) {
+                    ConfigInst = insertDyConfig(_num_cycles_switch_config);
+                    justSwitchedConfig = true;
+                  }
+                  numInDySER = 0;
+                }
+
                 useCloneOpMap = true;
 
                 //printDisasmPC(op->cpc().first, op->cpc().second);
@@ -247,7 +267,8 @@ namespace DySER {
                   insert_sliced_inst(SI, op, inst,
                                      false,
                                      cloneOp2InstMap[op][prevPipeId],
-                                     (clone+1 == numClones && j+1 == depth));
+                                     (clone+1 == numClones && j+1 == depth),
+                                     SI->hasSinCos()? (24*depth): 0);
                 useCloneOpMap = false;
                 cloneOp2InstMap[op][pipeId] = dy_inst;
                 pipeId = 0;
@@ -260,25 +281,21 @@ namespace DySER {
             }
           } else {
             // emit one node for load slice
+            // vectorized code cannot coalesce in the compiler yet,
+            // and we cannot do it either.
             if (op->isLoad() || op->isStore()) {
-              Op *firstOp = SI->getFirstMemNode(op);
-              if (memOp2Inst.count(firstOp) == 0) {
-                // create the inst
-                if (isStrideAccess(op)) {
-                  insert_sliced_inst(SI, op, inst);
-                } else {
-                  for (unsigned i = 0; i < _dyser_vec_len-1; ++i) {
-                    InstPtr tmpInst = createInst(op->img, 0, op);
-                    insert_sliced_inst(SI, op, tmpInst);
-                    updateInstWithTraceInfo(op, inst, false);
-                  }
-                  insert_sliced_inst(SI, op, inst);
-                  this->keepTrackOfInstOpMap(inst, op);
-                }
-                memOp2Inst[firstOp] = inst;
+              // create the inst
+              // handle the non stride access...
+              if (isStrideAccess(op)) {
+                insert_sliced_inst(SI, op, inst);
               } else {
-                // we already created the inst
-                this->keepTrackOfInstOpMap(memOp2Inst[firstOp], op);
+                for (unsigned i = 0; i < _dyser_vec_len-1; ++i) {
+                  InstPtr tmpInst = createInst(op->img, 0, op);
+                  insert_sliced_inst(SI, op, tmpInst);
+                  updateInstWithTraceInfo(op, inst, false);
+                }
+                insert_sliced_inst(SI, op, inst);
+                this->keepTrackOfInstOpMap(inst, op);
               }
             } else {
               insert_sliced_inst(SI, op, inst);

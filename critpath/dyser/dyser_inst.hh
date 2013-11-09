@@ -25,13 +25,6 @@ namespace DySER {
       return "dyser_inst";
     }
 
-    enum EventTy {
-      DyReady = 0,
-      DyExecute = 1,
-      DyComplete = 2,
-      DyNumStages = 3
-    };
-
   };
 
   // Instructions that execute inside dyser.
@@ -43,6 +36,12 @@ namespace DySER {
 
     dyser_compute_inst(): dyser_inst() {}
 
+    enum EventTy {
+      DyReady = 0,
+      DyExecute = 1,
+      DyComplete = 2,
+      DyNumStages = 3
+    };
 
     T& operator[](const unsigned i) {
       if (i == dyser_compute_inst::DyReady)
@@ -61,6 +60,7 @@ namespace DySER {
         events[i].reCalculate();
       }
     }
+
 
     virtual unsigned numStages() {
       return DyNumStages;
@@ -81,6 +81,15 @@ namespace DySER {
       return std::string(buf);
     }
 
+  };
+
+  class dyser_sincos_inst : public dyser_compute_inst {
+  public:
+    dyser_sincos_inst() : dyser_compute_inst() {}
+
+    std::string getDisasm() const {
+      return "dyser_sincos";
+    }
   };
 
   class dyser_pipe_inst : public dyser_inst {
@@ -114,7 +123,7 @@ namespace DySER {
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
-      for (int i = 0; i < DyNumStages; ++i) {
+      for (int i = 0; i < NumStages; ++i) {
         events[i].set_inst(this);
         events[i].prop_changed();
       }
@@ -154,6 +163,17 @@ namespace DySER {
 
     std::string getDisasm() const {
       return "dyser_recv";
+    }
+
+  };
+
+  class dyser_config : public dyser_pipe_inst {
+  public:
+    dyser_config(unsigned numCyclesToFetch): dyser_pipe_inst() {
+      _icache_lat = numCyclesToFetch;
+    }
+    std::string getDisasm() const {
+      return "dyser_config";
     }
 
   };

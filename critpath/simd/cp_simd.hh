@@ -934,7 +934,7 @@ namespace simd {
         // Create the instruction -- but donot track op <-> inst
         InstPtr inst = createInst(img, index, 0);
         getCPDG()->addInst(inst, index);
-        trackLoopInsts(li, op, inst);
+        trackLoopInsts(li, op, inst, img);
       }
 
 

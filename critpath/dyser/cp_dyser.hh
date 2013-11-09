@@ -30,18 +30,38 @@ namespace DySER {
     };
 
 
+  private:
     // number of times dyser configured..
     unsigned _num_config = 0;
     unsigned _num_config_loop_switching = 0;
     unsigned _num_config_config_switching = 0;
 
+  protected:
+    void incrConfigSwitch(unsigned lp, unsigned extra) {
+      _num_config += lp + extra;
+      _num_config_loop_switching += lp;
+      _num_config_config_switching += extra;
+    }
+
+  protected:
     // dyser size : default: 5x5
     unsigned _dyser_size = 25;
     unsigned _dyser_fu_fu_lat = 1;
 
+    unsigned _num_cycles_switch_config = 3;
+    unsigned _num_cycles_to_fetch_config = 64;
+
     InstPtr createDyComputeInst(Op *op, uint64_t index) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
                                                           index));
+      if (op) {
+        keepTrackOfInstOpMap(dy_compute, op);
+      }
+      return dy_compute;
+    }
+
+    InstPtr createDySinCosInst(Op *op) {
+      InstPtr dy_compute = InstPtr(new dyser_sincos_inst());
       if (op) {
         keepTrackOfInstOpMap(dy_compute, op);
       }
@@ -64,6 +84,12 @@ namespace DySER {
       return dy_recv;
     }
 
+    InstPtr createDyConfigInst(unsigned cyclesToFetch) {
+      InstPtr dy_config = InstPtr(new dyser_config(cyclesToFetch));
+      return dy_config;
+    }
+
+
     virtual void setDataDep(InstPtr dyInst, Op *op, InstPtr prevInst) {
       // Take case of ready
       for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
@@ -76,23 +102,25 @@ namespace DySER {
         }
         // FIXME:: Assumption - 2 cycle to get to next functional unit.
         getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
-                               *dyInst, dyser_inst::DyReady,
+                               *dyInst, dyser_compute_inst::DyReady,
                                _dyser_fu_fu_lat,
                                E_DyDep);
       }
       if (prevInst.get() != 0) {
         // Ready is inorder
-        getCPDG()->insert_edge(*prevInst, dyser_inst::DyReady,
-                               *dyInst, dyser_inst::DyReady,
+        getCPDG()->insert_edge(*prevInst, dyser_compute_inst::DyReady,
+                               *dyInst, dyser_compute_inst::DyReady,
                                0,
                                E_DyRR);
       }
     }
 
-    virtual void setReadyToExecute(InstPtr dyInst, Op *op, InstPtr prevInst) {
+    virtual void setReadyToExecute(InstPtr dyInst, Op *op,
+                                   InstPtr prevInst,
+                                   unsigned overrideIssueLat = (unsigned)-1) {
       // Ready to execute
-      getCPDG()->insert_edge(*dyInst, dyser_inst::DyReady,
-                             *dyInst, dyser_inst::DyExecute, 0,
+      getCPDG()->insert_edge(*dyInst, dyser_compute_inst::DyReady,
+                             *dyInst, dyser_compute_inst::DyExecute, 0,
                              E_DyRE);
 
       if (prevInst.get() != 0) {
@@ -104,32 +132,38 @@ namespace DySER {
           //override issueLatency for NBody: (fsqrt,fdiv -> rsqrt)
           issueLat = issueLat / 2;
 
+        if (overrideIssueLat != (unsigned)-1)
+          issueLat = overrideIssueLat;
 
         // Execute to Execute
-        getCPDG()->insert_edge(*prevInst, dyser_inst::DyExecute,
-                               *dyInst, dyser_inst::DyExecute,
+        getCPDG()->insert_edge(*prevInst, dyser_compute_inst::DyExecute,
+                               *dyInst, dyser_compute_inst::DyExecute,
                                issueLat,
                                E_DyFU);
       }
     }
 
     virtual void setExecuteToComplete(InstPtr dyInst, Op *op,
-                                      InstPtr prevInst) {
+                                      InstPtr prevInst,
+                                      unsigned overrideLat = (unsigned)-1) {
 
       unsigned op_lat = (SI->shouldIncludeInCSCount(op)
                          ? getFUOpLatency(op->img._opclass)
                          : 0);
-      getCPDG()->insert_edge(*dyInst, dyser_inst::DyExecute,
-                             *dyInst, dyser_inst::DyComplete,
+      if (overrideLat != (unsigned)-1)
+        op_lat = overrideLat;
+
+      getCPDG()->insert_edge(*dyInst, dyser_compute_inst::DyExecute,
+                             *dyInst, dyser_compute_inst::DyComplete,
                              op_lat,
-                             E_DyEC);
+                             E_DyEP);
 
       if (prevInst.get() != 0) {
         // complete is inorder to functional unit.
-        getCPDG()->insert_edge(*prevInst, dyser_inst::DyComplete,
-                               *dyInst, dyser_inst::DyComplete,
+        getCPDG()->insert_edge(*prevInst, prevInst->eventComplete(),
+                               *dyInst, dyInst->eventComplete(),
                                0,
-                               E_DyCC);
+                               E_DyPP);
       }
     }
 
@@ -147,21 +181,47 @@ namespace DySER {
     }
     dep_graph_impl_t<Inst_t, T, E> cpdg;
 
+  protected:
+    LoopInfo *StackLoop = 0;
+    unsigned StackLoopIter = 0;
+    Op *PrevOp = 0;
+
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
                      Op *op)
     {
       bool shouldCompleteLoop = false;
       //ModelState prev_model_state = dyser_model_state;
-      LoopInfo *li = getLoop(op);
+      LoopInfo *li = getLoop(op,
+                             PrevOp && PrevOp->isReturn(),
+                             StackLoop);
 
       if (CurLoop != li) {
-        // we switched to a different loop, complete DySER Loop
-        if (canDySERize(CurLoop)) {
+        // we switched to a different loop
+
+        // check whether we are in call to sin/cos function
+        if (CurLoop
+            && canDySERize(CurLoop)
+            && op->func()->nice_name() == "sincosf") {
+          StackLoop = CurLoop;
+          StackLoopIter = CurLoopIter;
+        }
+
+        // otherwise, complete DySER Loop
+        if (!StackLoop && (CurLoop != 0) & canDySERize(CurLoop)) {
           completeDySERLoop(CurLoop, CurLoopIter);
         }
         CurLoop = li;
         CurLoopIter = 0;
         global_loop_iter = 0;
+
+        if (StackLoop
+            && PrevOp && PrevOp->isReturn()
+            && PrevOp->func()->nice_name() == "sincosf") {
+          StackLoop = 0;
+          CurLoopIter = StackLoopIter;
+          StackLoopIter = 0;
+        }
+
       } else if (!CurLoop) {
         // no loop
       } else if (CurLoop) {
@@ -176,7 +236,7 @@ namespace DySER {
                                                     CurLoopIter);
       }
 
-      if (!canDySERize(li)) {
+      if (!StackLoop && !canDySERize(li)) {
         // We are in the CPU mode
         // use the default insert_inst
         CP_OPDG_Builder<T, E>::insert_inst(img, index, op);
@@ -188,12 +248,13 @@ namespace DySER {
         InstPtr inst = createInst(img, index, 0);
         getCPDG()->addInst(inst, index);
 
-        trackLoopInsts(CurLoop, op, inst);
+        trackLoopInsts(CurLoop, op, inst, img);
       }
       if (shouldCompleteLoop) {
         completeDySERLoop(CurLoop, CurLoopIter);
         CurLoopIter = 0; // reset loop counter.
       }
+      PrevOp = op;
     }
 
     virtual void accelSpecificStats(std::ostream& out, std::string &name) {
@@ -204,9 +265,9 @@ namespace DySER {
     }
 
     uint64_t numCycles() {
-      if (CurLoop) {
-        completeDySERLoop(CurLoop, CurLoopIter);
-      }
+      //if (CurLoop) {
+      //  completeDySERLoop(CurLoop, CurLoopIter);
+      //}
       return _lastInst->finalCycle();
     }
 
@@ -219,6 +280,13 @@ namespace DySER {
       if (strcmp(name, "dyser-fu-fu-latency") == 0) {
         _dyser_fu_fu_lat = atoi(optarg);
       }
+
+      if (strcmp(name, "disallow-internal-control-in-dyser") == 0)
+        SliceInfo::mapInternalControlToDySER = false;
+
+      if (strcmp(name, "dyser-switch-latency") == 0)
+        _num_cycles_switch_config = atoi(optarg);
+
     }
 
 
@@ -241,6 +309,8 @@ namespace DySER {
         return false;
       SliceInfo *si = SliceInfo::get(li, _dyser_size);
       if (si->cs_size() == 0)
+        return false;
+      if (!si->shouldDySERize(canVectorize(li, false)))
         return false;
       return true;
     }
@@ -295,14 +365,39 @@ namespace DySER {
 
 
     LoopInfo *PrevLoop = 0;
+    InstPtr ConfigInst = 0;
+    bool justSwitchedConfig = false;
+    std::list<LoopInfo *> _ConfigCache;
+
     virtual void completeDySERLoop(LoopInfo *DyLoop,
                                    unsigned curLoopIter)
     {
       if (PrevLoop != DyLoop) {
-        ++_num_config;
-        ++_num_config_loop_switching;
+        incrConfigSwitch(1, 0);
         PrevLoop = DyLoop;
-        std::cout << "Loop Switching\n";
+        if (_ConfigCache.size() == 0)
+          // first time  -- no penalty - to simulate our trace.
+          _ConfigCache.push_front(DyLoop);
+        else {
+          auto I = std::find(_ConfigCache.begin(), _ConfigCache.end(),
+                             DyLoop);
+          if (I != _ConfigCache.end()) {
+            // we have the config in cache
+            ConfigInst = insertDyConfig(_num_cycles_switch_config);
+            _ConfigCache.remove(DyLoop);
+          } else {
+            // Pay the price...
+            ConfigInst = insertDyConfig(_num_cycles_to_fetch_config);
+          }
+          // Manage the cache.
+          _ConfigCache.push_front(DyLoop);
+
+          // forget about least recently used
+          if (_ConfigCache.size() > 8)
+            _ConfigCache.pop_back();
+
+          justSwitchedConfig = true;
+        }
       }
       insert_inst_trace_to_default_pipe();
 
@@ -311,6 +406,11 @@ namespace DySER {
         this->completeDySERLoopWithIT(DyLoop, curLoopIter);
       } else {
         this->completeDySERLoopWithLI(DyLoop, curLoopIter);
+      }
+
+      justSwitchedConfig = false;
+      if (getenv("DUMP_MAFIA_PIPE") != 0) {
+        std::cout << " ============ completeDySERLoop==========\n";
       }
 
       static uint64_t numCompleted = 0;
@@ -338,10 +438,10 @@ namespace DySER {
 
       SI = SliceInfo::get(DyLoop, _dyser_size);
       assert(SI);
+      unsigned cssize = SI->cs_size();
+      unsigned extraConfigRequired = (cssize / _dyser_size);
+      incrConfigSwitch(0, extraConfigRequired);
 
-
-      _num_config += (SI->cs_size()/_dyser_size);
-      _num_config_config_switching += (SI->cs_size()/_dyser_size);
       DySERizingLoop = true;
 
       for (unsigned i = 0, e = _loop_InstTrace.size(); i != e; ++i) {
@@ -358,57 +458,115 @@ namespace DySER {
     virtual void completeDySERLoopWithLI(LoopInfo *LI, int curLoopIter) {
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
-      if (getenv("DUMP_MAFIA_PIPE")) {
-        std::cout << "=========Sliceinfo =========\n";
+      if (getenv("MAFIA_DUMP_SLICE_INFO")) {
+        std::cout << "=========Sliceinfo (cp_dyser) =========\n";
         SI->dump();
-        std::cout << "============================\n";
+        std::cout << "=======================================\n";
       }
       unsigned extraConfigRequired = (SI->cs_size()/_dyser_size);
       _num_config += extraConfigRequired;
       _num_config_config_switching += extraConfigRequired;
-
+      unsigned numInDySER = 0;
+      std::map<Op*, InstPtr> memOp2Inst;
       DySERizingLoop = true;
-      for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
-        BB *bb = *I;
-        for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
-          Op *op = *OI;
-          InstPtr inst = createInst(op->img, 0, op);
-          // update cache execution delay if necessary
-          updateInstWithTraceInfo(op, inst, false);
-          insert_sliced_inst(SI, op, inst);
+      for (int idx = 0; idx < curLoopIter; ++idx) {
+        for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
+          BB *bb = *I;
+          for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
+            Op *op = *OI;
+            InstPtr inst = createInst(op->img, 0, op);
+            // update cache execution delay if necessary
+            updateInstWithTraceInfo(op, inst, false);
+            if (!SI->isInLoadSlice(op)) {
+              ++ numInDySER;
+            }
+            if (numInDySER > _dyser_size) {
+              if (_num_cycles_switch_config != 0) {
+                ConfigInst = insertDyConfig(_num_cycles_switch_config);
+                justSwitchedConfig = true;
+              }
+              // All the sends follow this instruction will be
+              // dependent on this, but not receives.
+              numInDySER = 0;
+            }
+            if (!SI->isInLoadSlice(op)) {
+              insert_sliced_inst(SI, op, inst);
+            } else {
+              // load slice -- coalesce if possible
+              if (op->isLoad() || op->isStore()) {
+                Op *firstOp = SI->getFirstMemNode(op);
+                if (memOp2Inst.count(firstOp) == 0) {
+                  insert_sliced_inst(SI, op, inst);
+                  memOp2Inst[firstOp] = inst;
+                } else {
+                  // we already created the inst
+                  this->keepTrackOfInstOpMap(memOp2Inst[firstOp], op);
+                }
+              } else {
+                insert_sliced_inst(SI, op, inst);
+              }
+            }
+          }
         }
       }
       DySERizingLoop = false;
       cleanupLoopInstTracking();
     }
 
+    InstPtr _last_dyser_inst = 0;
     virtual InstPtr insertDySend(Op *op) {
 
       InstPtr dy_send = createDySendInst(op);
+
+      if (justSwitchedConfig) {
+        assert(ConfigInst.get() != 0);
+        getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
+                               *dy_send, Inst_t::Ready, 0,
+                               E_DyCR);
+      }
+
       addPipeDeps(dy_send, op);
       pushPipe(dy_send);
       inserted(dy_send);
+      _last_dyser_inst = dy_send;
       return dy_send;
     }
 
-    virtual InstPtr insertDyRecv(Op *op, InstPtr dy_inst) {
+    virtual InstPtr insertDyRecv(Op *op, InstPtr dy_inst, unsigned latency = 0) {
       InstPtr dy_recv = createDyRecvInst(op);
 
       getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
-                             *dy_recv, Inst_t::Ready, 0,
+                             *dy_recv, Inst_t::Ready,
+                             latency,
                              E_RDep);
 
       addDeps(dy_recv, op);
       pushPipe(dy_recv);
       inserted(dy_recv);
-
+      _last_dyser_inst = dy_recv;
       return dy_recv;
     }
+
+    virtual InstPtr insertDyConfig(unsigned numCyclesToFetch) {
+      InstPtr dy_config = createDyConfigInst(numCyclesToFetch);
+      if (_last_dyser_inst.get() != 0)
+        getCPDG()->insert_edge(*_last_dyser_inst,
+                               _last_dyser_inst->eventCommit(),
+                               *dy_config, Inst_t::Ready, 0,
+                               E_DyCR);
+      addDeps(dy_config);
+      pushPipe(dy_config);
+      inserted(dy_config);
+      _last_dyser_inst = dy_config;
+      return dy_config;
+    }
+
 
     virtual InstPtr insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
                                        bool useOpMap = true,
                                        InstPtr prevInst = 0,
-                                       bool emitDyRecv = true) {
+                                       bool emitDyRecv = true,
+                                       unsigned dyRecvLat = 0) {
       if (SI->isInLoadSlice(op)) {
         addDeps(inst, op);
         pushPipe(inst);
@@ -428,6 +586,15 @@ namespace DySER {
 
       InstPtr dy_inst = createDyComputeInst(op,
                                             inst->index());
+
+      if (justSwitchedConfig) {
+        assert(ConfigInst.get() != 0);
+        getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
+                               *dy_inst, dyser_compute_inst::DyReady,
+                               0,
+                               E_DyCR);
+      }
+
       //Assumptions::
       // All Instruction in CS can be scheduled to DySER
       // Latency between complete->next instruction is zero
@@ -444,12 +611,41 @@ namespace DySER {
       }
 
       keepTrackOfInstOpMap(dy_inst, op);
-      if (emitDyRecv && !op->isStore() && SI->isADySEROutput(op)) {
-        insertDyRecv(op, dy_inst);
+      if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)) {
+        insertDyRecv(op, dy_inst, dyRecvLat);
       }
       return dy_inst;
     }
 
+    bool allUsesAreStore(Op* op) {
+      for (auto UI = op->u_begin(), UE = op->u_end(); UI != UE; ++UI) {
+        if (!(*UI)->isStore())
+          return false;
+      }
+      return true;
+    }
+
+
+    // overrides
+    std::map<Op*, uint16_t> _iCacheLat;
+
+    void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
+                        const CP_NodeDiskImage &img) {
+      // Optimistic -- ????
+      CP_OPDG_Builder<T, E>::trackLoopInsts(li, op, inst, img);
+      _iCacheLat[op] = std::min(_iCacheLat[op], inst->_icache_lat);
+    }
+
+    void updateInstWithTraceInfo(Op *op, InstPtr inst,
+                                bool useInst) {
+      CP_OPDG_Builder<T, E>::updateInstWithTraceInfo(op, inst, useInst);
+      inst->_icache_lat = _iCacheLat[op];
+    }
+
+    void cleanupLoopInstTracking() {
+      CP_OPDG_Builder<T, E>::cleanupLoopInstTracking();
+      _iCacheLat.clear();
+    }
 
   };
 }

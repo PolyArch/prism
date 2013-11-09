@@ -59,6 +59,9 @@ public:
 
     std::cout << (inst->_isload?"L":"  ")
               << (inst->_isstore?"S":" ")
+              << ((inst->_cache_prod && inst->_true_cache_prod)
+                  ?"T"
+                  :" ")
               << (inst->_isctrl?"C":" ")
               << (inst->_ctrl_miss?"M": " ")
               << " ";

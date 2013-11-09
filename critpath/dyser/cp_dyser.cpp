@@ -14,18 +14,35 @@ static void init()
 {
 
   CPRegistry::get()->register_argument("dyser-size", true, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-vec-len", true, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("allow-non-stride-vec", false,
-                                       &VecOut.cp_obj);
-
   CPRegistry::get()->register_argument("dyser-size", true, &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-vec-len", true, &VecOut.cp_obj);
   CPRegistry::get()->register_argument("dyser-vec-len", true, &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
+                                       &VecOut.cp_obj);
   CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
                                        &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("allow-non-stride-vec", false,
+                                       &VecOut.cp_obj);
   CPRegistry::get()->register_argument("allow-non-stride-vec", false,
                                        &VecIn.cp_obj);
 
+  CPRegistry::get()->register_argument("disallow-internal-control-in-dyser", false,
+                                       &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("disallow-internal-control-in-dyser", false,
+                                       &VecIn.cp_obj);
+
+
+  CPRegistry::get()->register_argument("dyser-switch-latency", true,
+                                       &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-switch-latency", true,
+                                       &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,
+                                       &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,
+                                       &VecIn.cp_obj);
 }
 

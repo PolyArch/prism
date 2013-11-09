@@ -125,7 +125,10 @@ public:
     }
 
     Op *op = getOpForInst(n);
-    assert(op);
+    if (!op) {
+      assert(n.hasDisasm() && n.getDisasm() == "dyser_config");
+      return n;
+    }
 
     for (auto I = op->d_begin(), IE = op->d_end(); I != IE; ++I) {
       Op *DepOp = *I;
@@ -144,7 +147,12 @@ public:
       return CP_DG_Builder<T, E>::checkMemoryDependence(n);
 
     Op *op = getOpForInst(n);
-    assert(op);
+
+    if (!op) {
+      assert(n.hasDisasm() && n.getDisasm() == "dyser_config");
+      return n;
+    }
+
 
     for (auto I = op->m_begin(), IE = op->m_end(); I != IE; ++I) {
       Op *DepOp = *I;
@@ -189,8 +197,11 @@ protected:
     auto I2Op = _inst2Op.find(&n);
     if (I2Op != _inst2Op.end())
       return I2Op->second;
-    if (!allowNull)
+    if (!allowNull) {
+      if (n.hasDisasm())
+        return 0; // Fake instructions ....
       assert(0 && "inst2Op map does not have inst??");
+    }
     return 0;
   }
 
@@ -203,13 +214,27 @@ protected:
 
 
 protected:
-  std::vector<std::pair<Op*, InstPtr> > _loop_InstTrace;
+
+  template <class _F, class _S, class _T>
+  struct _InstInfo {
+    _F first;
+    _S second;
+    _T third;
+    _InstInfo(_F &f, _S &s, const _T &t):
+      first(f), second(s), third(t)
+    {}
+  };
+
+  std::vector< _InstInfo<Op*, InstPtr, CP_NodeDiskImage> > _loop_InstTrace;
   std::map<Op*, uint16_t> _cacheLat;
   std::map<Op*, bool> _trueCacheProd;
   std::map<Op*, bool> _ctrlMiss;
 
-  virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst) {
-    _loop_InstTrace.push_back(std::make_pair(op, inst));
+  virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
+                              const CP_NodeDiskImage &img) {
+    _loop_InstTrace.push_back(_InstInfo<Op*, InstPtr, CP_NodeDiskImage>(op,
+                                                                        inst,
+                                                                        img));
     if (op->isLoad() || op->isStore()) {
       _cacheLat[op] = std::max( (op->isLoad() ? inst->_ex_lat : inst->_st_lat),
                                 _cacheLat[op]);
@@ -231,6 +256,7 @@ protected:
 
   virtual void updateInstWithTraceInfo(Op *op, InstPtr inst,
                                        bool useInst) {
+
     if (op->isLoad()) {
       uint16_t inst_lat = useInst ? inst->_ex_lat : 0;
       inst->_ex_lat = std::max(inst_lat, _cacheLat[op]);
@@ -277,7 +303,7 @@ protected:
 
       for (auto I = _loop_InstTrace.begin(), IE = _loop_InstTrace.end();
            I != IE; ++I) {
-        _default_cp.insert_inst(I->first->img, I->second->index(), I->first);
+        _default_cp.insert_inst(I->third, I->second->index(), I->first);
       }
 
       std::cout << " =========== End Default Pipe =========\n";
