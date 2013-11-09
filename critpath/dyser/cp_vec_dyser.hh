@@ -268,7 +268,7 @@ namespace DySER {
                                      false,
                                      cloneOp2InstMap[op][prevPipeId],
                                      (clone+1 == numClones && j+1 == depth),
-                                     SI->hasSinCos()? (24*depth): 0);
+                                     SI->hasSinCos()? (18*depth): 0);
                 useCloneOpMap = false;
                 cloneOp2InstMap[op][pipeId] = dy_inst;
                 pipeId = 0;
