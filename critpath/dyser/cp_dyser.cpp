@@ -59,5 +59,15 @@ static void init()
   CPRegistry::get()->register_argument("dyser-insert-ctrl-miss-penalty",
                                        false, &VecIn.cp_obj);
 
+  CPRegistry::get()->register_argument("dyser-disallow-coalesce-mem-ops",
+                                       false, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-disallow-coalesce-mem-ops",
+                                       false, &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-try-bundle-ops",
+                                       false, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-try-bundle-ops",
+                                       false, &VecIn.cp_obj);
+
 }
 

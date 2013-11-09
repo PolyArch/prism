@@ -52,6 +52,8 @@ namespace DySER {
     unsigned _num_cycles_to_fetch_config = 64;
     bool useReductionConfig = false;
     bool insertCtrlMissConfigPenalty = false;
+    bool coalesceMemOps = true;
+    bool tryBundleDySEROps = false;
 
     InstPtr createDyComputeInst(Op *op, uint64_t index) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
@@ -300,6 +302,12 @@ namespace DySER {
 
       if (strcmp(name, "dyser-insert-ctrl-miss-penalty") == 0)
         insertCtrlMissConfigPenalty = true;
+
+      if (strcmp(name, "dyser-disallow-coalesce-mem-ops") == 0)
+        coalesceMemOps = false;
+
+      if (strcmp(name, "dyser-try-bundle-ops") == 0)
+        tryBundleDySEROps = true;
     }
 
 
@@ -490,6 +498,7 @@ namespace DySER {
       _num_config_config_switching += extraConfigRequired;
       unsigned numInDySER = 0;
       std::map<Op*, InstPtr> memOp2Inst;
+      std::map<Op*, InstPtr> bundledOp2Inst;
       DySERizingLoop = true;
       for (int idx = 0; idx < curLoopIter; ++idx) {
         for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
@@ -512,10 +521,20 @@ namespace DySER {
               numInDySER = 0;
             }
             if (!SI->isInLoadSlice(op)) {
-              insert_sliced_inst(SI, op, inst);
+              Op *firstOp = SI->getBundledNode(op);
+
+              if (firstOp && tryBundleDySEROps) {
+                if (bundledOp2Inst.count(firstOp) == 0) {
+                  insert_sliced_inst(SI, op, inst);
+                  bundledOp2Inst[firstOp] = inst;
+                } else {
+                  this->keepTrackOfInstOpMap(bundledOp2Inst[firstOp], op);
+                }
+              } else
+                insert_sliced_inst(SI, op, inst);
             } else {
               // load slice -- coalesce if possible
-              if (op->isLoad() || op->isStore()) {
+              if (coalesceMemOps && (op->isLoad() || op->isStore())) {
                 Op *firstOp = SI->getFirstMemNode(op);
                 if (memOp2Inst.count(firstOp) == 0) {
                   insert_sliced_inst(SI, op, inst);

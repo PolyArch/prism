@@ -57,6 +57,58 @@ namespace DySER {
       return curOp;
     }
 
+    std::map<Op*, Op*> bundledNodesMap;
+    Op *getBundledNode(Op *op) {
+      auto I = bundledNodesMap.find(op);
+      if (I != bundledNodesMap.end())
+        return I->second;
+      return 0;
+    }
+
+  protected:
+
+    bool checkDisasmHas(Op *op, const char *chkStr) {
+      uint64_t pc = op->cpc().first;
+      int upc = op->cpc().second;
+      std::string disasm =  ExecProfile::getDisasm(pc, upc);
+      if (disasm.find(chkStr) != std::string::npos)
+        return false;
+      return true;
+    }
+
+    bool checkForBundledNodes(Op *op, Op *nxop, Op *nx2op) {
+      if (!op || !nxop || !nx2op)
+        return false;
+
+      // FIXME::
+      // For needle
+      // Bundle max :: check the ops, and uses
+      if (!checkDisasmHas(op, "CMP_R_R"))
+        return false;
+
+      if (checkDisasmHas(nxop, "CMOVLE_R_R")
+          && checkDisasmHas(nx2op, "CMOVLE_R_R"))
+        return true;
+      if (checkDisasmHas(nxop, "CMOVNLE_R_R")
+          && checkDisasmHas(nx2op, "CMOVNLE_R_R"))
+        return true;
+
+      return false;
+    }
+
+    void computeBundledNodes() {
+      for (unsigned i = 0, e = OpList.size(); i < e; ++i) {
+        Op *op = OpList[i];
+        Op *nxop = (i+1 != e) ? OpList[i+1] : 0;
+        Op *nx2op = (i+2 != e)? OpList[i+2] : 0;
+        if (checkForBundledNodes(op, nxop, nx2op)) {
+          bundledNodesMap[nxop] = op;
+          bundledNodesMap[nx2op] = op;
+          i += 2; // skip next two ops
+        }
+      }
+    }
+
   public:
     SliceInfo(LoopInfo *li, unsigned dyser_size) {
       LI = li;
@@ -326,6 +378,8 @@ namespace DySER {
           IsInLoadSlice[op] = true;
         }
       }
+
+      computeBundledNodes();
 
     }
 
