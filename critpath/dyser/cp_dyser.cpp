@@ -44,5 +44,10 @@ static void init()
                                        &VecOut.cp_obj);
   CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,
                                        &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-fu-fu-latency", true,
+                                       &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-fu-fu-latency", true,
+                                       &VecIn.cp_obj);
 }
 
