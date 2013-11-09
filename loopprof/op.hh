@@ -11,6 +11,8 @@
 #include <vector>
 #include <iostream>
 
+
+#include <boost/serialization/binary_object.hpp>
 #include "cpu/crtpath/crtpathnode.hh"
 class Op;
 class FunctionInfo;
@@ -54,12 +56,13 @@ class Op {
 public:
   typedef std::set<Op*> Deps;
   static uint32_t _idcounter;
-
   CP_NodeDiskImage img;
 
 private:
+
   enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN };
   uint32_t _id;
+
   CPC _cpc;
   Deps _deps;
   Deps _uses; //forward use
@@ -83,6 +86,12 @@ private:
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version) {
     uint8_t temp_flags = _flags.to_ulong();
+
+    void* img_ptr = reinterpret_cast<void*>(&img); 
+    ar & boost::serialization::make_binary_object(img_ptr, 
+                                                  sizeof(CP_NodeDiskImage));
+
+
     ar & _id;
     ar & _cpc;
     ar & _deps;
@@ -101,8 +110,6 @@ private:
     ar & _sameEffAddrOpSet;
     ar & _nextEffAddrOpSet;
 
-
-    //ar & _subgraph;
     _flags = std::bitset<8>(temp_flags);
 
     for(auto i=_deps.begin(),e=_deps.end();i!=e;++i) {
@@ -124,10 +131,12 @@ public:
   {
     
   }*/
-  Op (): _id(_idcounter++), _bb(NULL), _totLat(0), _times(0) /*,_subgraph(NULL)*/  {
+  Op (): _id(_idcounter++), _bb(NULL), _totLat(0), _times(0)  {
    
   }
-  
+ 
+  void setImg(CP_NodeDiskImage& in_img) {img=in_img;}
+
   uint32_t id() {return _id;}
   CPC cpc() {return _cpc;}
   bool isLoad() {return _flags[ISLOAD];}

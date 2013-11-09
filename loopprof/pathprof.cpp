@@ -638,7 +638,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   if(op==NULL) {
     return;
   }
-  op->img = img;
+  op->setImg(img);
 
   _op_buf[_dId%MAX_OPS]=op;
 
