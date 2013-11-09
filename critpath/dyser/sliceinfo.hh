@@ -448,8 +448,15 @@ namespace DySER {
       int InSize =  getNumInputs();
       int OutSize = getNumOutputs();
       int lssize =  getNumLoadSlice();
+
+      if (InSize == 0 || OutSize == 0) {
+        // no input or output -- no dyser
+        return false;
+      }
+
       if (InSize + OutSize > (Total - lssize))
         return false;
+
       return true;
     }
 
