@@ -39,6 +39,7 @@ namespace simd {
     bool useReductionTree = false;
     bool useSplittedOps   = true;
     bool useMergeOps = true;
+    unsigned simd_exec_width = 1;
 
   public:
     cp_simd() : CP_OPDG_Builder<T, E> () {
@@ -190,6 +191,12 @@ namespace simd {
         useSplittedOps = false;
       if (strcmp(name, "disallow-merge-op") == 0)
         useMergeOps = false;
+
+      if (strcmp(name, "simd-exec-width") == 0) {
+        useSplittedOps = false; //off splitted -- instead use the width
+        useMergeOps = false;
+        simd_exec_width = atoi(optarg);
+      }
     }
 
     virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
@@ -733,6 +740,17 @@ namespace simd {
             addSIMDDeps(inst, op);
             pushPipe(inst);
             inserted(inst);
+          }
+
+          // simd_exec_width only for non-mem instruction
+          if (!(op->isLoad() || op->isStore()) && simd_exec_width > 1) {
+            for (unsigned i = 1; i < simd_exec_width; ++i) {
+              InstPtr inst = createSIMDInst(op);
+              updateInstWithTraceInfo(op, inst, false);
+              addSIMDDeps(inst, op);
+              pushPipe(inst);
+              inserted(inst);
+            }
           }
 
           if (op->isLoad()) {

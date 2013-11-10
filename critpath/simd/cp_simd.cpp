@@ -41,4 +41,9 @@ static void init()
   CPRegistry::get()->register_argument("disallow-merge-op",
                                        false, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("simd-exec-width",
+                                       true, &OOO.cp_obj);
+
+  CPRegistry::get()->register_argument("simd-exec-width",
+                                       true, &OOO.cp_obj);
 }
