@@ -79,5 +79,10 @@ static void init()
   CPRegistry::get()->register_argument("dyser-allow-merge-ops",
                                        false, &VecIn.cp_obj);
 
+  CPRegistry::get()->register_argument("dyser-use-rpo-index-for-output",
+                                       false, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-use-rpo-index-for-output",
+                                       false, &VecIn.cp_obj);
+
 }
 

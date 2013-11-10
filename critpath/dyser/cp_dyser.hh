@@ -324,6 +324,8 @@ namespace DySER {
 
       if (strcmp(name, "disallow-internal-control-in-dyser") == 0)
         SliceInfo::mapInternalControlToDySER = false;
+      if (strcmp(name, "dyser-use-rpo-index-for-output") == 0)
+        SliceInfo::useRPOIndexForOutput = true;
 
       if (strcmp(name, "dyser-switch-latency") == 0)
         _num_cycles_switch_config = atoi(optarg);

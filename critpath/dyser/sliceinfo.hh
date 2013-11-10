@@ -33,6 +33,7 @@ namespace DySER {
   public:
 
     static bool mapInternalControlToDySER;
+    static bool useRPOIndexForOutput;
 
     bool isFirstMemNode(Op* op) const {
       return (coalescedMemFirstNodes.count(op) > 0);
@@ -313,7 +314,8 @@ namespace DySER {
             // -- only a output if rpoIndex(op) < rpoIndex(useop)
             if (!rpoIndex.count(op) || !rpoIndex.count(UseOp))
               continue;
-            #if 1
+            if (!useRPOIndexForOutput)
+              continue;
             // This is not working -- commenting it for cutcp
             if (rpoIndex[op] >= rpoIndex[UseOp]) {
               IsOutput[op] = true;
@@ -322,7 +324,6 @@ namespace DySER {
                           << rpoIndex[op] << " --> " << rpoIndex[UseOp] << "\n";
               }
             }
-            #endif
           }
         }
       }
