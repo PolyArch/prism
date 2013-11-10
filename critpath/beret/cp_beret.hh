@@ -203,7 +203,7 @@ public:
   
         bool gams_details=false;
         bool no_gams=false;
-        std::cout << _beret_max_seb << " " << _beret_max_mem << "\n";
+        std::cerr << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
             li2ssmap[loopInfo],li2sgmap[loopInfo],
             gams_details,no_gams,_beret_max_seb,_beret_max_mem);
