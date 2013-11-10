@@ -1,13 +1,21 @@
 
 #include "cp_dyser.hh"
 #include "cp_vec_dyser.hh"
+#include "cp_orig_dyser.hh"
 #include "cp_registry.hh"
+
+
+unsigned DySER::dyser_inst::Send_Recv_Latency = 1;
 
 static RegisterCP<DySER::cp_dyser> XOut("dyser", false);
 static RegisterCP<DySER::cp_dyser> XIn("dyser", true);
 
 static RegisterCP<DySER::cp_vec_dyser> VecOut("vec-dyser", false);
 static RegisterCP<DySER::cp_vec_dyser> VecIn("vec-dyser", true);
+
+static RegisterCP<DySER::cp_orig_dyser> OrigOut("orig-dyser", false);
+static RegisterCP<DySER::cp_orig_dyser> OrigIn("orig-dyser", true);
+
 
 __attribute__((__constructor__))
 static void init()
@@ -35,9 +43,14 @@ static void init()
                                        &VecIn.cp_obj);
 
 
-  CPRegistry::get()->register_argument("dyser-switch-latency", true,
+  CPRegistry::get()->register_argument("dyser-config-fetch-latency", true,
                                        &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-switch-latency", true,
+  CPRegistry::get()->register_argument("dyser-config-fetch-latency", true,
+                                       &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-config-switch-latency", true,
+                                       &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-config-switch-latency", true,
                                        &VecIn.cp_obj);
 
   CPRegistry::get()->register_argument("dyser-ctrl-miss-config-penalty", true,
@@ -83,6 +96,11 @@ static void init()
                                        false, &VecOut.cp_obj);
   CPRegistry::get()->register_argument("dyser-use-rpo-index-for-output",
                                        false, &VecIn.cp_obj);
+
+  CPRegistry::get()->register_argument("dyser-send-recv-latency",
+                                       true, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-send-recv-latency",
+                                       true, &VecIn.cp_obj);
 
 }
 

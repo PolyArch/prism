@@ -150,6 +150,10 @@ public:
 */
   }
 
+  virtual int adjustExecuteLatency(int lat) const {
+    return lat;
+  }
+
   virtual bool hasDisasm() const { return false; }
   virtual std::string getDisasm() const { return std::string(""); }
 protected:

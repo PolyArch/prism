@@ -7,6 +7,7 @@
 #include "dyser_inst.hh"
 #include "vectorization_legality.hh"
 #include "sliceinfo.hh"
+#include "cp_utils.hh"
 
 namespace DySER {
 
@@ -66,9 +67,12 @@ namespace DySER {
     unsigned _dyser_size = 25;
     unsigned _dyser_fu_fu_lat = 1;
 
+
     unsigned _num_cycles_switch_config = 3;
     unsigned _num_cycles_to_fetch_config = 64;
-    unsigned _num_cycles_ctrl_miss_penalty = 64;
+    unsigned _num_cycles_ctrl_miss_penalty = 8;
+
+    unsigned _send_recv_latency = 1;
 
     bool useReductionConfig = false;
     bool insertCtrlMissConfigPenalty = false;
@@ -76,11 +80,38 @@ namespace DySER {
     bool tryBundleDySEROps = false;
     bool useMergeOps = false;
 
-    InstPtr createDyComputeInst(Op *op, uint64_t index) {
+    uint64_t _dyser_int_ops;
+    uint64_t _dyser_fp_ops;
+    uint64_t _dyser_mult_ops;
+
+    // do we need this????
+    uint64_t _dyser_regfile_freads;
+    uint64_t _dyser_regfile_reads;
+
+    InstPtr createDyComputeInst(Op *op, uint64_t index, SliceInfo *SI) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
                                                           index));
       if (op) {
         keepTrackOfInstOpMap(dy_compute, op);
+
+        if (op->img._floating)
+          ++ _dyser_fp_ops;
+        else if (op->img._opclass == 2)
+          ++ _dyser_mult_ops;
+        else
+          ++ _dyser_int_ops;
+
+        for (auto OI = op->d_begin(), OE = op->d_end(); OI != OE; ++OI) {
+          Op *DepOp = *OI;
+          if (!DepOp)
+            continue;
+          if (!SI->isInLoadSlice(DepOp, true))
+            continue;
+          if (DepOp->img._floating)
+            ++ _dyser_regfile_freads;
+          else
+            ++ _dyser_regfile_reads;
+        }
       }
       return dy_compute;
     }
@@ -94,7 +125,7 @@ namespace DySER {
     }
 
     InstPtr createDySendInst(Op *op) {
-            InstPtr dy_send = InstPtr(new dyser_send());
+      InstPtr dy_send = InstPtr(new dyser_send());
       if (op) {
         keepTrackOfInstOpMap(dy_send, op);
       }
@@ -327,8 +358,12 @@ namespace DySER {
       if (strcmp(name, "dyser-use-rpo-index-for-output") == 0)
         SliceInfo::useRPOIndexForOutput = true;
 
-      if (strcmp(name, "dyser-switch-latency") == 0)
+      if (strcmp(name, "dyser-config-fetch-latency") == 0)
+        _num_cycles_to_fetch_config = atoi(optarg);
+
+      if (strcmp(name, "dyser-config-switch-latency") == 0)
         _num_cycles_switch_config = atoi(optarg);
+
       if (strcmp(name, "dyser-ctrl-miss-config-penalty") == 0)
         _num_cycles_ctrl_miss_penalty = atoi(optarg);
 
@@ -346,6 +381,9 @@ namespace DySER {
 
       if (strcmp(name, "dyser-allow-merge-ops") == 0)
         useMergeOps = true;
+
+      if (strcmp(name, "dyser-send-recv-latency") == 0)
+        dyser_inst::Send_Recv_Latency = atoi(optarg);
     }
 
 
@@ -672,7 +710,8 @@ namespace DySER {
                                    : prevInst);
 
       InstPtr dy_inst = createDyComputeInst(op,
-                                            inst->index());
+                                            inst->index(),
+                                            SI);
 
       if (justSwitchedConfig) {
         assert(ConfigInst.get() != 0);
@@ -732,6 +771,78 @@ namespace DySER {
     void cleanupLoopInstTracking() {
       CP_OPDG_Builder<T, E>::cleanupLoopInstTracking();
       _iCacheLat.clear();
+    }
+
+    virtual void calcAccelEnergy(std::string fname_base, int nm) {
+      std::string fname=fname_base + std::string(".accel");
+
+      std::string outf = fname + std::string(".out");
+      std::cout <<  " dyser accel(" << nm << "nm)... ";
+      std::cout.flush();
+
+      execMcPAT(fname, outf);
+      float ialu  = std::stof(grepF(outf,"Integer ALUs",7,5));
+      float fpalu = std::stof(grepF(outf,"Floating Point Units",7,5));
+      float calu  = std::stof(grepF(outf,"Complex ALUs",7,5));
+      float reg   = std::stof(grepF(outf,"Register Files",7,5)) * 4;
+      float total = ialu + fpalu + calu + reg;
+      std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
+    }
+
+
+    // Handle enrgy events for McPAT XML DOC
+    virtual void printAccelMcPATxml(std::string fname_base, int nm) {
+
+
+
+      #include "mcpat-defaults.hh"
+      pugi::xml_document accel_doc;
+      std::istringstream ss(xml_str);
+      pugi::xml_parse_result result = accel_doc.load(ss);
+
+      if (!result) {
+        std::cerr << "XML Malformed\n";
+        return;
+      }
+
+      pugi::xml_node system_node =
+        accel_doc.child("component").find_child_by_attribute("name", "system");
+
+      //set the total_cycles so that we get power correctly
+      sa(system_node, "total_cycles", numCycles());
+      sa(system_node, "busy_cycles", 0);
+      sa(system_node, "idle_cycles", numCycles());
+
+      sa(system_node, "core_tech_node", nm);
+      sa(system_node, "device_type", 0);
+
+
+      pugi::xml_node core_node =
+        system_node.find_child_by_attribute("name", "core0");
+      sa(core_node, "total_cycles", numCycles());
+      sa(core_node, "busy_cycles", 0);
+      sa(core_node, "idle_cycles", numCycles());
+
+      sa(core_node, "ALU_per_core", Prof::get().int_alu_count);
+      sa(core_node, "MUL_per_core", Prof::get().mul_div_count);
+      sa(core_node, "FPU_per_core", Prof::get().fp_alu_count);
+
+      sa(core_node, "ialu_accesses", _dyser_int_ops);
+      sa(core_node, "fpu_accesses", _dyser_fp_ops);
+      sa(core_node, "mul_accesses", _dyser_mult_ops);
+
+      sa(core_node, "archi_Regs_IRF_size", 8);
+      sa(core_node, "archi_Regs_FRF_size", 8);
+      sa(core_node, "phy_Regs_IRF_size", 64);
+      sa(core_node, "phy_Regs_FRF_size", 64);
+
+      sa(core_node, "int_regfile_reads", _dyser_regfile_reads);
+      sa(core_node, "int_regfile_writes", _dyser_int_ops + _dyser_mult_ops);
+      sa(core_node, "float_regfile_reads", _dyser_regfile_freads);
+      sa(core_node, "float_regfile_writes", _dyser_fp_ops);
+
+      std::string fname=fname_base + std::string(".accel");
+      accel_doc.save_file(fname.c_str());
     }
 
   };

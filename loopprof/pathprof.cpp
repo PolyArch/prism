@@ -768,39 +768,60 @@ void PathProf::procConfigFile(const char* filename) {
       while(std::getline(ifs, line) && !line.empty()) {
         std::istringstream iss(line);
         if( getToken(iss, tag,'=') && getToken(iss,val) ) {
-          getStat("assoc",tag,val,dcache_assoc);
-          getStat("hit_latency",tag,val,dcache_hit_latency);
-          getStat("mshrs",tag,val,dcache_mshrs);
-          getStat("response_latency",tag,val,dcache_response_latency);
-          getStat("size",tag,val,dcache_size);
-          getStat("tgts_per_mshr",tag,val,dcache_tgts_per_mshr);
-          getStat("write_buffers",tag,val,dcache_write_buffers);
+          getStat("assoc",tag,val,dcache_assoc, true);
+          if (!getStat("hit_latency",tag,val,dcache_hit_latency)) {
+            if (getStat("latency", tag, val, dcache_hit_latency, true)) {
+              dcache_hit_latency /= 500;
+              if (dcache_hit_latency < 0)
+                dcache_hit_latency = 1;
+            }
+          }
+          getStat("mshrs",tag,val,dcache_mshrs, true);
+          getStat("response_latency",tag,val, dcache_response_latency, true);
+          getStat("size",tag,val,dcache_size, true);
+          getStat("tgts_per_mshr",tag,val,dcache_tgts_per_mshr, true);
+          getStat("write_buffers",tag,val,dcache_write_buffers, true);
+          if (cache_line_size == 0) {
+            cache_line_size = 64; // override for old gem5
+          }
         }
       } 
     } else if(line.find("[system.cpu.icache]")!= string::npos) {
       while(std::getline(ifs, line) && !line.empty()) {
         std::istringstream iss(line);
         if( getToken(iss, tag,'=') && getToken(iss,val) ) {
-          getStat("assoc",tag,val,icache_assoc);
-          getStat("hit_latency",tag,val,icache_hit_latency);
-          getStat("mshrs",tag,val,icache_mshrs);
-          getStat("response_latency",tag,val,icache_response_latency);
-          getStat("size",tag,val,icache_size);
-          getStat("tgts_per_mshr",tag,val,icache_tgts_per_mshr);
-          getStat("write_buffers",tag,val,icache_write_buffers);
+          getStat("assoc",tag,val,icache_assoc, true);
+          if (!getStat("hit_latency",tag,val,icache_hit_latency, true)) {
+            if (getStat("latency",tag, val, icache_hit_latency, true)) {
+              icache_hit_latency /= 500;
+              if (icache_hit_latency == 0)
+                icache_hit_latency = 1;
+            }
+          }
+          getStat("mshrs",tag,val,icache_mshrs, true);
+          getStat("response_latency",tag,val,icache_response_latency, true);
+          getStat("size",tag,val,icache_size, true);
+          getStat("tgts_per_mshr",tag,val,icache_tgts_per_mshr, true);
+          getStat("write_buffers",tag,val,icache_write_buffers, true);
         }
       } 
     } else if(line.find("[system.l2]")!= string::npos) {
       while(std::getline(ifs, line) && !line.empty()) {
         std::istringstream iss(line);
         if( getToken(iss, tag,'=') && getToken(iss,val) ) {
-          getStat("assoc",tag,val,l2_assoc);
-          getStat("hit_latency",tag,val,l2_hit_latency);
-          getStat("mshrs",tag,val,l2_mshrs);
-          getStat("response_latency",tag,val,l2_response_latency);
-          getStat("size",tag,val,l2_size);
-          getStat("tgts_per_mshr",tag,val,l2_tgts_per_mshr);
-          getStat("write_buffers",tag,val,l2_write_buffers);
+          getStat("assoc",tag,val,l2_assoc, true);
+          if (!getStat("hit_latency",tag,val,l2_hit_latency, true)) {
+            if (getStat("latency", tag, val, l2_hit_latency, true)) {
+              l2_hit_latency /= 500;
+              if (l2_hit_latency == 0)
+                l2_hit_latency = 1;
+            }
+          }
+          getStat("mshrs",tag,val,l2_mshrs, true);
+          getStat("response_latency",tag,val,l2_response_latency, true);
+          getStat("size",tag,val,l2_size, true);
+          getStat("tgts_per_mshr",tag,val,l2_tgts_per_mshr, true);
+          getStat("write_buffers",tag,val,l2_write_buffers, true);
         }
       } 
     } else if(line.find("[system.switch_cpus]")!= string::npos) {
@@ -839,8 +860,11 @@ void PathProf::procConfigFile(const char* filename) {
           getStat("renameToROBDelay",tag,val,renameToROBDelay);
           getStat("wbDepth",tag,val,wbDepth);
           getStat("wbWidth",tag,val,wbWidth);
+          getStat("BTBEntries", tag, val, BTBEntries);
+          getStat("BTBTagSize",tag,val,BTBTagSize);
+          getStat("RASSize",tag,val,RASSize);
         }
-      } 
+      }
     } else if(line.find("[system.switch_cpus.branchPred]")!= string::npos) {
       while(std::getline(ifs, line) && !line.empty()) {
         std::istringstream iss(line);
@@ -992,6 +1016,7 @@ void PathProf::procStatsFile(const char* filename) {
     std::string tag,val;
     if( getToken(iss, tag) && getToken(iss,val) ) {
       if( tag.find("switch_cpus") != std::string::npos ) {
+        statMap[tag] = val;
         getStat("numCycles",tag,val,numCycles);
         getStat("idleCycles",tag,val,idleCycles);
 
@@ -1012,8 +1037,12 @@ void PathProf::procStatsFile(const char* filename) {
         getStat("iq.FU_type_0::FloatDiv",tag,val,fdivOps);
         getStat("iq.FU_type_0::FloatSqrt",tag,val,fsqrtOps);
 
-        getStat("branchPred.lookups",tag,val,branchPredictions);
-        getStat("branchPred.condIncorrect",tag,val,mispredicts);
+        if (!getStat("branchPred.lookups",tag,val,branchPredictions)) {
+          getStat("BPredUnit.lookups",tag,val,branchPredictions);
+        }
+        if (!getStat("branchPred.condIncorrect",tag,val,mispredicts)) {
+          getStat("BPredUnit.condIncorrect",tag,val,mispredicts);
+        }
 
         getStat("rob.rob_reads",tag,val,rob_reads);
         getStat("rob.rob_writes",tag,val,rob_writes);
@@ -1045,11 +1074,20 @@ void PathProf::procStatsFile(const char* filename) {
 
         getStat("fetch.CacheLines",tag,val,icacheLinesFetched);
 
-        getStat("committedOps",tag,val,commitInsts);
         getStat("commit.int_insts",tag,val,commitIntInsts);
         getStat("commit.fp_insts",tag,val,commitFPInsts);
+
+        if (!getStat("committedOps",tag,val,commitInsts)) {
+          // try to use switch_cpus.commit.count
+          if (!getStat("commit.count", tag, val, commitInsts)) {
+            // use int+fp
+            commitInsts = commitIntInsts + commitFPInsts;
+          }
+        }
         getStat("commit.branches",tag,val,commitBranches);
-        getStat("commit.branchMispredicts",tag,val,commitBranchMispredicts);
+        if (!getStat("commit.branchMispredicts",tag,val,commitBranchMispredicts)) {
+          getStat("BPredUnit.condIncorrect", tag, val, commitBranchMispredicts);
+        }
         getStat("commit.loads",tag,val,commitLoads);
         getStat("commit.refs",tag,val,commitMemRefs);
       } else {

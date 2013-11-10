@@ -334,31 +334,77 @@ private:
     return valid;
   }
 
-  static void getStat(const char* tag_str, std::string& tag, 
-               std::string& val, uint64_t& stat) {
-    if(tag.find(tag_str) != std::string::npos) {
+  static bool getStat(const char* tag_str, const std::string& tag,
+                      const std::string& val, uint64_t& stat, bool eq = false) {
+    if (eq) {
+      if (tag == std::string(tag_str)) {
+        stat = std::stoul(val);
+        return true;
+      }
+      return false;
+    }
+    if (tag.find(tag_str) != std::string::npos) {
       stat = std::stoul(val);
+      return true;
     }
+    return false;
   }
 
-  static void getStat(const char* tag_str, std::string& tag, 
-               std::string& val, int& stat) {
-    if(tag.find(tag_str) != std::string::npos) {
+  static bool getStat(const char* tag_str, std::string& tag,
+                      std::string& val, int& stat, bool eq = false) {
+    if (eq) {
+      if (tag == std::string(tag_str)) {
+        stat = std::stoi(val);
+        return true;
+      }
+      return false;
+    }
+
+    if (tag.find(tag_str) != std::string::npos) {
       stat = std::stoi(val);
+      return true;
     }
+    return false;
   }
 
-  static void getStat(const char* tag_str, std::string& tag, 
-               std::string& val, bool& stat) {
-    if(tag.find(tag_str) != std::string::npos) {
-      stat = val.find("false")!=std::string::npos;
+  static bool getStat(const char* tag_str, std::string& tag,
+                      std::string& val, bool& stat, bool eq = false) {
+
+    if (eq) {
+      if (tag == std::string(tag_str)) {
+        stat = val.find("false") != std::string::npos;
+        return true;
+      }
+      return false;
     }
+
+    if (tag.find(tag_str) != std::string::npos) {
+      stat = val.find("false")!=std::string::npos;
+      return true;
+    }
+    return false;
   }
+
 
 
   static bool to_bool(std::string const& s) {
     return s != "0";
   }
+
+  std::map<std::string, std::string> statMap;
+public:
+  template<class T>
+  T getStatFromMap(const char *tag) {
+    T val = 0;
+    for (auto I = statMap.begin(), E = statMap.end();
+         I != E; ++I) {
+      if (I->first.find(tag) == std::string::npos)
+        continue;
+      getStat(tag, I->first, I->second, val);
+    }
+    return val;
+  }
+
 
 public:
   PathProf() {

@@ -1743,9 +1743,11 @@ protected:
   //==========COMPLTE ==============
   //Complete After Execute
   virtual Inst_t &checkEP(Inst_t &n) {
-    int lat=epLat(n._ex_lat,n._opclass,n._isload,
-                  n._isstore,n._cache_prod,n._true_cache_prod,
-                  n.isAccelerated);
+    int lat = epLat(n._ex_lat,n._opclass,n._isload,
+                    n._isstore,n._cache_prod,n._true_cache_prod,
+                    n.isAccelerated);
+
+    lat = n.adjustExecuteLatency(lat);
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Complete, lat, E_EP);
     return n;

@@ -25,6 +25,7 @@ namespace DySER {
       return "dyser_inst";
     }
 
+    static unsigned Send_Recv_Latency;
   };
 
   // Instructions that execute inside dyser.
@@ -151,6 +152,9 @@ namespace DySER {
       return "dyser_send 1";
     }
 
+    int adjustExecuteLatency(int lat) const {
+      return Send_Recv_Latency;
+    }
   };
 
   class dyser_recv : public dyser_pipe_inst {
@@ -163,6 +167,10 @@ namespace DySER {
 
     std::string getDisasm() const {
       return "dyser_recv";
+    }
+
+    int adjustExecuteLatency(int lat) const {
+      return Send_Recv_Latency;
     }
 
   };
