@@ -1947,8 +1947,18 @@ protected:
     if(true_idle_cycles<0) {
       true_idle_cycles=0;
     }*/
+
+    uint64_t calc_rob_reads=rob_reads;
+    Inst_t* prevInst = getCPDG()->peekPipe(-1); 
+    if(!prevInst) {
+      calc_rob_reads+=totalCycles;
+    } else {
+      calc_rob_reads+=totalCycles-prevInst->cycleOfStage(Inst_t::Commit);
+    }
+    
+
     if(!_isInOrder) {
-      sa(core_node,"ROB_reads",(uint64_t)(rob_reads-idleCycles)*halfSpecFactor);
+      sa(core_node,"ROB_reads",(uint64_t)(calc_rob_reads-idleCycles)*halfSpecFactor);
     } else {
       sa(core_node,"ROB_reads",(uint64_t)0);
     } 

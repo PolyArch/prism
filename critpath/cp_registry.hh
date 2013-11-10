@@ -199,7 +199,7 @@ public:
       int nm = *i;
       for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
         I->second->set_nm(nm);  
-        std::string mcpat_fname=std::string("mcpat/") + _run_name + 
+        std::string mcpat_fname=std::string("mcpat/") + _run_name +
                                   std::to_string(nm) + std::string(".") +
                                   I->first + std::string(".xml");
         I->second->printMcPATxml(mcpat_fname.c_str(),nm);
@@ -218,10 +218,10 @@ public:
         std::cout << I->first << " Dynamic Power(" << nm << "nm)... ";
         std::cout.flush();
   
-        std::string inf = std::string("mcpat/") + _run_name + 
+        std::string inf = std::string("mcpat/") + _run_name +
                            std::to_string(nm) + std::string(".") +
                            I->first + std::string(".xml");
-        std::string outf = std::string("mcpat/") + _run_name + 
+        std::string outf = std::string("mcpat/") + _run_name +
                            I->first + std::string(".out");
   
         execMcPAT(inf,outf);
@@ -239,6 +239,9 @@ public:
   std::string _run_name = "";
   void setRunName(std::string run_name) {
     _run_name = run_name;
+    if(!run_name.empty()) {
+      _run_name+="_";
+    }
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       I->second->setRunName(_run_name);
     }
