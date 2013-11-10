@@ -708,6 +708,9 @@ namespace DySER {
           return insertDySend(op);
         }
         return inst;
+        if (op->isLoad() || op->isStore()) {
+          inst->isAccelerated = true;
+        }
       }
 
       InstPtr prevPipelinedInst = ((useOpMap)
