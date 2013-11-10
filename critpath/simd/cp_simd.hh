@@ -742,8 +742,10 @@ namespace simd {
             inserted(inst);
           }
 
-          // simd_exec_width only for non-mem instruction
-          if (!(op->isLoad() || op->isStore()) && simd_exec_width > 1) {
+          // simd_exec_width only for non-mem, non-ctrl instructions.
+          // FIXME:: Should apply for the instruction -- not just microops
+          if (simd_exec_width > 1
+              && !(op->isLoad() || op->isStore() || op->isCtrl())) {
             for (unsigned i = 1; i < simd_exec_width; ++i) {
               InstPtr inst = createSIMDInst(op);
               updateInstWithTraceInfo(op, inst, false);
