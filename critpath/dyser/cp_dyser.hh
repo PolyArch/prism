@@ -91,6 +91,7 @@ namespace DySER {
     InstPtr createDyComputeInst(Op *op, uint64_t index, SliceInfo *SI) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
                                                           index));
+      dy_compute->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_compute, op);
 
@@ -118,6 +119,7 @@ namespace DySER {
 
     InstPtr createDySinCosInst(Op *op) {
       InstPtr dy_compute = InstPtr(new dyser_sincos_inst());
+      dy_compute->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_compute, op);
       }
@@ -126,6 +128,7 @@ namespace DySER {
 
     InstPtr createDySendInst(Op *op) {
       InstPtr dy_send = InstPtr(new dyser_send());
+      dy_send->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_send, op);
       }
@@ -134,6 +137,7 @@ namespace DySER {
 
     InstPtr createDyRecvInst(Op *op) {
       InstPtr dy_recv = InstPtr(new dyser_recv());
+      dy_recv->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_recv, op);
       }
@@ -142,6 +146,7 @@ namespace DySER {
 
     InstPtr createDyConfigInst(unsigned cyclesToFetch) {
       InstPtr dy_config = InstPtr(new dyser_config(cyclesToFetch));
+      dy_config->isAccelerated = true;
       return dy_config;
     }
 

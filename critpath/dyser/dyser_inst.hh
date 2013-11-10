@@ -15,7 +15,9 @@ namespace DySER {
     typedef T* TPtr;
     typedef E* EPtr;
 
-    dyser_inst(): dg_inst<T, E>() {}
+    dyser_inst(): dg_inst<T, E>() {
+      this->isAccelerated = true;
+    }
 
     dyser_inst(const CP_NodeDiskImage &img, uint64_t index):
       dg_inst<T, E>(img, index) {}
