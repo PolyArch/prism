@@ -25,6 +25,8 @@ namespace DySER {
     std::set<Op*> controlOps;
     std::set<Op*> storeOps;
 
+    std::set<Op*> internalCtrlOps;
+
     std::map<Op*, Op*> coalescedMemNodes;
     std::set<Op*> coalescedMemFirstNodes;
     LoopInfo *LI = 0;
@@ -34,6 +36,10 @@ namespace DySER {
 
     bool isFirstMemNode(Op* op) const {
       return (coalescedMemFirstNodes.count(op) > 0);
+    }
+
+    bool isInternalCtrl(Op* op) const {
+      return internalCtrlOps.count(op);
     }
 
     bool isCoalesced(Op *op) const {
@@ -65,16 +71,17 @@ namespace DySER {
       return 0;
     }
 
-  protected:
 
-    bool checkDisasmHas(Op *op, const char *chkStr) {
+    static bool checkDisasmHas(Op *op, const char *chkStr) {
       uint64_t pc = op->cpc().first;
       int upc = op->cpc().second;
       std::string disasm =  ExecProfile::getDisasm(pc, upc);
       if (disasm.find(chkStr) != std::string::npos)
-        return false;
-      return true;
+        return true;
+      return false;
     }
+
+  protected:
 
     bool checkForBundledNodes(Op *op, Op *nxop, Op *nx2op) {
       if (!op || !nxop || !nx2op)
@@ -158,6 +165,7 @@ namespace DySER {
                 workList.push_back(*OI);
                 IsInLoadSlice[*OI] = true;
               } else {
+                internalCtrlOps.insert(*OI);
                 IsInLoadSlice[*OI] = false;
               }
               if (op->isCtrl())
@@ -253,6 +261,15 @@ namespace DySER {
           if (dumpIOInfo) {
             std::cout << "   use: "; printDasm(UseOp);
           }
+
+          if (checkDisasmHas(op, "RSQRTSS_XMM_XMM") && op == UseOp) {
+            continue; // It is not a use -- spurious use from gem5..
+          }
+          if (checkDisasmHas(op, "CMP_R_R") &&
+              checkDisasmHas(op, "UCOMISS_XMM_XMM")) {
+            continue; // It is not a uses
+          }
+
           if (isInLoadSlice(op)) {
             if (IsInLoadSlice.count(UseOp) && !isInLoadSlice(UseOp))
               if (op->isLoad() || op->isStore() || !shouldIncludeLdUops(op)) {
@@ -271,24 +288,41 @@ namespace DySER {
               // ...
               //  <reg> = xor <reg>, <reg>
               //  or used as part of wide operation
-              // We are assuming it is a spurious use if the use
-              // distance is greater than 50 or the use is not in the
-              // first microop.
-              if ( abs(UseOp->cpc().first - op->cpc().first) <= 50
-                   || UseOp->cpc().second == 0) {
-                IsOutput[op] = true;
-                if (dumpIOInfo) {
-                  std::cout << "          --> output\n";
-                }
+              // We are assuming it is a spurious use if is part of XOR
+              // or MOV
+
+              if (checkDisasmHas(UseOp, "XOR"))
+                continue;
+              if (checkDisasmHas(UseOp, "MOVAPS_XMM_XMM"))
+                continue;
+              IsOutput[op] = true;
+              if (dumpIOInfo) {
+                std::cout << "          --> output used outside the loop\n";
               }
+
               continue;
             }
             if (isInLoadSlice(UseOp)) {
               IsOutput[op] = true;
               if (dumpIOInfo) {
-                std::cout << "          --> output\n";
+                std::cout << "          --> output in the loop\n";
+              }
+              continue;
+            }
+            // used in the CS itself then
+            // -- only a output if rpoIndex(op) < rpoIndex(useop)
+            if (!rpoIndex.count(op) || !rpoIndex.count(UseOp))
+              continue;
+            #if 1
+            // This is not working -- commenting it for cutcp
+            if (rpoIndex[op] >= rpoIndex[UseOp]) {
+              IsOutput[op] = true;
+              if (dumpIOInfo) {
+                std::cout << "          --> output, in loop cs "
+                          << rpoIndex[op] << " --> " << rpoIndex[UseOp] << "\n";
               }
             }
+            #endif
           }
         }
       }
@@ -408,6 +442,9 @@ namespace DySER {
       // all loads belong to LS
       if (disasm.find("MOVSS_XMM_M") != std::string::npos)
         return true;
+      if (disasm.find("MOVSS_XMM_P") != std::string::npos)
+        return true;
+
       return false;
     }
 

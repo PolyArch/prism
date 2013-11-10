@@ -119,8 +119,17 @@ namespace DySER {
       // Take case of ready
       for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
         Op *DepOp = *I;
+
+        if (op == DepOp
+            && SliceInfo::checkDisasmHas(op, "RSQRTSS_XMM_XMM")) {
+          continue;
+        }
+
         InstPtr depInst = getInstForOp(DepOp);
         if (!depInst.get())
+          continue;
+        // we should neve have dependence on dyser_recv -- a spurious use...
+        if (depInst->hasDisasm() && depInst->getDisasm().find("dyser_recv") != std::string::npos)
           continue;
         if (getenv("DUMP_MAFIA_PIPE_DEP")) {
           std::cout << "\t:";  dumpInst(depInst);
@@ -456,6 +465,8 @@ namespace DySER {
         this->completeDySERLoopWithLI(DyLoop, curLoopIter);
       }
 
+      this->cleanupLoopInstTracking();
+
       justSwitchedConfig = false;
 
       if (_lastInst->_ctrl_miss) {
@@ -510,7 +521,6 @@ namespace DySER {
         insert_sliced_inst(SI, op, inst);
       }
       DySERizingLoop = false;
-      cleanupLoopInstTracking();
     }
 
 
@@ -537,6 +547,8 @@ namespace DySER {
           for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
             Op *op = *OI;
             if (isOpMerged(op))
+              continue;
+            if (SI->isInternalCtrl(op))
               continue;
             InstPtr inst = createInst(op->img, 0, op);
             // update cache execution delay if necessary
@@ -584,7 +596,6 @@ namespace DySER {
         }
       }
       DySERizingLoop = false;
-      cleanupLoopInstTracking();
     }
 
     InstPtr _last_dyser_inst = 0;

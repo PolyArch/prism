@@ -126,7 +126,6 @@ namespace DySER {
         InstPtr inst = op_n_Inst.second;
         insert_sliced_inst(SI, op, inst, false);
       }
-      cleanupLoopInstTracking();
     }
 
 
@@ -177,11 +176,19 @@ namespace DySER {
       }
       // we can vectorize 2, 4, 8, 16 .. to max _dyser_vec_len
 
-      if (curLoopIter <= 1
-          || (curLoopIter & (curLoopIter - 1))) {
+      if (curLoopIter <= 3 ) {
         cp_dyser::completeDySERLoopWithLI(LI, curLoopIter);
         return;
       }
+      if (curLoopIter & (curLoopIter - 1)) {
+        // call recursively
+        int loopIter = floor_to_pow2(curLoopIter);
+        assert(loopIter && loopIter >= 4 && loopIter < curLoopIter);
+        completeDySERLoopWithLI(LI, loopIter);
+        completeDySERLoopWithLI(LI, (curLoopIter - loopIter));
+        return;
+      }
+
 
       assert(LI);
       SI = SliceInfo::get(LI, _dyser_size);
@@ -311,7 +318,6 @@ namespace DySER {
         dumpCloneOp2InstMap();
       }
 
-      cleanupLoopInstTracking();
     }
 
     bool isThisOpCoalesced(Op *op) {
