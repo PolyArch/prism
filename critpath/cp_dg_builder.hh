@@ -1037,10 +1037,15 @@ protected:
     }
     if (depInst->_ctrl_miss) {
          bool predict_taken=!predictTaken(*depInst,n);
-      
-        int adjusted_squash_cycles=prev_squash_penalty-2*predict_taken;
-        int insts_to_squash=(prev_squash_penalty-2)*SQUASH_WIDTH;
+     
+        int adjusted_squash_cycles=2;
+        int insts_to_squash=SQUASH_WIDTH;
+        if(!_isInOrder){
+          adjusted_squash_cycles=prev_squash_penalty-2*predict_taken;
+          insts_to_squash=(prev_squash_penalty-2)*SQUASH_WIDTH;
+        }
         squashed_insts+=insts_to_squash;
+
 
         getCPDG()->insert_edge(*depInst, Inst_t::Complete,
                                n, Inst_t::Fetch,
