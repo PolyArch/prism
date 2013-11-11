@@ -1000,7 +1000,7 @@ protected:
 
     // ??? Should I add n._icache_lat?
     Inst_t* depInst = getCPDG()->peekPipe(
-            -(FETCH_TO_DISPATCH_STAGES-1)*FETCH_WIDTH);
+            -(FETCH_TO_DISPATCH_STAGES)*FETCH_WIDTH);
     if(!depInst) {
       return n;
     }
