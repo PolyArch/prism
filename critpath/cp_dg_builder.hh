@@ -106,6 +106,9 @@ public:
 
     } else {
       N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
+      if(ISSUE_WIDTH==2) {
+        N_ALUS=2;
+      }
       N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),4);
       RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),2);
       N_MUL=std::min(std::max(1,ISSUE_WIDTH/2),2);
