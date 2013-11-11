@@ -49,4 +49,4 @@ clean:
 	+make -C critpath -f Makefile.static clean
 
 static: cp
-	make -C critpath -f Makefile.static
+	+make -C critpath -f Makefile.static
