@@ -44,6 +44,7 @@ protected:
   int N_ALUS=6;
   int N_MUL=1;
   int N_FPU=2;
+  int N_MUL_FPU=2;
   int RW_PORTS=2;
 
   int IBUF_SIZE=32;
@@ -54,7 +55,6 @@ protected:
   int _max_mem_lat=1073741824; //some big numbers that will never make sense
   int _max_ex_lat=1073741824;
   int _nm=22;
-
 
   //------- energy events -----------
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
@@ -180,7 +180,7 @@ public:
     FETCH_WIDTH = Prof::get().fetchWidth;
     D_WIDTH = Prof::get().dispatchWidth;
     ISSUE_WIDTH = Prof::get().issueWidth;
-    PEAK_ISSUE_WIDTH = Prof::get().issueWidth+1;
+    PEAK_ISSUE_WIDTH = Prof::get().issueWidth+2;
     WRITEBACK_WIDTH = Prof::get().wbWidth;
     COMMIT_WIDTH = Prof::get().commitWidth;
     SQUASH_WIDTH = Prof::get().squashWidth;
@@ -194,9 +194,20 @@ public:
                                    Prof::get().decodeToRenameDelay +
                                    Prof::get().renameToIEWDelay;
 
+    PIPE_DEPTH=20;
+
     N_ALUS=Prof::get().int_alu_count;
-    N_FPU=Prof::get().mul_div_count;
-    RW_PORTS=Prof::get().fp_alu_count;
+    N_MUL=Prof::get().mul_div_count;
+    N_FPU=Prof::get().fp_alu_count;
+    N_MUL_FPU=Prof::get().fp_mul_div_sqrt_count;
+    RW_PORTS=Prof::get().read_write_port_count;
+
+ 
+    //N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
+    //N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),2);
+    //RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),2);
+
+
   }
 
   virtual ~CriticalPath() {
@@ -302,8 +313,8 @@ public:
     sa(core_node,"fp_issue_width",N_FPU);
 
     sa(core_node,"ALU_per_core", N_ALUS);
-    sa(core_node,"MUL_per_core", N_FPU);
-    sa(core_node,"FPU_per_core", RW_PORTS);
+    sa(core_node,"MUL_per_core", N_MUL);
+    sa(core_node,"FPU_per_core", N_FPU);
 
     sa(core_node,"instruction_window_size", IQ_WIDTH);
     sa(core_node,"fp_instruction_window_size", IQ_WIDTH);

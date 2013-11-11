@@ -93,6 +93,7 @@ public:
       N_ALUS=ISSUE_WIDTH; //only need 1-issue, 2-issue
       N_FPU=1;
       RW_PORTS=1;
+      N_MUL=1;
 
       IBUF_SIZE=16;
       PIPE_DEPTH=16;
@@ -105,8 +106,9 @@ public:
 
     } else {
       N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
-      N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),2);
+      N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),4);
       RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),2);
+      N_MUL=std::min(std::max(1,ISSUE_WIDTH/2),2);
 
       IBUF_SIZE=32;
       PIPE_DEPTH=20;
@@ -292,8 +294,8 @@ protected:
     uint64_t prevCycle=0;
     for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
       uint64_t cycle=*I;
-      if(prevCycle!=0 && cycle-prevCycle>16) {
-        idleCycles+=(cycle-prevCycle-16);
+      if(prevCycle!=0 && cycle-prevCycle>10) {
+        idleCycles+=(cycle-prevCycle-10);
       }
       if (cycle + 100  < curCycle && activityMap.size() > 2) {
         I = activityMap.erase(I);
@@ -398,7 +400,17 @@ protected:
 
     //add to activity
     for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
-      activityMap.insert(inst->cycleOfStage(i));
+      uint64_t cyc = inst->cycleOfStage(i);
+      activityMap.insert(cyc);
+      
+      if(i == Inst_t::Fetch) {
+        activityMap.insert(cyc+3);
+      }
+      if(i == Inst_t::Complete) {
+        activityMap.insert(cyc+2);
+      }
+
+
     }
     cleanUp(_curCycle);
   }
@@ -547,7 +559,6 @@ protected:
   //Adds a resource to the resource utilization map.
   BaseInst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
                        BaseInst_t* cpnode) { 
-
     int fuIndex = fuPoolIdx(opclass);
     FuUsageMap& fuUseMap = fuUsage[fuIndex];
     NodeRespMap& nodeRespMap = nodeResp[fuIndex];
@@ -896,6 +907,17 @@ protected:
     }
   }
 
+  virtual bool predictTaken(Inst_t& dep_n, Inst_t &n) {
+    bool predict_taken = false;
+    if(dep_n._pc == n._pc) {
+      predict_taken = dep_n._upc + 1 != n._upc;
+    } else {
+      predict_taken |= n._pc < dep_n._pc;
+      predict_taken |= n._pc > dep_n._pc+8;//proxy for inst width
+    }
+    return predict_taken;
+  }
+
   //==========FETCH ==============
   //Inorder fetch
   virtual Inst_t &checkFF(Inst_t &n) {
@@ -907,13 +929,7 @@ protected:
 
     if(depInst->_isctrl) {
       //check if previous inst was a predict taken branch
-      bool predict_taken = false;
-      if(depInst->_pc == n._pc) {
-        predict_taken = depInst->_upc +1 != n._pc;
-      } else {
-        predict_taken |= n._pc < depInst->_pc;
-        predict_taken |= n._pc > depInst->_pc+8;//proxy for inst width
-      }
+      bool predict_taken=predictTaken(*depInst,n);
       if(predict_taken && lat==0) {
         lat+=1;
       }
@@ -984,7 +1000,7 @@ protected:
 
     // ??? Should I add n._icache_lat?
     Inst_t* depInst = getCPDG()->peekPipe(
-            -FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH);
+            -(FETCH_TO_DISPATCH_STAGES-1)*FETCH_WIDTH);
     if(!depInst) {
       return n;
     }
@@ -1020,10 +1036,17 @@ protected:
       return n;
     }
     if (depInst->_ctrl_miss) {
+         bool predict_taken=!predictTaken(*depInst,n);
+      
+        int adjusted_squash_cycles=prev_squash_penalty-2*predict_taken;
+        int insts_to_squash=(prev_squash_penalty-2)*SQUASH_WIDTH;
+        squashed_insts+=insts_to_squash;
+
         getCPDG()->insert_edge(*depInst, Inst_t::Complete,
                                n, Inst_t::Fetch,
-                               n._icache_lat + //don't add in the icache latency?
-          prev_squash_penalty + 1,E_CM); //two to commit, 1 to 
+                               //n._icache_lat + prev_squash_penalty 
+                               std::max((int)n._icache_lat, adjusted_squash_cycles)
+                               + 1,E_CM); //two to commit, 1 to 
 
         //we need to make sure that the processor stays active during squash
         uint64_t i=depInst->cycleOfStage(Inst_t::Complete);
@@ -1045,7 +1068,7 @@ protected:
     InstQueue.erase(InstQueue.begin(),upperbound);
 
     //Next, check if the IQ is full
-    if (InstQueue.size() < (unsigned)IQ_WIDTH-1) {
+    if (InstQueue.size() < (unsigned)IQ_WIDTH) {
       return n;
     }
 
@@ -1340,7 +1363,7 @@ protected:
     case 7: //FloatMult
     case 8: //FloatDiv
     case 9: //FloatSqrt
-      return N_FPU;
+      return N_MUL_FPU;
     case 30: //MemRead
     case 31: //MemWrite
       return RW_PORTS;
@@ -1523,16 +1546,24 @@ protected:
       
 #if 0
       int insts_to_squash=instsToSquash();
-      int squash_cycles = squashCycles(insts_to_squash);
-      int recheck_cycles = squash_cycles-1;
+      int squash_cycles = squashCycles(insts_to_squash)/2;
+      int recheck_cycles = squash_cycles;
 
 
-      if(recheck_cycles < 3) {
-        recheck_cycles=3;
+      if(recheck_cycles < 7) {
+        recheck_cycles=7;
       }
+
+      if(recheck_cycles > 9) {
+        recheck_cycles=9;
+      }
+
 #else
-      int insts_to_squash=FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH;
-      int recheck_cycles=FETCH_TO_DISPATCH_STAGES;
+      //int insts_to_squash=FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH;
+      //int recheck_cycles=FETCH_TO_DISPATCH_STAGES;
+      int insts_to_squash=13;
+      int recheck_cycles=9;
+
 #endif
 
       assert(recheck_cycles>=1); 
@@ -1574,7 +1605,14 @@ protected:
 
         //std::cout << insts_to_squash << "," << rechecks << "\n";
         //squashed_insts+=rechecks*(insts_to_squash*0.8);
-        squashed_insts+=(rechecks*insts_to_squash)/(FETCH_TO_DISPATCH_STAGES+1);
+        squashed_insts+=insts_to_squash+(rechecks-1)*insts_to_squash/1.5;
+
+        //we need to make sure that the processor stays active during squash
+        uint64_t i=sh_dummy_inst->cycleOfStage(Inst_t::Execute);
+        for(;i<n->cycleOfStage(Inst_t::Execute);++i) {
+          activityMap.insert(i);
+        }
+
 
       }
     } else { //if store
@@ -1844,23 +1882,30 @@ protected:
     if (n._ctrl_miss) {
 
         int insts_to_squash=instsToSquash();
-        squashed_insts+=insts_to_squash;
-
         int squash_cycles = squashCycles(insts_to_squash); 
-
+        
 
         //int squash_cycles = (rob_head_at_dispatch + 1- 12*rob_growth_rate)/SQUASH_WIDTH;
 
         if(squash_cycles<5) {
           squash_cycles=5;
-        } else if (squash_cycles > (ROB_SIZE-10)/SQUASH_WIDTH) {
+        } /*else if (squash_cycles > (ROB_SIZE-10)/SQUASH_WIDTH) {
           squash_cycles = (ROB_SIZE-10)/SQUASH_WIDTH;
+        }*/
+
+        uint64_t rob_insert_cycle = n.cycleOfStage(Inst_t::Dispatch)-1;
+        uint64_t complete_cycle = n.cycleOfStage(Inst_t::Complete);
+        uint64_t max_cycles = ((complete_cycle-rob_insert_cycle)*ISSUE_WIDTH*.9)/SQUASH_WIDTH + 2;
+
+        if(squash_cycles > max_cycles) {
+          squash_cycles=max_cycles;
         }
+
 
         //add two extra cycles, because commit probably has to play catch up
         //because it can't commit while squashing
         getCPDG()->insert_edge(n, Inst_t::Complete,
-                               n, Inst_t::Commit,squash_cycles+2,E_SQUA);
+                               n, Inst_t::Commit,squash_cycles+1,E_SQUA);
 
         prev_squash_penalty=squash_cycles;
     }

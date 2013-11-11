@@ -46,8 +46,11 @@ for row1,row2 in izip(reader1,reader2):
   rinst=inst%bufsize
   #bookkeeping
   for stage in range(6):
-    pipe1[stage][rinst]=int(row1[stage+1])
-    pipe2[stage][rinst]=int(row2[stage+1])
+    mod=1
+    if inst == 1:
+      mod=0
+    pipe1[stage][rinst]=int(row1[stage+mod])
+    pipe2[stage][rinst]=int(row2[stage+mod])
     sdiff[stage]=filterDiff(inst,stage,1,0,1)
     if stage != 0:
       idiff[stage-1]=(pipe2[stage][rinst]-pipe2[stage-1][rinst]) - \

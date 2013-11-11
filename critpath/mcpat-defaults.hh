@@ -76,7 +76,7 @@ static const char * xml_str = R"(
 			Theses parameters are reserved for future use.--> 
 			<param name="pipelines_per_core" value="1,1"/>
 			<!--integer_pipeline and floating_pipelines, if the floating_pipelines is 0, then the pipeline is shared-->
-			<param name="pipeline_depth" value="16,16"/>
+			<param name="pipeline_depth" value="20,20"/>
 			<!-- pipeline depth of int and fp, if pipeline is shared, the second number is the average cycles of fp ops -->
 			<!-- issue and exe unit-->
 			<param name="ALU_per_core" value="6"/>
