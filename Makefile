@@ -1,6 +1,6 @@
 
 
-.PHONY: all clean cp lp base simd dyser ccores beret
+.PHONY: all clean cp lp base simd dyser ccores beret static
 
 all: cp simd base dyser ccores beret super disasm verbose
 
@@ -46,3 +46,7 @@ clean:
 	+make -C critpath/super clean
 	+make -C critpath/disasm clean
 	+make -C critpath/verbose clean
+	+make -C critpath -f Makefile.static clean
+
+static: cp
+	make -C critpath -f Makefile.static

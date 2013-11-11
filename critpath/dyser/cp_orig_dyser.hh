@@ -37,12 +37,12 @@ public:
   // Handle enrgy events for McPAT XML DOC
   virtual void printAccelMcPATxml(std::string fname_base, int nm) {
       uint64_t _dyser_int_ops =
-        Prof::get().getStatFromMap<uint64_t>("numDyIntOps");
+        Prof::get().getStatFromMap<uint64_t>("dyIntOps");
 
       uint64_t _dyser_fp_ops =
-        Prof::get().getStatFromMap<uint64_t>("numDyFloatOps");
+        Prof::get().getStatFromMap<uint64_t>("dyFloatOps");
       uint64_t _dyser_mult_ops =
-        Prof::get().getStatFromMap<uint64_t>("numDyMultOps");
+        Prof::get().getStatFromMap<uint64_t>("dyMultOps");
       uint64_t _dyser_regfile_reads =
         Prof::get().getStatFromMap<uint64_t>("numDyIntReads");
       uint64_t _dyser_regfile_writes =

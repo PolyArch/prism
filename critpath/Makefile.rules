@@ -35,6 +35,10 @@ quiet_cmd_cxx_o_cxx = "	[CC]			$(notdir $<)"
 quiet_cmd_ccld_out = "	[CCLD]			$@"
 	cmd_ccld_out	 = $(CXX) $(CFLAGS) $(LDFLAGS) $(SHLDFLAGS) -o $@ $(OBJ)  $(LIBS)
 
+quiet_cmd_ccld_static_out = "	[CCLD]	-static		$@"
+	cmd_ccld_static_out	 = $(CXX) $(CFLAGS) $(LDFLAGS) $(SHLDFLAGS) -o $@ $(OBJ)  $(LIBS)
+
+
 quiet_cmd_ccld_out_so = "	[CCLD]  -shared		$@"
 	cmd_ccld_out_so	 = $(CXX)  $(LDFLAGS) -shared -fPIC  -o $@ $(OBJ) $(LIBS)
 
@@ -44,6 +48,15 @@ quiet_cmd_mkdir = "	[MKDIR]			$@"
 
 .PHONY: clean install
 
+ifdef STATIC_BINARY
+
+$(STATIC_BINARY): $(OBJ)
+	@echo $($(quiet)cmd_ccld_static_out)
+	@$(cmd_ccld_static_out)
+
+clean:
+	-rm -f $(STATIC_BINARY) *.o *.d ${OBJ}
+else
 ifdef BINARY
 $(BINARY): $(OBJ)
 	@echo $($(quiet)cmd_ccld_out)
@@ -84,6 +97,8 @@ install:
 
 clean:
 	-rm -f *.o *.d *.so
+
+endif
 
 endif
 

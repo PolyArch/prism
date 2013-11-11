@@ -1,0 +1,40 @@
+
+LEVEL = ./
+
+SRC := critpath.cpp \
+	gzstream.cpp \
+	prof.cpp \
+	plugin.cpp \
+	origcp.cpp \
+	exec_profile.cpp \
+	../loopprof/pathprof.cpp \
+	../loopprof/op.cpp \
+	../loopprof/bb.cpp \
+	../loopprof/loopinfo.cpp \
+	../loopprof/functioninfo.cpp \
+	../loopprof/lpanalysis.cpp \
+	base/cp_base.cpp \
+	beret/cp_beret.cpp \
+	ccores/cp_ccores.cpp \
+	disasm/cp_disasm.cpp \
+	dyser/cp_dyser.cpp \
+	dyser/sliceinfo.cpp \
+	simd/cp_simd.cpp \
+	super/cp_super.cpp \
+	verbose/cp_verbose.cpp
+
+OBJ := $(patsubst %.cpp, %.o, $(SRC))
+
+LIBS := -lz  -lboost_serialization -ldl -ltcmalloc_minimal
+
+
+LDFLAGS := -static -pthread $(EXFLAGS) \
+           -L/unsup/gperftools-2.0/amd64_rhel6/lib/ \
+           -L/s/boost-1.54.0/lib
+
+STATIC_BINARY = stcp
+
+
+include $(LEVEL)/Makefile.rules
+
+-include $(OBJ:.o=.d)
