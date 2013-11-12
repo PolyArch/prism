@@ -50,7 +50,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
       CP_NodeDiskImage& img = cp_array[ind];
 
       CPC cpc = std::make_pair(cp_array[ind]._pc,
-                               cp_array[ind]._upc);
+                               (uint8_t)cp_array[ind]._upc);
 
       if(cpc.first==0) {
         break; //unreal instructions should be ignored

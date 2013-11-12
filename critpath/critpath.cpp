@@ -246,7 +246,7 @@ int main(int argc, char *argv[])
     if (count == 0)
       img._fc = 0;
 
-    CPC cpc = make_pair(img._pc, img._upc);
+    CPC cpc = make_pair(img._pc, (uint8_t)img._upc);
     Op* op = Prof::get().processOpPhase3(cpc, prevCall, prevRet);
     //if (op && op->img._pc == 0) {
     //  op->img = img;
