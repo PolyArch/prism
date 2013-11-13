@@ -75,7 +75,8 @@
   X(DyFU,  "DyFU", "DySER Functional unit pipelined")           \
   X(DyEP,  "DyEP", "DySER Functional Execute to complete")      \
   X(DyPP,  "DyPP", "DySER Complete To Complete")                \
-  X(DyCR,  "DyCR", "DySER Commit to ready")
+  X(DyCR,  "DyCR", "DySER Commit to ready")                     \
+  X(NPUFE, "NPUFE", "NPU Fake Edges")
 
 
 #define X(a, b, c) E_ ## a,

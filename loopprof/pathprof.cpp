@@ -644,7 +644,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
 
   if(isCall && call_fi && call_op) {
     sf.funcInfo()->calledByOp(call_fi,call_op);
-    call_op->setCalledFuncName(sf.funcInfo()->nice_name());
+    call_op->setCalledFunc(sf.funcInfo());
   }
 
   //check inst/execution statistics

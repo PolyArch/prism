@@ -23,7 +23,7 @@ namespace simd {
     typedef dg_edge_impl_t<T> E;
     typedef dg_inst<T, E> Inst_t;
     typedef std::shared_ptr<Inst_t> InstPtr;
-    typedef std::shared_ptr<simd_inst> SimdInstPtr;
+
 
     dep_graph_impl_t<Inst_t, T, E> cpdg;
 

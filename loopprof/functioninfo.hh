@@ -124,14 +124,14 @@ public:
   void setSymbol(prof_symbol* sym) { _sym=sym;}
   prof_symbol* symbol() {return _sym;}
 
-  std::string nice_name() {
-    if(_sym!=0) {
+  std::string nice_name() const {
+    if (_sym != 0) {
       return ELF_parser::demangle(_sym->name.c_str());
-    } else {
-      std::stringstream ss;
-      ss << _id;
-      return ss.str();
     }
+
+    std::stringstream ss;
+    ss << _id;
+    return ss.str();
   }
 
   void setCanRecurse(bool b) {

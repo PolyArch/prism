@@ -33,6 +33,8 @@ disasm:
 
 verbose:
 	+make -C critpath/verbose
+npu:
+	+make -C critpath/npu
 
 
 clean:
@@ -46,6 +48,7 @@ clean:
 	+make -C critpath/super clean
 	+make -C critpath/disasm clean
 	+make -C critpath/verbose clean
+	+make -C critpath/npu clean
 	+make -C critpath -f Makefile.static clean
 
 static: cp

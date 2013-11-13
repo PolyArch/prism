@@ -78,7 +78,7 @@ private:
   //Subgraph* _subgraph;
   uint64_t _effAddr = 0;
   int stride = 0;
-  std::string _calledFuncName = "";
+  FunctionInfo *_calledFunc = 0;
   enum stride_value_type { st_Unknown, st_Constant, st_Variable, st_Cycle };
   enum stride_value_type stride_ty = st_Unknown;
   friend class boost::serialization::access;
@@ -87,8 +87,8 @@ private:
   void serialize(Archive & ar, const unsigned int version) {
     uint8_t temp_flags = _flags.to_ulong();
 
-    void* img_ptr = reinterpret_cast<void*>(&img); 
-    ar & boost::serialization::make_binary_object(img_ptr, 
+    void* img_ptr = reinterpret_cast<void*>(&img);
+    ar & boost::serialization::make_binary_object(img_ptr,
                                                   sizeof(CP_NodeDiskImage));
 
 
@@ -172,12 +172,11 @@ public:
 
   //std::vector<eainfo> effAddrAccessed;
 
-  void setCalledFuncName(std::string fnname) {
-    _calledFuncName = fnname;
+  void setCalledFunc(FunctionInfo *callFn) {
+    _calledFunc = callFn;
   }
-  std::string getCalledFuncName() const {
-    return _calledFuncName;
-  }
+
+  std::string getCalledFuncName() const;
 
   void printEffAddrs() {
     return ;

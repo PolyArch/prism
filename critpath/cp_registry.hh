@@ -21,6 +21,7 @@ private:
   std::map<std::string, std::vector<std::pair<bool, ArgumentHandler*>> >
     register_arg_map;
   std::map<std::string, bool> cp2Enabled;
+  std::map<std::string, bool> cp2RequestOnly;
   CriticalPath* baselineCP=NULL;
 
 public:
@@ -94,14 +95,26 @@ public:
     }
   }
 
-  void pruneCP(bool inorder, bool ooo) {
+  void pruneCP(bool inorder, bool ooo, bool allModels) {
+
     assert((inorder || ooo) && "both inorder and ooo are false.");
-    // erase inorder, ooo
+
+    if (!allModels) {
+      // erase inorder, ooo
+      for (auto i = cpmap.begin(); i != cpmap.end(); ) {
+        bool isInorder = i->second->isInOrder();
+        if ((isInorder && !inorder) // no inorder allowed
+            || (!isInorder && !ooo) // no ooo allowed
+            || !cp2Enabled[i->first]) //specific
+          i = cpmap.erase(i);
+        else
+          ++i;
+      }
+      return;
+    }
+    // erase models that should execute only if requested.
     for (auto i = cpmap.begin(); i != cpmap.end(); ) {
-      bool isInorder = i->second->isInOrder();
-      if ((isInorder && !inorder) // no inorder allowed
-          || (!isInorder && !ooo) // no ooo allowed
-          || !cp2Enabled[i->first]) //specific
+      if (cp2RequestOnly[i->first] && !cp2Enabled[i->first])
         i = cpmap.erase(i);
       else
         ++i;
@@ -116,7 +129,8 @@ public:
 
 
   void register_cp(std::string name, CriticalPath *cp,
-                   bool EnableByDefault, bool isBaseline) {
+                   bool EnableByDefault, bool isBaseline,
+                   bool EnableIfRequested) {
     std::string fullname;
     if(cp->isInOrder()) {
        fullname="inorder-"+name;
@@ -130,6 +144,7 @@ public:
     cpmap[fullname.c_str()] = cp;
     cp->setName(fullname);
     cp2Enabled[fullname] = EnableByDefault;
+    cp2RequestOnly[fullname] = EnableIfRequested;
 
     if (isBaseline) {
       baselineCP = cp;
@@ -304,12 +319,14 @@ struct RegisterCP
   RegisterCP(const char *N,
              bool attachInorder = false,
              bool EnableByDefault = false,
-             bool isBaseline = false) {
+             bool isBaseline = false,
+             bool EnableIfRequested = false) {
     cp_obj.setInOrder(attachInorder);
     CPRegistry::get()->register_cp(std::string(N),
                                    &cp_obj,
                                    EnableByDefault,
-                                   isBaseline);
+                                   isBaseline,
+                                   EnableIfRequested);
   }
 };
 
