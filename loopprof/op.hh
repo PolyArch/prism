@@ -109,6 +109,7 @@ private:
     ar & stride_ty;
     ar & _sameEffAddrOpSet;
     ar & _nextEffAddrOpSet;
+    ar & _calledFunc;
 
     _flags = std::bitset<8>(temp_flags);
 

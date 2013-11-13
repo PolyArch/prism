@@ -37,6 +37,7 @@ int main(int argc, char *argv[])
   int nm = 0;
   int max_mem_lat=1073741824; //some big numbers that will never make sense
   int max_ex_lat=1073741824;
+  uint64_t progress_granularity = 10000;
 
   load_plugins(argv[0]);
 
@@ -61,6 +62,7 @@ int main(int argc, char *argv[])
       {"max-ex-lat", required_argument, 0, 6},
       {"max-mem-lat", required_argument, 0, 7},
       {"nm", required_argument, 0, 8},
+      {"progress", required_argument, 0, 'p'},
       {0,0,0,0}
     };
 
@@ -138,6 +140,13 @@ int main(int argc, char *argv[])
                   << optarg << "\" is not valid for --models."
                   << "Options are inorder, ooo, or both.\n";
       }
+    case 'p': {
+      progress_granularity = atoi(optarg);
+      if (progress_granularity == 0) {
+        progress_granularity = 10000;
+      }
+      break;
+    }
     case '?': break;
     default:
       abort();
@@ -201,9 +210,8 @@ int main(int argc, char *argv[])
   }
   Prof::get().procConfigFile(configfile.c_str());
 
-  if(!allModels) {
-    CPRegistry::get()->pruneCP(inorder_model, ooo_model);
-  }
+  CPRegistry::get()->pruneCP(inorder_model, ooo_model, allModels);
+
   CPRegistry::get()->setDefaults();
 
   if(inorderWidth > 0) {
@@ -217,6 +225,7 @@ int main(int argc, char *argv[])
 
   uint64_t count = 0;
   uint64_t numCycles =  0;
+
 
   bool prevCall=true;
   bool prevRet=false;
@@ -269,7 +278,7 @@ int main(int argc, char *argv[])
     if (count == max_inst || count == Prof::get().stopInst)
       break;
 
-    if (count && count % 100000 == 0) {
+    if (count && (count % progress_granularity) == 0) {
       std::cout << "processed " << count << "\n";
     }
   }

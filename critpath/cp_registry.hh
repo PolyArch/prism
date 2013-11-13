@@ -22,6 +22,7 @@ private:
     register_arg_map;
   std::map<std::string, bool> cp2Enabled;
   std::map<std::string, bool> cp2RequestOnly;
+  std::map<std::string, bool> cp2ArgsEnabled;
   CriticalPath* baselineCP=NULL;
 
 public:
@@ -36,11 +37,13 @@ public:
   {
     if (cp2Enabled.count(argv)) {
       cp2Enabled[argv] = true;
+      cp2ArgsEnabled[argv] = true;
       return;
     }
     if (strncmp(argv, "no-", 3) == 0 && argv[3]) {
       if (cp2Enabled.count(&argv[3])) {
         cp2Enabled[&argv[3]] = false;
+        cp2ArgsEnabled[&argv[3]] = false;
         return;
       }
       if (chkForBothModel) {
@@ -114,9 +117,14 @@ public:
     }
     // erase models that should execute only if requested.
     for (auto i = cpmap.begin(); i != cpmap.end(); ) {
+      // if plugin is not requested -- remove it.
       if (cp2RequestOnly[i->first] && !cp2Enabled[i->first])
         i = cpmap.erase(i);
-      else
+      else if (cp2ArgsEnabled.count(i->first)
+               && !cp2ArgsEnabled[i->first]) {
+        // we are specifically asked to disable.
+        i = cpmap.erase(i);
+      } else
         ++i;
     }
   }
