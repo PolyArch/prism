@@ -153,14 +153,17 @@ int main(int argc, char *argv[])
   //determine the prof file name
   std::string prof_file(argv[optind]);
   size_t start_pos = prof_file.find_last_of("/");
-
+  size_t lp_start_pos=start_pos;
+  if (start_pos == string::npos) {
+    lp_start_pos=0;
+  }
   if (binary_name != "")
     Prof::get().procSymTab(binary_name.c_str());
 
   //open prof file
   bool hasLoopProfile = false;
   if (!gen_loop_prof) {
-    size_t dot_pos =  prof_file.find(".", start_pos);
+    size_t dot_pos =  prof_file.find(".", lp_start_pos);
     prof_file = ((dot_pos == string::npos)
                  ? prof_file
                  : prof_file.substr(0, dot_pos));
