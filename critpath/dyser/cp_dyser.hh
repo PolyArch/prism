@@ -707,10 +707,10 @@ namespace DySER {
           // Insert a dyser send instruction to pipeline
           return insertDySend(op);
         }
-        return inst;
         if (op->isLoad() || op->isStore()) {
           inst->isAccelerated = true;
         }
+        return inst;
       }
 
       InstPtr prevPipelinedInst = ((useOpMap)
