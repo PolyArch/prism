@@ -952,6 +952,8 @@ namespace simd {
         inserted(inst);    // Book keeping
       } else {
         // Create the instruction -- but donot track op <-> inst
+        //std::cout << "vector Adding instruction with index:: " << index << "\n";
+
         InstPtr inst = createInst(img, index, 0);
         getCPDG()->addInst(inst, index);
         trackLoopInsts(li, op, inst, img);

@@ -210,6 +210,7 @@ public:
                            std::to_string(nm) + std::string(".") +
                            I->first + std::string(".xml");
         std::string outf = std::string("mcpat/") + _run_name +
+                           std::to_string(nm) + std::string(".") +
                            I->first + std::string(".out");
   
         execMcPAT(inf,outf);
