@@ -2013,7 +2013,11 @@ protected:
     
 
     if(!_isInOrder) {
-      sa(core_node,"ROB_reads",(uint64_t)(calc_rob_reads-idleCycles)*halfSpecFactor);
+      if(idleCycles < calc_rob_reads) {
+        sa(core_node,"ROB_reads",(uint64_t)(calc_rob_reads-idleCycles)*halfSpecFactor);
+      } else {
+        sa(core_node,"ROB_reads",0);
+      }
     } else {
       sa(core_node,"ROB_reads",(uint64_t)0);
     } 
