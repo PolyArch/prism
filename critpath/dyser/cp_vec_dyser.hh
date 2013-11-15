@@ -28,6 +28,7 @@ namespace DySER {
     unsigned _dyser_vec_len = 16;
     bool nonStrideAccessLegal = false;
     bool countDepthNodesForConfig = false;
+
   public:
     cp_vec_dyser() : cp_dyser() { }
     virtual ~cp_vec_dyser() { }
@@ -234,8 +235,9 @@ namespace DySER {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
           Op *op = *OI;
-          if (isOpMerged(op))
+          if (isOpMerged(op)) {
             continue;
+          }
           InstPtr inst = createInst(op->img, 0, op);
           updateInstWithTraceInfo(op, inst, false);
           //dumpInst(inst);

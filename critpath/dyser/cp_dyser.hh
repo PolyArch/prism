@@ -25,6 +25,9 @@ namespace DySER {
     typedef dg_inst<T, E> Inst_t;
     typedef std::shared_ptr<Inst_t> InstPtr;
 
+    uint64_t _num_loads = 0;
+    uint64_t _num_stores = 0;
+
     enum MODEL_STATE {
       IN_CPU = 0,
       IN_DYSER = 1
@@ -95,12 +98,19 @@ namespace DySER {
       if (op) {
         keepTrackOfInstOpMap(dy_compute, op);
 
-        if (op->img._floating)
-          ++ _dyser_fp_ops;
-        else if (op->img._opclass == 2)
-          ++ _dyser_mult_ops;
-        else
-          ++ _dyser_int_ops;
+        if (SI->shouldIncludeInCSCount(op)) {
+          switch(dy_compute->_opclass) {
+          default: break;
+
+          case 3:
+          case 1: ++_dyser_int_ops; break;
+          case 2: ++_dyser_int_ops; ++_dyser_mult_ops; break;
+
+          case 4:  case 5:
+          case 6:  case 7:
+          case 8:  case 9: ++ _dyser_fp_ops; break;
+          }
+        }
 
         for (auto OI = op->d_begin(), OE = op->d_end(); OI != OE; ++OI) {
           Op *DepOp = *OI;
@@ -787,6 +797,44 @@ namespace DySER {
       CP_OPDG_Builder<T, E>::cleanupLoopInstTracking();
       _iCacheLat.clear();
     }
+
+    void pushPipe(InstPtr &inst) {
+      CP_OPDG_Builder<T, E>::pushPipe(inst);
+      if (inst->_isload) {
+        ++_num_loads;
+      } else if (inst->_isstore) {
+        ++_num_stores;
+      }
+    }
+
+    void setEnergyEvents(pugi::xml_document &doc, int nm) {
+      CP_OPDG_Builder<T, E>::setEnergyEvents(doc, nm);
+
+      pugi::xml_node system_node =
+        doc.child("component").find_child_by_attribute("name","system");
+      pugi::xml_node core_node =
+        system_node.find_child_by_attribute("name","core0");
+
+          // ---------- icache --------------
+      pugi::xml_node dcache_node =
+        core_node.find_child_by_attribute("name", "dcache");
+      sa(dcache_node, "read_accesses",   _num_loads);
+      sa(dcache_node, "write_accesses", _num_stores);
+
+      double read_miss_rate = ((Prof::get().dcacheReads != 0)?
+                               ((double)Prof::get().dcacheReadMisses
+                                / (double)Prof::get().dcacheReads): 0.0);
+      double write_miss_rate = ((Prof::get().dcacheReads != 0)?
+                                ((double)Prof::get().dcacheReadMisses
+                                 / (double)Prof::get().dcacheReads): 0.0);
+
+      uint64_t read_misses = _num_loads * read_miss_rate;
+      uint64_t write_misses = _num_stores * write_miss_rate;
+
+      sa(dcache_node, "read_misses", read_misses);
+      sa(dcache_node, "write_misses", write_misses);
+    }
+
 
     virtual void calcAccelEnergy(std::string fname_base, int nm) {
       std::string fname=fname_base + std::string(".accel");

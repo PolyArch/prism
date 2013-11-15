@@ -290,7 +290,7 @@ public:
 
   virtual void setEnergyEvents(pugi::xml_document& doc,int nm) {
     std::stringstream ss;
-    pugi::xml_node system_node = 
+    pugi::xml_node system_node =
       doc.child("component").find_child_by_attribute("name","system");
 
     uint64_t busyCycles=Prof::get().numCycles-Prof::get().idleCycles;
