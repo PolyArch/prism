@@ -887,14 +887,18 @@ protected:
         }
       }
     }
+    setEnergyStatsPerInst(inst);
+  }
 
-    committed_insts++;
-    committed_int_insts+=!inst._floating;
-    committed_fp_insts+=inst._floating;
-    committed_branch_insts+=inst._isctrl;
-    committed_load_insts+=inst._isload;
-    committed_store_insts+=inst._isstore;
-    func_calls+=inst._iscall;
+  virtual void setEnergyStatsPerInst(Inst_t& inst)
+  {
+    ++committed_insts;
+    committed_int_insts += !inst._floating;
+    committed_fp_insts += inst._floating;
+    committed_branch_insts += inst._isctrl;
+    committed_load_insts += inst._isload;
+    committed_store_insts += inst._isstore;
+    func_calls += inst._iscall;
   }
 
   virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {

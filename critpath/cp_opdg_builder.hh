@@ -95,7 +95,8 @@ public:
 
   virtual Inst_t &checkRegisterDependence(Inst_t &n) {
     if (!(useOpDependence() || usePipeDependence()
-          || useInstListDependence()))
+          || useInstListDependence()
+          || n.hasOperandInsts()))
       return CP_DG_Builder<T, E>::checkRegisterDependence(n);
 
     if (usePipeDependence()) {
@@ -124,6 +125,15 @@ public:
       return n;
     }
 
+    if (n.hasOperandInsts()) {
+      for (auto I = n.op_begin(), IE = n.op_end(); I != IE; ++I) {
+        auto inst = *I;
+        getCPDG()->insert_edge(*inst, inst->eventComplete(),
+                               n, Inst_t::Ready, 0, E_RDep);
+      }
+      return n;
+    }
+
     Op *op = getOpForInst(n);
     if (!op) {
       assert(n.hasDisasm() && n.getDisasm() == "dyser_config");
@@ -143,8 +153,17 @@ public:
 
   // Override DataDependence Check
   virtual Inst_t &checkMemoryDependence(Inst_t &n) {
-    if (!useOpDependence())
+    if (!useOpDependence() && !n.hasMemOperandInsts())
       return CP_DG_Builder<T, E>::checkMemoryDependence(n);
+
+    if (n.hasMemOperandInsts()) {
+      for (auto I = n.mem_op_begin(), IE = n.mem_op_end(); I != IE; ++I) {
+        std::shared_ptr<dg_inst_base<T, E> > inst = *I;
+        Inst_t *depInst = dynamic_cast<Inst_t*>(inst.get());
+        this->insert_mem_dep_edge(*depInst, n);
+      }
+      return n;
+    }
 
     Op *op = getOpForInst(n);
 
@@ -252,6 +271,21 @@ protected:
       else
         _ctrlMiss[op] = inst->_ctrl_miss;
     }
+
+    // cache the op in the insts
+    {
+      const int NumProducer = 7;
+      for (int i = 0; i < NumProducer; ++i) {
+        unsigned prod = inst->_prod[i];
+        if (prod <= 0 || prod >= inst->index())
+          continue;
+        inst->addOperandInst(getCPDG()->queryInst(inst->index() - prod));
+      }
+      if (inst->_mem_prod > 0 && inst->_mem_prod < inst->index()) {
+        inst->addMemOperandInst(getCPDG()->queryInst(inst->index()
+                                                     - inst->_mem_prod));
+      }
+    }
   }
 
   virtual void updateInstWithTraceInfo(Op *op, InstPtr inst,
@@ -285,6 +319,11 @@ protected:
   }
 
   virtual void cleanupLoopInstTracking() {
+    for (auto I = _loop_InstTrace.begin(), IE = _loop_InstTrace.end();
+         I != IE; ++I) {
+      InstPtr inst = I->second;
+      inst->clearOperandInsts();
+    }
     _loop_InstTrace.clear();
     _cacheLat.clear();
     _trueCacheProd.clear();

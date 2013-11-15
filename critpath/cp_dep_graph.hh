@@ -185,7 +185,40 @@ public:
   virtual unsigned memComplete() {return (unsigned)-1;} //return the index of when the memory operation is ready
 
   virtual unsigned eventCommit() {return numStages()-1;}
-  
+
+  typedef std::vector<std::shared_ptr< dg_inst_base<T, E> > > oplist_t;
+  typedef typename oplist_t::iterator op_iterator;
+
+protected:
+  oplist_t _operands;
+  oplist_t _mem_operands;
+
+public:
+  void addOperandInst(std::shared_ptr< dg_inst_base<T, E> > op) {
+    _operands.push_back(op);
+  }
+  void addMemOperandInst(std::shared_ptr< dg_inst_base<T, E> > op) {
+    _mem_operands.push_back(op);
+  }
+
+  void clearOperandInsts() {
+    _operands.clear();
+    _mem_operands.clear();
+  }
+  bool hasOperandInsts() const {
+    return !_operands.empty();
+  }
+  bool hasMemOperandInsts() const {
+    return !_mem_operands.empty();
+  }
+
+
+  op_iterator op_begin() { return _operands.begin(); }
+  op_iterator op_end() { return _operands.end(); }
+
+  op_iterator mem_op_begin() { return _mem_operands.begin(); }
+  op_iterator mem_op_end()   { return _mem_operands.end();   }
+
 };
 
 template<typename T, typename E>
@@ -372,9 +405,8 @@ public:
       events[i].remove_all_edges();
     }
   }
-  
-  bool isMem() {return this->_isload || this->_isstore;}
 
+  bool isMem() {return this->_isload || this->_isstore;}
 };
 
 // Implementation of DYNOP Type, inerits from generic node
@@ -635,6 +667,8 @@ public:
   /*  virtual void insert_ff_edge(uint64_t srcIdx,
                               uint64_t destIdx, unsigned len) = 0;*/
   virtual dg_inst_base<T,E>& queryNodes(uint64_t idx) = 0;
+
+  virtual std::shared_ptr< dg_inst_base<T, E> > queryInst(uint64_t idx) = 0;
   virtual uint64_t getMaxCycles() =0;
   //virtual void printInstEvents(uint64_t index, std::ostream& out) = 0;
 
@@ -714,6 +748,13 @@ public:
 
     int vec_ind = idx % BSIZE;
     return *_vec[vec_ind];
+  }
+  std::shared_ptr< dg_inst_base<T, E> > queryInst(uint64_t idx)
+  {
+    if (hasIdx(idx)) {
+      return _vec[idx % BSIZE];
+    }
+    return 0;
   }
 
   virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,
