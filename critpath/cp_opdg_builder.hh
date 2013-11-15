@@ -244,7 +244,7 @@ protected:
     {}
   };
 
-  std::vector< _InstInfo<Op*, InstPtr, CP_NodeDiskImage> > _loop_InstTrace;
+  std::list< _InstInfo<Op*, InstPtr, CP_NodeDiskImage> > _loop_InstTrace;
   std::map<Op*, uint16_t> _cacheLat;
   std::map<Op*, bool> _trueCacheProd;
   std::map<Op*, bool> _ctrlMiss;
@@ -254,6 +254,10 @@ protected:
     _loop_InstTrace.push_back(_InstInfo<Op*, InstPtr, CP_NodeDiskImage>(op,
                                                                         inst,
                                                                         img));
+    aggrLoopInstsStat(op, inst);
+  }
+
+  virtual void aggrLoopInstsStat(Op *op, InstPtr inst) {
     if (op->isLoad() || op->isStore()) {
       _cacheLat[op] = std::max( (op->isLoad() ? inst->_ex_lat : inst->_st_lat),
                                 _cacheLat[op]);
@@ -330,11 +334,50 @@ protected:
     _ctrlMiss.clear();
   }
 
+  virtual void cleanupLoopInstTracking(LoopInfo *li, unsigned iter) {
 
-    void insert_inst_trace_to_default_pipe()
-    {
-      if (getenv("DUMP_MAFIA_PIPE") == 0)
-        return ;
+    int numIter = -1;
+
+    // clear only delete iter worth of instructions.
+    while (!_loop_InstTrace.empty()) {
+      auto Entry = _loop_InstTrace.front();
+      Op *op = Entry.first;
+      if (op->bb_pos() == 0 && li->loop_head() == op->bb())
+        ++ numIter;
+      if ((unsigned)numIter  == iter)
+        return;
+      InstPtr inst = Entry.second;
+      inst->clearOperandInsts();
+
+      _loop_InstTrace.pop_front();
+    }
+    redoTrackLoopInsts(li, (unsigned)-1);
+  }
+
+  virtual void redoTrackLoopInsts(LoopInfo *li, unsigned iter) {
+
+    _cacheLat.clear();
+    _trueCacheProd.clear();
+    _ctrlMiss.clear();
+
+    unsigned numIter = 0;
+    // repopulate --- for iter worth of instructions
+    for (auto I = _loop_InstTrace.begin(), IE = _loop_InstTrace.end();
+         I != IE; ++I) {
+      Op *op = I->first;
+      InstPtr inst = I->second;
+      if (op->bb_pos() == 0 && li->loop_head() == op->bb())
+        ++ numIter;
+      if ((unsigned)numIter > iter)
+        return;
+      this->aggrLoopInstsStat(op, inst);
+    }
+  }
+
+  void insert_inst_trace_to_default_pipe()
+  {
+    if (getenv("DUMP_MAFIA_PIPE") == 0)
+      return ;
 
       if (getenv("DUMP_MAFIA_DEFAULT_PIPE") != 0)
         _default_cp._dump_inst_flag = true;

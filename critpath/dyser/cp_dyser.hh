@@ -559,8 +559,9 @@ namespace DySER {
 
       DySERizingLoop = true;
 
-      for (unsigned i = 0, e = _loop_InstTrace.size(); i != e; ++i) {
-        auto op_n_Inst  = _loop_InstTrace[i];
+      for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();
+           I != E; ++I) {
+        auto op_n_Inst  = *I;
         Op *op = op_n_Inst.first;
         InstPtr inst = op_n_Inst.second;
         insert_sliced_inst(SI, op, inst);
@@ -744,7 +745,7 @@ namespace DySER {
       setExecuteToComplete(dy_inst, op, prevPipelinedInst);
 
 
-      if (getenv("DUMP_MAFIA_PIPE") != 0) {
+      if (getenv("DUMP_MAFIA_DYSER_EXEC") != 0) {
         std::cout << "      "; dumpInst(dy_inst);
       }
 

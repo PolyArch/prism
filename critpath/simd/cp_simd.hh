@@ -10,6 +10,21 @@
 
 #include "cp_args.hh"
 
+static unsigned floor_to_pow2(unsigned num)
+{
+  if (num & (num-1)) {
+    num = num - 1;
+    num |= (num >> 1);
+    num |= (num >> 2);
+    num |= (num >> 4);
+    num |= (num >> 8);
+    num |= (num >> 16);
+    num += 1;
+    num >>= 1;
+  }
+  return num;
+}
+
 namespace simd {
 
   class cp_simd : public ArgumentHandler,
@@ -32,7 +47,7 @@ namespace simd {
       IN_SIMD    // instructions execute in simd fashion
     };
 
-    unsigned _simd_len = 4;
+    unsigned _simd_vec_len = 4;
     bool _useInstTrace = false;
     bool nonStrideAccessLegal = false;
     bool unalignedVecAccess = false;
@@ -171,9 +186,9 @@ namespace simd {
 
     void handle_argument(const char *name, const char *optarg) {
       if (strcmp(name, "simd-len") == 0) {
-        _simd_len = atoi(optarg);
-        if (_simd_len == 0)
-          _simd_len = 4;
+        _simd_vec_len = atoi(optarg);
+        if (_simd_vec_len == 0)
+          _simd_vec_len = 4;
         return;
       }
       if (strcmp(name, "simd-use-inst-trace") == 0)
@@ -369,13 +384,15 @@ namespace simd {
           || (li->body_size() == 1
               && !hasNonStridedMemAccess(li, nonStrideAccessLegal)))
 #endif
-        completeSIMDLoopWithInstTrace(li, CurLoopIter, useIT);
+        completeSIMDLoopWithInstTrace(li, CurLoopIter, useIT, _simd_vec_len);
       else
         completeSIMDLoopWithLI(li, CurLoopIter, loopDone);
       if (!dumped.count(li)) {
         dumped.insert(li);
         dumpPipe();
       }
+
+    cleanupLoopInstTracking();
 
     static unsigned numCompleted = 0;
     if (getenv("MAFIA_DEBUG_SIMD_LOOP")) {
@@ -386,8 +403,10 @@ namespace simd {
     }
   }
 
-    void completeSIMDLoopWithInstTrace(LoopInfo *li, int CurLoopIter,
-                                       bool forceIT) {
+    void completeSIMDLoopWithInstTrace(LoopInfo *li,
+                                       int CurLoopIter,
+                                       bool forceIT,
+                                       unsigned vec_len) {
       //if (vecloop_InstTrace.size() != 0) {
       // std::cout << "Completing SIMD Loop:" << li
       //          << " with iterCnt: " << CurLoopIter << "\n";
@@ -406,13 +425,13 @@ namespace simd {
         // assert((int)_op2Count[op] == CurLoopIter
         //      && "Different control path inside simd loop??");
 
-        if ((CurLoopIter == (int)_simd_len) && emitted.count(op))
+        if ((CurLoopIter == (int)vec_len) && emitted.count(op))
           continue;
 
         emitted.insert(std::make_pair(op, true));
 
         unpackInsts.clear();
-        unpackInsts.resize(_simd_len);
+        unpackInsts.resize(vec_len);
         if (!forceIT && op->isLoad()) {
           if (!isStrideAccess(op)) {
             // we need to create unpack instruction for the loads
@@ -432,7 +451,7 @@ namespace simd {
               }
             }
             if (maxDepInst.get() != 0) {
-              for (unsigned i = 0; i < _simd_len; ++i) {
+              for (unsigned i = 0; i < vec_len; ++i) {
                 // create a instruction for depop
                 InstPtr unpack = createUnpackInst(maxDepInst);
                 addInstToProducerList(maxDepInst);
@@ -482,9 +501,9 @@ namespace simd {
           }
           // Non strided -- create more loads
           if (!forceIT && !isStrideAccess(op)) {
-            std::vector<unsigned> loadInsts(_simd_len);
+            std::vector<unsigned> loadInsts(vec_len);
             loadInsts[0] =  0;
-            for (unsigned i = 1; i < _simd_len; ++i) {
+            for (unsigned i = 1; i < vec_len; ++i) {
               InstPtr tmpInst = createInst(op->img,
                                            inst->index(), op);
               if (unpackInsts[i].get()) {
@@ -499,8 +518,8 @@ namespace simd {
               inserted(tmpInst);
               loadInsts[i] = i;
             }
-            unsigned InstIdx = _simd_len;
-            unsigned numInst = _simd_len;
+            unsigned InstIdx = vec_len;
+            unsigned numInst = vec_len;
             while (numInst > 1) {
               for (unsigned i = 0, j = 0; i < numInst; i += 2, ++j) {
                 unsigned op0Idx = loadInsts[i];
@@ -521,7 +540,7 @@ namespace simd {
       }
       //std::cout << "<<<====== completeSIMDLoopWithIT ======\n";
       // clear out instTrace, counts and cache latency
-      cleanupLoopInstTracking();
+      //cleanupLoopInstTracking();
     }
 
   void completeSIMDLoopWithLI(LoopInfo *li, int CurLoopIter, bool loopDone) {
@@ -554,71 +573,44 @@ namespace simd {
         }
       }
 
-      // if loop did not finish executing fully
-      if (CurLoopIter != (int)_simd_len) {
-        if (useReductionTree && loopDone) {
-          for (auto I = resultOps.begin(), E = resultOps.end(); I != E; ++I) {
-            Op *op = *I; //getMaxResultOp(resultOps)) {
-            InstPtr resultInst = getInstForOp(op);
-            // FIXME: very conservative code -- for kmeans ????
-            for (unsigned i = 0; i < _simd_len-1; ++i) {
-              InstPtr tmpInst = createReduceInst(resultInst, op);
-              addInstToProducerList(resultInst);
-              addInstListDeps(tmpInst, 0);
-              pushPipe(tmpInst);
-              inserted(tmpInst);
-              resultInst = tmpInst;
+      if (CurLoopIter <= 3) {
+        // if loop did not finish executing fully
+        if (CurLoopIter != (int)_simd_vec_len) {
+          if (useReductionTree && loopDone) {
+            for (auto I = resultOps.begin(), E = resultOps.end(); I != E; ++I) {
+              Op *op = *I; //getMaxResultOp(resultOps)) {
+              InstPtr resultInst = getInstForOp(op);
+              // FIXME: very conservative code -- for kmeans ????
+              for (unsigned i = 0; i < _simd_vec_len-1; ++i) {
+                InstPtr tmpInst = createReduceInst(resultInst, op);
+                addInstToProducerList(resultInst);
+                addInstListDeps(tmpInst, 0);
+                pushPipe(tmpInst);
+                inserted(tmpInst);
+                resultInst = tmpInst;
+              }
             }
           }
         }
-        completeSIMDLoopWithInstTrace(li, CurLoopIter, true);
+        completeSIMDLoopWithInstTrace(li, CurLoopIter, true, _simd_vec_len);
         return;
       }
 
+      if (CurLoopIter & (CurLoopIter - 1)) {
+        // not a power of 2
+        int loopIter = floor_to_pow2(CurLoopIter);
+        assert(loopIter && loopIter >= 4 && loopIter < CurLoopIter);
+        redoTrackLoopInsts(li, loopIter);
+        completeSIMDLoopWithLI(li, loopIter, false);
 
-#if 0
-      static std::set<LoopInfo*> li_printed;
-      //static std::set<Op*>       op_printed;
-
-      if (!li_printed.count(li)) {
-        li_printed.insert(li);
-        std::cout << "\nLoop " << li << "\n";
-
-        for (auto I = li->rpo_rbegin(), E = li->rpo_rend(); I != E; ++I) {
-          BB *bb = *I;
-          std::cout << "\nBB" << bb << ": ";
-          if (li->loop_head() == bb)
-            std::cout << " <Head> ";
-          if (li->isLatch(bb))
-            std::cout << " <Latch>";
-          std::cout << "\n";
-
-          std::cout << "\tPred:: ";
-          for (auto PI = bb->pred_begin(), PE = bb->pred_end(); PI != PE; ++PI) {
-            std::cout << *PI << " ";
-          }
-          std::cout << "\n";
-
-          std::cout << "\tSucc:: ";
-          for (auto SI = bb->succ_begin(), SE = bb->succ_end(); SI != SE; ++SI) {
-            std::cout << *SI << " ";
-          }
-          std::cout << "\n";
-
-          for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
-            Op *op = *OI;
-            std::cout << ((internalCtrlOps.count(op))? "<IC>": "   ")
-                      << ((resultOps.count(op))? "<R>" : "   ")
-                      << " ";
-            printDisasm(op);
-          }
-        }
-        std::cout << "\n<==\n\n";
+        completeSIMDLoopWithLI(li, (CurLoopIter - loopIter), loopDone);
+        return;
       }
-#endif
-      // printLoop(li);
 
-      //std::cout << "\n====== completeSIMDLoopWithLI ======>>>\n";
+      unsigned vec_len = CurLoopIter;
+      assert(vec_len <= _simd_vec_len);
+
+
       for (auto I = li->rpo_rbegin(), E = li->rpo_rend(); I != E; ++I) {
         BB *bb = *I;
         for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
@@ -632,19 +624,10 @@ namespace simd {
           // if this op will be merged to others in SIMD event graph, skip
           if (isOpMerged(op))
             continue;
-#if 0
-          if (!op_printed.count(op)) {
-            printDisasm(op);
-            op_printed.insert(op);
-            if (op == op->bb()->lastOp())
-              std::cout << "\n";
-          }
-#endif
 
           unpackInsts.clear();
-          unpackInsts.resize(_simd_len);
+          unpackInsts.resize(vec_len);
 
-#if 1
           if (op->isLoad()) {
             if (!isStrideAccess(op)) {
               // we need to create unpack instruction for the loads
@@ -666,15 +649,11 @@ namespace simd {
               if (maxDepInst.get() != 0) {
                 unsigned acc_bits = op->img._acc_size * 8;
                 // FIXME: Decouple _simd_len from number of iterations to be vectorized.
-#if 0
-                //unsigned num_val_per_vec_reg = (32*_simd_len)/acc_bits;
-                //unsigned num_registers_needed = _simd_len / num_val_per_vec_reg;
-#endif
                 unsigned num_registers_needed = acc_bits/32;
                 if (num_registers_needed == 0)
                   num_registers_needed = 1;
                 num_registers_needed = 2; // Override for TreeSearch ... TOTALLY WRONG THING TO DO
-                for (unsigned i = 0; i < _simd_len; ++i) {
+                for (unsigned i = 0; i < vec_len; ++i) {
                   for (unsigned j = 0; j < num_registers_needed; ++j) {
                     // create a instruction for depop
                     InstPtr unpack = createUnpackInst(maxDepInst);
@@ -695,29 +674,7 @@ namespace simd {
               }
             }
           }
-#else
-          if (op->isLoad()) {
-            if (!isStrideAccess(op)) {
-              // we need to create unpack instruction for the loads
-              for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
-                Op *DepOp = *I;
-                InstPtr depInst = getInstForOp(DepOp);
-                if (!depInst.get())
-                  continue;
-                for (unsigned i = 0; i < _simd_len; ++i) {
-                  // create a instruction for depop
-                  InstPtr unpack = createUnpackInst(depInst);
-                  addInstToProducerList(depInst);
-                  addInstListDeps(unpack, 0);
-                  pushPipe(unpack);
-                  inserted(unpack);
-                  unpackInsts[i] = unpack;
-                }
-              }
-            }
-          }
 
-#endif
           //printDisasm(op);
           InstPtr inst = createSIMDInst(op);
           updateInstWithTraceInfo(op, inst, false);
@@ -774,9 +731,9 @@ namespace simd {
 
             // Non strided -- create more loads
             if (!isStrideAccess(op)) {
-              std::vector<unsigned> loadInsts(_simd_len);
+              std::vector<unsigned> loadInsts(vec_len);
               loadInsts[0] =  0;
-              for (unsigned i = 1; i < _simd_len; ++i) {
+              for (unsigned i = 1; i < vec_len; ++i) {
                 InstPtr tmpInst = createInst(op->img, inst->index(), op);
                 // // They should atleas tmpInst
                 // for (unsigned j = 0; j < tmpInst->numStages(); ++j) {
@@ -794,8 +751,8 @@ namespace simd {
                 inserted(tmpInst);
                 loadInsts[i] = i;
               }
-              unsigned InstIdx = _simd_len;
-              unsigned numInst = _simd_len;
+              unsigned InstIdx = vec_len;
+              unsigned numInst = vec_len;
               while (numInst > 1) {
                 for (unsigned i = 0, j = 0; i < numInst; i += 2, ++j) {
                   unsigned op0Idx = loadInsts[i];
@@ -817,7 +774,8 @@ namespace simd {
       }
 
       //std::cout << "<<<====== completeSIMDLoopWithLI ======\n";
-      cleanupLoopInstTracking();
+      if (CurLoopIter != (int)_simd_vec_len)
+        cleanupLoopInstTracking(li, CurLoopIter);
     }
 
 
@@ -926,7 +884,7 @@ namespace simd {
           }
         // set insertSIMDInstr if curloopiter is a multiple of _simd_len.
         insertSIMDInst =  (canVectorize(CurLoop, nonStrideAccessLegal)
-                           && CurLoopIter && (CurLoopIter % _simd_len == 0)
+                           && CurLoopIter && (CurLoopIter % _simd_vec_len == 0)
                            && !StackLoop);
       }
 

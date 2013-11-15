@@ -22,6 +22,7 @@ namespace DySER {
     dyser_inst(const CP_NodeDiskImage &img, uint64_t index):
       dg_inst<T, E>(img, index) {}
 
+
     bool hasDisasm() const { return true; }
     std::string getDisasm() const {
       return "dyser_inst";

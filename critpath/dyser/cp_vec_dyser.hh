@@ -111,8 +111,9 @@ namespace DySER {
       incrConfigSwitch(0, extraConfigRequired);
 
       std::map<Op*, unsigned> emitted;
-      for (unsigned i = 0, e = _loop_InstTrace.size(); i != e; ++i) {
-        auto op_n_Inst  = _loop_InstTrace[i];
+      for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();
+           I != E; ++I) {
+        auto op_n_Inst  = *I;
         Op *op = op_n_Inst.first;
 
         // emit one instruction per op for load slice
@@ -252,7 +253,7 @@ namespace DySER {
                 if ((j == 0 || countDepthNodesForConfig)
                     && SI->shouldIncludeInCSCount(op)) {
                   ++numInDySER;
-                  if (getenv("DUMP_MAFIA_PIPE"))
+                  if (getenv("DUMP_MAFIA_DYSER_EXEC"))
                     std::cout << " NumInDySER: " << numInDySER << "\n";
                 }
                 if (numInDySER >= _dyser_size) {
