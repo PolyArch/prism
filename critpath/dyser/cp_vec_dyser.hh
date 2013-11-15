@@ -28,7 +28,7 @@ namespace DySER {
     unsigned _dyser_vec_len = 16;
     bool nonStrideAccessLegal = false;
     bool countDepthNodesForConfig = false;
-
+    bool forceVectorize = false;
   public:
     cp_vec_dyser() : cp_dyser() { }
     virtual ~cp_vec_dyser() { }
@@ -47,6 +47,8 @@ namespace DySER {
         nonStrideAccessLegal = true;
       if (strcmp(name, "dyser-count-depth-nodes-for-config") == 0)
         countDepthNodesForConfig = true;
+      if (strcmp(name, "dyser-force-vectorize") == 0)
+        forceVectorize = true;
     }
 
     virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,
@@ -60,8 +62,12 @@ namespace DySER {
         return false;
       // complete this as soon as it completes a iteration
       // we cannot vectorize this.
-      if (!canVectorize(CurLoop, nonStrideAccessLegal))
+      bool noVectorize = !canVectorize(CurLoop, nonStrideAccessLegal);
+
+      if (noVectorize && !forceVectorize) {
         return true;
+      }
+
       // wait until we _dyser_vec_len worth of iteration
       if ( (CurLoopIter % _dyser_vec_len) == 0)
         return true;
@@ -280,7 +286,7 @@ namespace DySER {
                                      false,
                                      cloneOp2InstMap[op][prevPipeId],
                                      (clone+1 == numClones && j+1 == depth),
-                                     SI->hasSinCos()? (18*depth): 0);
+                                     SI->hasSinCos()? (24*depth): 0);
                 useCloneOpMap = false;
                 cloneOp2InstMap[op][pipeId] = dy_inst;
                 pipeId = 0;
