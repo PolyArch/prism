@@ -185,9 +185,7 @@ namespace DySER {
     std::string getDisasm() const {
       return "dyser_config";
     }
-
   };
-
 
 } // end namespace dyser
 

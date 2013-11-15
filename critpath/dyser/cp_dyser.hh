@@ -698,6 +698,10 @@ namespace DySER {
                                        bool emitDyRecv = true,
                                        unsigned dyRecvLat = 0) {
       if (SI->isInLoadSlice(op)) {
+        if (op->isLoad()) {
+          // change it to int
+          inst->_floating = false;
+        }
         addDeps(inst, op);
         pushPipe(inst);
         inserted(inst);
@@ -853,6 +857,24 @@ namespace DySER {
       accel_doc.save_file(fname.c_str());
     }
 
+#if 0
+    virtual void setEnergyStatsPerInst(std::shared_ptr<Inst_t>& inst)
+    {
+      ++committed_insts;
+
+      committed_int_insts += !inst._floating;
+      committed_fp_insts += inst._floating;
+
+      committed_branch_insts += inst._isctrl;
+
+
+      // TODO::if we just load one value always, replace that with dsend...
+      committed_load_insts += inst._isload;
+
+      committed_store_insts += inst._isstore;
+      func_calls += inst._iscall;
+    }
+#endif
   };
 }
 
