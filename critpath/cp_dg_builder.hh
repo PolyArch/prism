@@ -48,36 +48,6 @@ public:
 
 
 
-  virtual void dumpInst(InstPtr inst) {
-    if (!inst.get()) {
-      std::cout << "<null>\n";
-      return;
-    }
-    for (unsigned j = 0; j < inst->numStages(); ++j) {
-      std::cout << std::setw(5) << inst->cycleOfStage(j) << " ";
-    }
-
-    std::cout << (inst->_isload?"L":"  ")
-              << (inst->_isstore?"S":" ")
-              << ((inst->_cache_prod && inst->_true_cache_prod)
-                  ?"T"
-                  :" ")
-              << (inst->_isctrl?"C":" ")
-              << (inst->_ctrl_miss?"M": " ")
-              << " ";
-    if (inst->hasDisasm()) {
-      std::cout << inst->getDisasm() << "\n";
-      return ;
-    }
-
-    printDisasmPC(inst->_pc, inst->_upc);
-  }
-
-
-  virtual void printDisasmPC(uint64_t pc, int upc) {
-    std::cout << pc << "," << upc << " : "
-              << ExecProfile::getDisasm(pc, upc) << "\n";
-  }
 
   virtual void setWidth(int i) {
     FETCH_WIDTH = i;
@@ -1956,17 +1926,17 @@ protected:
     uint64_t busyCycles=totalCycles-idleCycles;
 
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
-    pugi::xml_node core_node = 
+    pugi::xml_node core_node =
               system_node.find_child_by_attribute("name","core0");
-   
+
     sa(system_node,"total_cycles",totalCycles);
     sa(system_node,"idle_cycles", idleCycles);
     sa(system_node,"busy_cycles",busyCycles);
 
 
     //std::cout << "squash: " << squashed_insts
-    //          << "commit: " << committed_insts << "\n";            
-    
+    //          << "commit: " << committed_insts << "\n";
+
     //Modify relevent events to be what we predicted
     double squashRatio=0;
     if(committed_insts!=0) {

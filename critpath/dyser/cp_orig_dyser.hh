@@ -15,7 +15,9 @@ class cp_orig_dyser: public OrigCP {
 public:
   cp_orig_dyser() : OrigCP() {}
 
-
+  void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
+    OrigCP::insert_inst(img, index, op);
+  }
 
   virtual void calcAccelEnergy(std::string fname_base, int nm) {
     std::string fname=fname_base + std::string(".accel");

@@ -200,8 +200,10 @@ public:
   void initEffAddr(uint64_t addr, unsigned size, int iterCnt) {
     _first_effAddr = addr;
     _effAddr = addr;
-    _acc_size = size;
-
+    // For old gem5, size can be zero..
+    if (size) {
+      _acc_size = size;
+    }
     assert(_acc_size != 0);
   }
 

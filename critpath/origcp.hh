@@ -22,8 +22,7 @@ class OrigCP : public CriticalPath {
   //typedef dg_inst<dg_event, dg_edge_impl_t<dg_event>> Inst_t;
   typedef orig_dg_inst Inst_t;
   dep_graph_impl_t<orig_dg_inst, dg_event, dg_edge_impl_t<dg_event>> cpdg;
- 
- 
+
 public:
   OrigCP() : CriticalPath() {}
 
@@ -32,13 +31,16 @@ public:
   }
   virtual ~OrigCP() { }
 
-protected: 
+protected:
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     Inst_t* inst = new Inst_t(img,index);
     std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
     getCPDG()->addInst(sh_inst,index);
     addDeps(*inst,img);
     getCPDG()->pushPipe(sh_inst);
+    if (getenv("MAFIA_DUMP_ORIG_PIPE")) {
+      dumpInst(sh_inst.get());
+    }
   }
 
   virtual void addDeps(Inst_t& inst,const CP_NodeDiskImage &img) { 

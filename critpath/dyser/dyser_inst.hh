@@ -99,7 +99,7 @@ namespace DySER {
   class dyser_pipe_inst : public dyser_inst {
   public:
     dyser_pipe_inst(): dyser_inst() {
-
+      _opclass = 1; // IntALU ??
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
 

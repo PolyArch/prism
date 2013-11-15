@@ -3,6 +3,7 @@
 
 #include "cp_dep_graph.hh"
 #include "op.hh"
+#include "exec_profile.hh"
 
 #include "pugixml/pugixml.hpp"
 #include <stdio.h>
@@ -461,6 +462,45 @@ public:
     sa(l2_node,"read_misses",Prof::get().l2ReadMisses);
     sa(l2_node,"write_misses",Prof::get().l2WriteMisses);
     sa(l2_node,"conflicts",Prof::get().l2Replacements);
+  }
+
+  template <class T, class E>
+  void dumpInst(std::shared_ptr<dg_inst<T, E> >inst) {
+    dumpInst(inst.get());
+  }
+
+
+  template <class T, class E>
+  void dumpInst(dg_inst<T, E> *inst) {
+    if (!inst) {
+      std::cout << "<null>\n";
+      return;
+    }
+    for (unsigned j = 0; j < inst->numStages(); ++j) {
+      std::cout << std::setw(5) << inst->cycleOfStage(j) << " ";
+    }
+
+    std::cout << (inst->_isload?"L":" ")
+              << (inst->_isstore?"S":" ")
+              << ((inst->_cache_prod && inst->_true_cache_prod)
+                  ?"T"
+                  :" ")
+              << (inst->_isctrl?"C":" ")
+              << (inst->_ctrl_miss?"M": " ")
+              << (inst->_floating?"f": " ")
+              << " ";
+    if (inst->hasDisasm()) {
+      std::cout << inst->getDisasm() << "\n";
+      return ;
+    }
+
+    printDisasmPC(inst->_pc, inst->_upc);
+  }
+
+
+  virtual void printDisasmPC(uint64_t pc, int upc) {
+    std::cout << pc << "," << upc << " : "
+              << ExecProfile::getDisasm(pc, upc) << "\n";
   }
 
 };

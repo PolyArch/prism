@@ -699,7 +699,9 @@ namespace DySER {
                                        bool emitDyRecv = true,
                                        unsigned dyRecvLat = 0) {
       if (SI->isInLoadSlice(op)) {
-        if (op->isLoad()) {
+        // FIXME:: Should all loadslice is not floating point ???
+        //if (op->isLoad())
+        {
           // change it to int
           inst->_floating = false;
         }

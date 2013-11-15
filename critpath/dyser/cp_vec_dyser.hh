@@ -290,9 +290,16 @@ namespace DySER {
               }
             }
           } else {
+            if (op->isLoad() && isStrideAccess(op, 0)) {
+              // if stride access is zero, compiler hoist the load up and
+              // uses DSendPQ. Example. NBody
+              // Is it going to mess up mem_prod stuff???
+              inst->_isload = false;
+            }
             // emit one node for load slice
             // vectorized code cannot coalesce in the compiler yet,
             // and we cannot do it either.
+
             if (op->isLoad() || op->isStore()) {
               // create the inst
               // handle the non stride access...
@@ -327,6 +334,8 @@ namespace DySER {
         return false;
 
     }
+
+   
   };
 }
 
