@@ -465,6 +465,64 @@ public:
   void toDotFile_detailed(std::ostream& out);
   void toDotFile_record(std::ostream& out);
 
+  enum ArgType {
+    ArgTy_Unknown = 0,
+    ArgTy_Mem = 1,
+    ArgTy_Reg = 2
+  };
+  typedef std::map<Op*, ArgType> arg_op_map;
+  typedef arg_op_map::iterator arg_op_iterator;
+
+protected:
+  arg_op_map _argsMap;
+
+
+public:
+  arg_op_iterator arg_op_begin() { return _argsMap.begin(); }
+  arg_op_iterator arg_op_end()   { return _argsMap.end(); }
+
+  void computeArguments() {
+    if (arg_computed)
+      return;
+    arg_computed = true;
+    //   FIXME: handle recursive calls.
+    for (auto I = _rpo.begin(), E = _rpo.end(); I != E; ++I)
+      for (auto II = (*I)->op_begin(), EE = (*I)->op_end(); II != EE; ++II)
+        computeArgument(*II);
+
+  }
+private:
+  bool arg_computed = false;
+  void computeArgument(Op *op) {
+    for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
+      Op *depOp = *I;
+      FunctionInfo *depFunc = depOp->func();
+      if (depFunc == this)
+        continue;
+      // FIXME: recursive calls???
+      if (this->callsFunc(depFunc))
+        continue;
+      _argsMap[depOp] = ArgTy_Reg;
+    }
+
+    for (auto I = op->m_begin(), E = op->m_end(); I != E; ++I) {
+      Op *depOp = *I;
+      FunctionInfo *depFunc = depOp->func();
+      if (depFunc == this)
+        continue;
+
+      // FIXME: recursive calls???
+      if (this->callsFunc(depFunc))
+        continue;
+
+      // only stores can be a memory input.
+      if (!depOp->isStore())
+        continue;
+
+      _argsMap[depOp] = ArgTy_Mem;
+    }
+  }
+
 };
 
 #endif

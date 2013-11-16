@@ -34,6 +34,14 @@ namespace npu {
     void handle_argument(const char *name,
                          const char *optarg) {
     }
+  private:
+    std::map<Op*, InstPtr> _op2InstPtr;
+    virtual void addDeps(InstPtr &inst, Op *op = NULL) {
+      if (op) {
+        _op2InstPtr[op] = inst;
+      }
+      CP_DG_Builder<T, E>::addDeps(inst, op);
+    }
 
     bool insideNPU = false;
 
@@ -52,6 +60,20 @@ namespace npu {
           // now, create a node for NPU execution
           InstPtr inst = InstPtr(new npu_inst());
           getCPDG()->addInst(inst, index);
+
+          // create edges from its arguments;
+          FunctionInfo *func = op->getCalledFunc();
+          func->computeArguments();
+          for (auto I = func->arg_op_begin(), E = func->arg_op_end();
+               I != E; ++I) {
+            if (!_op2InstPtr.count(*I))
+              continue;
+            InstPtr depInst = _op2InstPtr[op];
+            getCPDG()->insert_edge(*depInst,
+                                   depInst->eventComplete(),
+                                   *inst, Inst_t::Ready,
+                                   0, E_NPUCR);
+          }
           addDeps(inst);
           pushPipe(inst);
           inserted(inst);
