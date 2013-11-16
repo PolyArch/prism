@@ -243,10 +243,12 @@ int main(int argc, char *argv[])
   struct timeval end;
   gettimeofday(&start, 0);
 
-  std::ifstream tempf(argv[optind], std::ios::in|std::ios::binary|std::ios::ate);
+#if 0
+  ifstream tempf(argv[optind], std::ios::in|std::ios::binary|std::ios::ate);
   uint64_t input_fsize =  tempf.tellg();
   tempf.close();
   std::cout << "Input file size: " << input_fsize << "\n";
+#endif
 
   CP_NodeDiskImage img;
   igzstream inf(argv[optind], std::ios::in | std::ios::binary );
@@ -291,13 +293,16 @@ int main(int argc, char *argv[])
         std::cout << "   ...   "
                   << std::fixed << std::setprecision(4)
                   << (double)(100.0*(double)count/max_inst) << "% completed.";
-      } else if (input_fsize != 0) {
+      }
+#if 0
+      else if (input_fsize != 0) {
         uint64_t pos = inf.tellg();
         std::cout << "   ...   "
                   << std::fixed << std::setprecision(4)
                   << (double)(100.0*(double)pos/input_fsize)
                   << "% completed.";
       }
+#endif
       std::cout.flush();
     }
   }

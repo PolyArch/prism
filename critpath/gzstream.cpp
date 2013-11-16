@@ -76,6 +76,7 @@ gzstreambuf * gzstreambuf::close() {
     return (gzstreambuf*)0;
 }
 
+#if 0
   gzstreambuf::pos_type gzstreambuf::seekoff(gzstreambuf::off_type off,
                                              std::ios_base::seekdir dir,
                                              std::ios_base::openmode mode)
@@ -85,7 +86,7 @@ gzstreambuf * gzstreambuf::close() {
   }
   return std::streambuf::seekoff(off, dir, mode);
 }
-
+#endif
 
 int gzstreambuf::underflow() { // used for input buffer only
     if ( gptr() && ( gptr() < egptr()))
