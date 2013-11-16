@@ -178,7 +178,8 @@ namespace simd {
 
   public:
     uint64_t numCycles() {
-      if (CurLoop) {
+      if (CurLoop && canVectorize(CurLoop, nonStrideAccessLegal)) {
+        // complete the loop ...
         completeSIMDLoop(CurLoop, CurLoopIter, false, true);
       }
       return _lastInst->finalCycle();
