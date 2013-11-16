@@ -76,6 +76,17 @@ gzstreambuf * gzstreambuf::close() {
     return (gzstreambuf*)0;
 }
 
+  gzstreambuf::pos_type gzstreambuf::seekoff(gzstreambuf::off_type off,
+                                             std::ios_base::seekdir dir,
+                                             std::ios_base::openmode mode)
+{
+  if (off == 0 && dir == std::ios_base::cur && mode == std::ios_base::in) {
+    return pos_type(gztell(file));
+  }
+  return std::streambuf::seekoff(off, dir, mode);
+}
+
+
 int gzstreambuf::underflow() { // used for input buffer only
     if ( gptr() && ( gptr() < egptr()))
         return * reinterpret_cast<unsigned char *>( gptr());
@@ -157,6 +168,7 @@ void gzstreambase::close() {
         if ( ! buf.close())
             clear( rdstate() | std::ios::badbit);
 }
+
 
 #ifdef GZSTREAM_NAMESPACE
 } // namespace GZSTREAM_NAMESPACE

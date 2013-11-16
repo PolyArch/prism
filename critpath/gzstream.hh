@@ -70,6 +70,9 @@ public:
     virtual int     overflow( int c = EOF);
     virtual int     underflow();
     virtual int     sync();
+  pos_type seekoff(off_type off,
+                   std::ios_base::seekdir dir,
+                   std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out);
 };
 
 class gzstreambase : virtual public std::ios {

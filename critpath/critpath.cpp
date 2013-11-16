@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
+#include <iomanip>
 
 #include "cp_dep_graph.hh"
 #include "cp_dg_builder.hh"
@@ -140,6 +141,7 @@ int main(int argc, char *argv[])
                   << optarg << "\" is not valid for --models."
                   << "Options are inorder, ooo, or both.\n";
       }
+      break;
     case 'p': {
       progress_granularity = atoi(optarg);
       if (progress_granularity == 0) {
@@ -241,8 +243,13 @@ int main(int argc, char *argv[])
   struct timeval end;
   gettimeofday(&start, 0);
 
+  std::ifstream tempf(argv[optind], std::ios::in|std::ios::binary|std::ios::ate);
+  uint64_t input_fsize =  tempf.tellg();
+  tempf.close();
+  std::cout << "Input file size: " << input_fsize << "\n";
+
   CP_NodeDiskImage img;
-  igzstream inf(argv[optind], std::ios::in | std::ios::binary);
+  igzstream inf(argv[optind], std::ios::in | std::ios::binary );
 
   if (!inf.is_open()) {
     std::cerr << "Cannot open file: \"" << argv[optind] << "\"\n";
@@ -281,8 +288,15 @@ int main(int argc, char *argv[])
     if (count && (count % progress_granularity) == 0) {
       std::cout << "\rprocessed " << count ;
       if (max_inst != (uint64_t)-1 && max_inst != 0) {
-        std::cout << "\t ...  "
-                  << (100.0*(double)count/max_inst) << "% completed.";
+        std::cout << "   ...   "
+                  << std::fixed << std::setprecision(4)
+                  << (double)(100.0*(double)count/max_inst) << "% completed.";
+      } else if (input_fsize != 0) {
+        uint64_t pos = inf.tellg();
+        std::cout << "   ...   "
+                  << std::fixed << std::setprecision(4)
+                  << (double)(100.0*(double)pos/input_fsize)
+                  << "% completed.";
       }
       std::cout.flush();
     }
