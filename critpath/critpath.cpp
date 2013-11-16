@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
   int nm = 0;
   int max_mem_lat=1073741824; //some big numbers that will never make sense
   int max_ex_lat=1073741824;
-  uint64_t progress_granularity = 10000;
+  uint64_t progress_granularity = 100000;
 
   load_plugins(argv[0]);
 
@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
     case 'p': {
       progress_granularity = atoi(optarg);
       if (progress_granularity == 0) {
-        progress_granularity = 10000;
+        progress_granularity = 100000;
       }
       break;
     }
@@ -248,7 +248,7 @@ int main(int argc, char *argv[])
     std::cerr << "Cannot open file: \"" << argv[optind] << "\"\n";
     return 1;
   }
-
+  std::cout << "\n";
   while (!inf.eof()) {
     CP_NodeDiskImage::read_from_file_into(inf, img);
 
@@ -279,10 +279,15 @@ int main(int argc, char *argv[])
       break;
 
     if (count && (count % progress_granularity) == 0) {
-      std::cout << "processed " << count << "\n";
+      std::cout << "\rprocessed " << count ;
+      if (max_inst != (uint64_t)-1 && max_inst != 0) {
+        std::cout << "\t ...  "
+                  << (100.0*(double)count/max_inst) << "% completed.";
+      }
+      std::cout.flush();
     }
   }
-
+  std::cout << "\n";
   numCycles += img._cmpc;
 
   gettimeofday(&end, 0);
