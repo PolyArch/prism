@@ -48,9 +48,17 @@ namespace npu {
     std::vector<InstPtr> _npu_inputs;
     InstPtr _current_npu_exec_inst = 0;
     Op *prevOp = 0;
+    std::set<std::string> CalledFuncs;
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
                      Op *op) {
       // are we inside the function
+      if (op && op->isCall()) {
+        std::string fname = op->getCalledFuncName();
+        if (!CalledFuncs.count(fname)) {
+          CalledFuncs.insert(fname);
+          std::cout << "NPU:: Called func: " << fname << "\n";
+        }
+      }
       if (!insideNPU) {
         if (op
             && op->isCall()

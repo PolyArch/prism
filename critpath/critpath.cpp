@@ -289,10 +289,12 @@ int main(int argc, char *argv[])
 
     if (count && (count % progress_granularity) == 0) {
       std::cout << "\rprocessed " << count ;
-      if (max_inst != (uint64_t)-1 && max_inst != 0) {
+      uint64_t denom = std::min(max_inst, Prof::get().stopInst);
+
+      if (denom != 0) {
         std::cout << "   ...   "
                   << std::fixed << std::setprecision(4)
-                  << (double)(100.0*(double)count/max_inst) << "% completed.";
+                  << (double)(100.0*(double)count/denom) << "% completed.";
       }
 #if 0
       else if (input_fsize != 0) {
