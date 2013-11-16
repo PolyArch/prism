@@ -4,8 +4,16 @@
 
 #include <string>
 
+#include <unistd.h>
+
+static void msleep( int s ) {
+  usleep( s * 1000 );
+}
+
+
 static std::string exec(const char* cmd)
 {
+  msleep(50);
   FILE* pipe = popen(cmd, "r");
   if (!pipe) return "ERROR";
   char buffer[128];
@@ -15,6 +23,8 @@ static std::string exec(const char* cmd)
       result += buffer;
   }
   pclose(pipe);
+  msleep(50);
+
   return result;
 }
 
@@ -36,7 +46,10 @@ static void execMcPAT(std::string& inf, std::string& outf) {
     std::string ms = std::string(mcpat) + std::string(" -opt_for_clk 0 -print_level 5 -infile ")
                    + inf + std::string(" > ") + outf;
     //std::cout << ms << "\n";
+    msleep(500);
     system(ms.c_str());
+    msleep(500);
+
   }
 }
 

@@ -524,7 +524,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
           std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
-          cleanUp(beretEndEv->cycle()-std::min((uint64_t)1000,beretEndEv->cycle()));
+          cleanUp(beretEndEv->cycle()-std::min((uint64_t)50000,beretEndEv->cycle()));
           beretEndEv=event;
           assert(beretEndEv);
         } else if(op->bb_pos()==0) {

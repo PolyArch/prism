@@ -13,6 +13,7 @@
 
 #include "cp_utils.hh"
 
+
 class CPRegistry {
 private:
   CPRegistry() {}
@@ -191,7 +192,10 @@ public:
                                   std::to_string(nm) + std::string(".") +
                                   I->first + std::string(".xml");
         I->second->printMcPATxml(mcpat_fname.c_str(),nm);
+        msleep(100);
         I->second->printAccelMcPATxml(mcpat_fname.c_str(),nm);
+        msleep(100);
+
       }
     }
   }
@@ -212,15 +216,15 @@ public:
         std::string outf = std::string("mcpat/") + _run_name +
                            std::to_string(nm) + std::string(".") +
                            I->first + std::string(".out");
-  
         execMcPAT(inf,outf);
-  
+
         float tot_dyn_p = stof(grepF(outf,"Processor:",9,5));
         float tot_leak_p = stof(grepF(outf,"Processor:",4,5));
   
         std::cout << tot_dyn_p << " " << tot_leak_p << "\n";
-  
+
         I->second->calcAccelEnergy(inf,nm);
+
       }
     }
   }
