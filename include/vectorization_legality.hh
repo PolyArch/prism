@@ -140,7 +140,7 @@ protected:
     // if control flow is going to increase number of instructions too much,
     // skip the loop from vectorization
     if (!li->isSuperBlockProfitable(acceptableIncrFactor))
-      return true;
+      return false;
 
     return hasVectorizableMemAccess(li,
                                     nonStrideAccessLegal);

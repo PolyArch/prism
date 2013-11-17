@@ -51,4 +51,9 @@ static void init()
   CPRegistry::get()->register_argument("simd-inst-incr-factor",
                                        true, &In.cp_obj);
 
+  CPRegistry::get()->register_argument("simd-full-dataflow",
+                                       false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("simd-full-dataflow",
+                                       false, &In.cp_obj);
+
 }

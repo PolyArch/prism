@@ -322,8 +322,7 @@ public:
 
     uint64_t totalInstInSB = totalIterCount * totalStaticInstCount;
     assert(totalInstInSB > 0);
-    double instrIncrFactor = totalDynamicInst/totalInstInSB;
-
+    double instrIncrFactor = (totalDynamicInst)/((double)totalInstInSB);
     return (instrIncrFactor >= factor);
   }
 

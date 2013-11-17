@@ -49,6 +49,7 @@ namespace simd {
 
     unsigned _simd_vec_len = 4;
     bool _useInstTrace = false;
+    bool _simd_full_dataflow = false;
     bool nonStrideAccessLegal = false;
     bool unalignedVecAccess = false;
     bool useReductionTree = false;
@@ -200,6 +201,11 @@ namespace simd {
       }
       if (strcmp(name, "simd-use-inst-trace") == 0)
         _useInstTrace = true;
+
+      if (strcmp(name, "simd-full-dataflow") == 0) {
+        _useInstTrace = true;
+        _simd_full_dataflow = true;
+      }
 
       if (strcmp(name, "allow-non-stride-vec") == 0)
         nonStrideAccessLegal = true;
@@ -391,10 +397,6 @@ namespace simd {
 
       markStartPipe();
       if (_useInstTrace || useIT)
-#if 0
-          || (li->body_size() == 1
-              && !hasNonStridedMemAccess(li, nonStrideAccessLegal)))
-#endif
         completeSIMDLoopWithInstTrace(li, CurLoopIter, useIT, _simd_vec_len);
       else
         completeSIMDLoopWithLI(li, CurLoopIter, loopDone);
@@ -427,6 +429,7 @@ namespace simd {
       //}
       std::vector<InstPtr> unpackInsts;
       std::map<Op*, bool> emitted;
+      int curIter = 0;
       //std::cout << "\n====== completeSIMDLoopWithIT ======>>>\n";
       // Add trace to the pipe
       for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();
@@ -438,6 +441,18 @@ namespace simd {
 
         if ((CurLoopIter == (int)vec_len) && emitted.count(op))
           continue;
+
+        if (_simd_full_dataflow) {
+          if (op->bb_pos() == 0 && li->loop_head() == op->bb()) {
+            ++curIter;
+            if (curIter > 1) {
+              // one full iteration is inserted.
+              // in full data flow, all subsequent iterations
+              // follow the first iteration
+              break;
+            }
+          }
+        }
 
         emitted.insert(std::make_pair(op, true));
 
@@ -548,11 +563,11 @@ namespace simd {
             }
           }
         }
-      }
+        }
       //std::cout << "<<<====== completeSIMDLoopWithIT ======\n";
       // clear out instTrace, counts and cache latency
       //cleanupLoopInstTracking();
-    }
+      }
 
   void completeSIMDLoopWithLI(LoopInfo *li, int CurLoopIter, bool loopDone) {
       std::set<Op*> internalCtrlOps;
@@ -787,7 +802,7 @@ namespace simd {
       //std::cout << "<<<====== completeSIMDLoopWithLI ======\n";
       if (CurLoopIter != (int)_simd_vec_len)
         cleanupLoopInstTracking(li, CurLoopIter);
-    }
+  }
 
 
 
