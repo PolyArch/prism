@@ -41,7 +41,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
 
     pathProf.resetStack(prevCPC, prevCtrl, prevCall, prevRet);
 
-    printf("LoopProf PASS %d\n", pass);
+    std::cout << "LoopProf PASS " << pass << "\n";
 
     count = 0;
     while (!inf.eof()) {
@@ -103,9 +103,11 @@ bool doLoopProfAnalysis(const char *trace_fname,
         break;
       }
       if (count && (count % 10000000 == 0)) {
-        std::cout << "pass " << pass << " processed " << count << " instructions\n";
+        std::cout << "\rpass " << pass << " processed " << count << " instructions";
+        std::cout.flush();
       }
     }
+    std::cout << "\n";
 
     if (pass == 1) {
       pathProf.runAnalysis();
