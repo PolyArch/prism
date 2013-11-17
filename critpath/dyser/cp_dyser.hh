@@ -421,6 +421,10 @@ namespace DySER {
         return false;
       if (!li->isInnerLoop())
         return false;
+
+      if (!li->isSuperBlockProfitable(_dyser_inst_incr_factor))
+        return false;
+
       SliceInfo *si = SliceInfo::get(li, _dyser_size);
       if (si->cs_size() == 0)
         return false;
