@@ -112,6 +112,12 @@ static void init()
   CPRegistry::get()->register_argument("dyser-inst-incr-factor",
                                        true, &VecIn.cp_obj);
 
+  // DySER FU executes without any inorder constraint
+  CPRegistry::get()->register_argument("dyser-full-dataflow",
+                                       false, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-full-dataflow",
+                                       false, &VecIn.cp_obj);
+
 
 }
 

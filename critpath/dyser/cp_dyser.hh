@@ -58,6 +58,7 @@ namespace DySER {
     unsigned _num_config_loop_switching = 0;
     unsigned _num_config_config_switching = 0;
     double _dyser_inst_incr_factor = 0.5;
+    bool _dyser_full_dataflow = false;
   protected:
     void incrConfigSwitch(unsigned lp, unsigned extra) {
       _num_config += lp + extra;
@@ -174,13 +175,13 @@ namespace DySER {
         InstPtr depInst = getInstForOp(DepOp);
         if (!depInst.get())
           continue;
-        // we should neve have dependence on dyser_recv -- a spurious use...
+        // we should never have dependence on dyser_recv -- a spurious use...
         if (depInst->hasDisasm() && depInst->getDisasm().find("dyser_recv") != std::string::npos)
           continue;
         if (getenv("DUMP_MAFIA_PIPE_DEP")) {
           std::cout << "\t:";  dumpInst(depInst);
         }
-        // FIXME:: Assumption - 2 cycle to get to next functional unit.
+        // FIXME:: Assumption - 1 cycle to get to next functional unit.
         getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
                                *dyInst, dyser_compute_inst::DyReady,
                                _dyser_fu_fu_lat,
@@ -188,10 +189,12 @@ namespace DySER {
       }
       if (prevInst.get() != 0) {
         // Ready is inorder
-        getCPDG()->insert_edge(*prevInst, dyser_compute_inst::DyReady,
-                               *dyInst, dyser_compute_inst::DyReady,
-                               0,
-                               E_DyRR);
+        if (!_dyser_full_dataflow) {
+          getCPDG()->insert_edge(*prevInst, dyser_compute_inst::DyReady,
+                                 *dyInst, dyser_compute_inst::DyReady,
+                                 0,
+                                 E_DyRR);
+        }
       }
     }
 
@@ -215,11 +218,13 @@ namespace DySER {
         if (overrideIssueLat != (unsigned)-1)
           issueLat = overrideIssueLat;
 
-        // Execute to Execute
-        getCPDG()->insert_edge(*prevInst, dyser_compute_inst::DyExecute,
-                               *dyInst, dyser_compute_inst::DyExecute,
-                               issueLat,
-                               E_DyFU);
+        if (!_dyser_full_dataflow) {
+          // Execute to Execute
+          getCPDG()->insert_edge(*prevInst, dyser_compute_inst::DyExecute,
+                                 *dyInst, dyser_compute_inst::DyExecute,
+                                 issueLat,
+                                 E_DyFU);
+        }
       }
     }
 
@@ -239,11 +244,13 @@ namespace DySER {
                              E_DyEP);
 
       if (prevInst.get() != 0) {
-        // complete is inorder to functional unit.
-        getCPDG()->insert_edge(*prevInst, prevInst->eventComplete(),
-                               *dyInst, dyInst->eventComplete(),
-                               0,
-                               E_DyPP);
+        if (!_dyser_full_dataflow) {
+          // complete is inorder to functional unit.
+          getCPDG()->insert_edge(*prevInst, prevInst->eventComplete(),
+                                 *dyInst, dyInst->eventComplete(),
+                                 0,
+                                 E_DyPP);
+        }
       }
     }
 
@@ -401,6 +408,9 @@ namespace DySER {
 
       if (strcmp(name, "dyser-inst-incr-factor") == 0)
         _dyser_inst_incr_factor = atof(optarg);
+
+      if (strcmp(name, "dyser-full-dataflow") == 0)
+        _dyser_full_dataflow = true;
     }
 
 
@@ -696,6 +706,8 @@ namespace DySER {
     }
 
     virtual InstPtr insertDyConfig(unsigned numCyclesToFetch) {
+      if (numCyclesToFetch)
+        return 0;
       InstPtr dy_config = createDyConfigInst(numCyclesToFetch);
       if (_last_dyser_inst.get() != 0)
         getCPDG()->insert_edge(*_last_dyser_inst,
@@ -727,7 +739,8 @@ namespace DySER {
         inserted(inst);
 
         if (!op->isLoad() // Skip DySER Load because we morph load to dyload
-            &&  SI->isAInputToDySER(op)) {
+            &&  SI->isAInputToDySER(op)
+            && dyser_inst::Send_Recv_Latency > 0) {
           // Insert a dyser send instruction to pipeline
           return insertDySend(op);
         }
@@ -746,11 +759,12 @@ namespace DySER {
                                             SI);
 
       if (justSwitchedConfig) {
-        assert(ConfigInst.get() != 0);
-        getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
-                               *dy_inst, dyser_compute_inst::DyReady,
-                               0,
-                               E_DyCR);
+        if (ConfigInst.get() != 0) {
+          getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
+                                 *dy_inst, dyser_compute_inst::DyReady,
+                                 0,
+                                 E_DyCR);
+        }
       }
 
       //Assumptions::
@@ -769,7 +783,8 @@ namespace DySER {
       }
 
       keepTrackOfInstOpMap(dy_inst, op);
-      if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)) {
+      if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)
+          && dyser_inst::Send_Recv_Latency > 0 && dyRecvLat > 0) {
         insertDyRecv(op, dy_inst, dyRecvLat);
       }
       return dy_inst;
