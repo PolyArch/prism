@@ -347,8 +347,7 @@ namespace DySER {
     virtual void accelSpecificStats(std::ostream& out, std::string &name) {
       out << " numConfig:" << _num_config
           << " loops: " << _num_config_loop_switching
-          << " config:" << _num_config_config_switching
-          << "\n";
+          << " config:" << _num_config_config_switching;
     }
 
     uint64_t numCycles() {

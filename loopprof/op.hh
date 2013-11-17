@@ -178,6 +178,7 @@ public:
   }
 
   std::string getCalledFuncName() const;
+  FunctionInfo *getCalledFunc() const { return _calledFunc; }
 
   void printEffAddrs() {
     return ;

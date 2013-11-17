@@ -39,11 +39,14 @@ int main(int argc, char *argv[])
   int max_mem_lat=1073741824; //some big numbers that will never make sense
   int max_ex_lat=1073741824;
   uint64_t progress_granularity = 100000;
-
+  bool progress_granularity_set = false;
   load_plugins(argv[0]);
 
   string run_name;
   string binary_name;
+
+  bool isStdOutTerminal = (ttyname(1) != 0);
+
 
   static struct option static_long_options[] =
     {
@@ -143,6 +146,7 @@ int main(int argc, char *argv[])
       }
       break;
     case 'p': {
+      progress_granularity_set = true;
       progress_granularity = atoi(optarg);
       if (progress_granularity == 0) {
         progress_granularity = 100000;
@@ -241,7 +245,9 @@ int main(int argc, char *argv[])
 
   struct timeval start;
   struct timeval end;
+
   gettimeofday(&start, 0);
+  uint64_t prev_time = start.tv_sec*1000000 + start.tv_usec;
 
 #if 0
   ifstream tempf(argv[optind], std::ios::in|std::ios::binary|std::ios::ate);
@@ -288,7 +294,28 @@ int main(int argc, char *argv[])
       break;
 
     if (count && (count % progress_granularity) == 0) {
-      std::cout << "\rprocessed " << count ;
+
+      if (!progress_granularity_set) {
+        struct timeval now;
+        gettimeofday(&now, 0);
+        uint64_t now_time  = now.tv_sec*1000000 + now.tv_usec;
+        int64_t elapsed_usec = now_time - prev_time;
+        prev_time = now_time;
+        int64_t update_usec = (isStdOutTerminal)? (250*1000) : (2*1000*1000);
+        if (elapsed_usec > update_usec || elapsed_usec < (update_usec/50)) {
+          // reduce progress_granularity
+          progress_granularity = (uint64_t) ((double)progress_granularity * (update_usec/(double)elapsed_usec));
+        }
+
+        if (progress_granularity < 100) {
+          progress_granularity = 100;
+        }
+      }
+      if (isStdOutTerminal) {
+        std::cout << "\rprocessed " << count ;
+      } else {
+        std::cout << "\nprocessed " << count ;
+      }
       uint64_t denom = std::min(max_inst, Prof::get().stopInst);
 
       if (denom != 0) {
@@ -296,15 +323,6 @@ int main(int argc, char *argv[])
                   << std::fixed << std::setprecision(4)
                   << (double)(100.0*(double)count/denom) << "% completed.";
       }
-#if 0
-      else if (input_fsize != 0) {
-        uint64_t pos = inf.tellg();
-        std::cout << "   ...   "
-                  << std::fixed << std::setprecision(4)
-                  << (double)(100.0*(double)pos/input_fsize)
-                  << "% completed.";
-      }
-#endif
       std::cout.flush();
     }
   }

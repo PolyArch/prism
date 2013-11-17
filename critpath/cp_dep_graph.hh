@@ -76,7 +76,7 @@
   X(DyEP,  "DyEP", "DySER Functional Execute to complete")      \
   X(DyPP,  "DyPP", "DySER Complete To Complete")                \
   X(DyCR,  "DyCR", "DySER Commit to ready")                     \
-  X(NPURE, "NPUCR", "NPU Complete to ready")                    \
+  X(NPUPR, "NPUCR", "NPU Complete to ready")                    \
   X(NPUFE, "NPUFE", "NPU Fake Edges")
 
 

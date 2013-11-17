@@ -30,17 +30,52 @@ namespace npu {
     }
 
     std::string _npu_func_name = "";
+    unsigned _npu_exec_latency = 32;
+    uint64_t _num_npu_exec_inst = 0;
 
     void handle_argument(const char *name,
                          const char *optarg) {
+      if (strcmp(name, "npu-func") == 0) {
+        _npu_func_name = std::string(optarg);
+      }
+      if (strcmp(name, "npu-exec-latency") == 0) {
+        _npu_exec_latency = atoi(optarg);
+      }
     }
+
+    bool isNPUFunc(FunctionInfo *func) const {
+      if (!func)
+        return false;
+      auto sym = func->symbol();
+      if (!sym)
+        return false;
+      return (sym->name == _npu_func_name);
+    }
+    std::string getFuncName(FunctionInfo *func) const {
+      if (!func)
+        return "";
+      auto sym = func->symbol();
+      if (!sym)
+        return "";
+      return sym->name;
+    }
+
+    void accelSpecificStats(std::ostream& out, std::string &name) {
+      out << " num_npu_invoked: " << _num_npu_exec_inst;
+    }
+
   private:
     std::map<Op*, InstPtr> _op2InstPtr;
+  public:
     virtual void addDeps(InstPtr &inst, Op *op = NULL) {
       if (op) {
+        assert(inst.get());
         _op2InstPtr[op] = inst;
       }
       CP_DG_Builder<T, E>::addDeps(inst, op);
+      if (getenv("MAFIA_NPU_DUMP_PIPE")) {
+        dumpInst(inst);
+      }
     }
 
     bool insideNPU = false;
@@ -51,45 +86,30 @@ namespace npu {
     std::set<std::string> CalledFuncs;
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
                      Op *op) {
+      bool insert_npu_exec = false;
       // are we inside the function
-      if (op && op->isCall()) {
-        std::string fname = op->getCalledFuncName();
-        if (!CalledFuncs.count(fname)) {
-          CalledFuncs.insert(fname);
-          std::cout << "NPU:: Called func: " << fname << "\n";
+      if (getenv("MAFIA_NPU_DUMP_CALLED_FUNC")) {
+        if (op && op->isCall()) {
+          std::string fname = getFuncName(op->getCalledFunc());
+          if (!CalledFuncs.count(fname)) {
+            CalledFuncs.insert(fname);
+            std::cout << "NPU:: Called func: "
+                      << fname
+                      << ":::" << op->getCalledFuncName()
+                      << "\n";
+          }
         }
       }
       if (!insideNPU) {
         if (op
             && op->isCall()
-            && op->getCalledFuncName() == _npu_func_name) {
+            && isNPUFunc(op->getCalledFunc())) {
           insideNPU = true;
-          // create the node for NPU execution
-          // now, create a node for NPU execution
-          InstPtr inst = InstPtr(new npu_inst());
-          getCPDG()->addInst(inst, index);
-
-          // create edges from its arguments;
-          FunctionInfo *func = op->getCalledFunc();
-          func->computeArguments();
-          for (auto I = func->arg_op_begin(), E = func->arg_op_end();
-               I != E; ++I) {
-            if (!_op2InstPtr.count(*I))
-              continue;
-            InstPtr depInst = _op2InstPtr[op];
-            getCPDG()->insert_edge(*depInst,
-                                   depInst->eventComplete(),
-                                   *inst, Inst_t::Ready,
-                                   0, E_NPUCR);
-          }
-          addDeps(inst);
-          pushPipe(inst);
-          inserted(inst);
-          _current_npu_exec_inst = inst;
+          insert_npu_exec = true;
         }
       } else {
         if (prevOp->isReturn()
-            && prevOp->func()->nice_name() == _npu_func_name) {
+            && isNPUFunc(prevOp->func())) {
           // just return from _npu_func_name
           // FIXME:: how about recursion...
           insideNPU = false;
@@ -100,6 +120,34 @@ namespace npu {
       prevOp = op;
       if (!insideNPU) {
         CP_DG_Builder<T, E>::insert_inst(img, index, op);
+        return;
+      }
+
+      if (insideNPU && insert_npu_exec) {
+        // create the node for NPU execution
+        // now, create a node for NPU execution
+        InstPtr inst = InstPtr(new npu_inst(_npu_exec_latency));
+        getCPDG()->addInst(inst, index);
+
+        // create edges from its arguments;
+        FunctionInfo *func = op->getCalledFunc();
+        func->computeArguments();
+        for (auto I = func->arg_op_begin(), E = func->arg_op_end();
+             I != E; ++I) {
+          if (!_op2InstPtr.count(I->first))
+            continue;
+          InstPtr depInst = _op2InstPtr[I->first];
+          assert(depInst.get());
+          getCPDG()->insert_edge(*depInst,
+                                 depInst->eventComplete(),
+                                 *inst, Inst_t::Ready,
+                                 0, E_NPUPR);
+        }
+        addDeps(inst);
+        pushPipe(inst);
+        inserted(inst);
+        _current_npu_exec_inst = inst;
+        ++ _num_npu_exec_inst;
         return;
       }
 
@@ -119,7 +167,9 @@ namespace npu {
         getCPDG()->insert_edge(prev_inst, stage,
                                *inst, stage, 0, E_NPUFE);
       // No push pipe
-
+      if (getenv("MAFIA_NPU_DUMP_ELIDED")) {
+        this->dumpInst(inst);
+      }
       inserted(inst);
     }
 
