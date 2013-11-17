@@ -43,7 +43,12 @@ static void init()
 
   CPRegistry::get()->register_argument("simd-exec-width",
                                        true, &OOO.cp_obj);
-
   CPRegistry::get()->register_argument("simd-exec-width",
+                                       true, &In.cp_obj);
+
+  CPRegistry::get()->register_argument("simd-inst-incr-factor",
                                        true, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("simd-inst-incr-factor",
+                                       true, &In.cp_obj);
+
 }

@@ -302,9 +302,31 @@ public:
     return _calledTo.count(fi);
   }
 
-  int dynamicInstsOnPath(int i) {
-    return instsOnPath(i) * _iterCount[i];
+  uint64_t dynamicInstsOnPath(int i) {
+    return (uint64_t)instsOnPath(i) * (uint64_t)_iterCount[i];
   }
+
+  uint64_t getStaticInstCount() {
+    uint64_t numStaticInsts = 0;
+    for (auto I = body_begin(), E = body_end(); I != E; ++I) {
+      numStaticInsts += (*I)->len();
+    }
+    return numStaticInsts;
+  }
+
+  bool isSuperBlockProfitable(double factor) {
+    uint64_t totalIterCount = getTotalIters();
+    uint64_t totalDynamicInst = numInsts();
+
+    uint64_t totalStaticInstCount = getStaticInstCount();
+
+    uint64_t totalInstInSB = totalIterCount * totalStaticInstCount;
+    assert(totalInstInSB > 0);
+    double instrIncrFactor = totalDynamicInst/totalInstInSB;
+
+    return (instrIncrFactor >= factor);
+  }
+
 
   bool calledOnlyFrom(std::set<FunctionInfo*>& fiSet,
                       std::set<LoopInfo*>& liSet,

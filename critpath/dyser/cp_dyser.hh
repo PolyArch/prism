@@ -52,12 +52,12 @@ namespace DySER {
     }
 
 
-  private:
+  protected:
     // number of times dyser configured..
     unsigned _num_config = 0;
     unsigned _num_config_loop_switching = 0;
     unsigned _num_config_config_switching = 0;
-
+    double _dyser_inst_incr_factor = 0.5;
   protected:
     void incrConfigSwitch(unsigned lp, unsigned extra) {
       _num_config += lp + extra;
@@ -398,6 +398,9 @@ namespace DySER {
 
       if (strcmp(name, "dyser-send-recv-latency") == 0)
         dyser_inst::Send_Recv_Latency = atoi(optarg);
+
+      if (strcmp(name, "dyser-inst-incr-factor") == 0)
+        _dyser_inst_incr_factor = atof(optarg);
     }
 
 
@@ -421,7 +424,8 @@ namespace DySER {
       SliceInfo *si = SliceInfo::get(li, _dyser_size);
       if (si->cs_size() == 0)
         return false;
-      if (!si->shouldDySERize(canVectorize(li, false)))
+      if (!si->shouldDySERize(canVectorize(li, false,
+                                           _dyser_inst_incr_factor)))
         return false;
       return true;
     }

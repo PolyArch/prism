@@ -62,7 +62,9 @@ namespace DySER {
         return false;
       // complete this as soon as it completes a iteration
       // we cannot vectorize this.
-      bool noVectorize = !canVectorize(CurLoop, nonStrideAccessLegal);
+      bool noVectorize = !canVectorize(CurLoop,
+                                       nonStrideAccessLegal,
+                                       _dyser_inst_incr_factor);
 
       if (noVectorize && !forceVectorize) {
         return true;
@@ -176,7 +178,7 @@ namespace DySER {
                                          int curLoopIter)
     {
       if (getenv("MAFIA_DYSER_LOOP_ARG") != 0) {
-        if (canVectorize(LI, nonStrideAccessLegal)) {
+        if (canVectorize(LI, nonStrideAccessLegal, _dyser_inst_incr_factor)) {
           std::cout << "Vectorizable: curLoopIter:" << curLoopIter << "\n";
         } else {
           std::cout << "NonVectorizable:" << curLoopIter << "\n";

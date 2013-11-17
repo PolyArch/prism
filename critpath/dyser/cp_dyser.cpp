@@ -107,5 +107,11 @@ static void init()
   CPRegistry::get()->register_argument("dyser-force-vectorize",
                                        false, &VecIn.cp_obj);
 
+  CPRegistry::get()->register_argument("dyser-inst-incr-factor",
+                                       true, &VecOut.cp_obj);
+  CPRegistry::get()->register_argument("dyser-inst-incr-factor",
+                                       true, &VecIn.cp_obj);
+
+
 }
 

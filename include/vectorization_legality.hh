@@ -126,7 +126,8 @@ protected:
   // Can we vectorize the loop?
   // clients override this
   virtual bool canVectorize(LoopInfo *li,
-                            bool nonStrideAccessLegal) {
+                            bool nonStrideAccessLegal,
+                            double acceptableIncrFactor) {
     // no loop.
     if (!li)
       return false;
@@ -135,6 +136,11 @@ protected:
     if (!li->isInnerLoop()) {
       return false;
     }
+
+    // if control flow is going to increase number of instructions too much,
+    // skip the loop from vectorization
+    if (!li->isSuperBlockProfitable(acceptableIncrFactor))
+      return true;
 
     return hasVectorizableMemAccess(li,
                                     nonStrideAccessLegal);

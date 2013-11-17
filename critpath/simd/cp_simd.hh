@@ -55,7 +55,7 @@ namespace simd {
     bool useSplittedOps   = true;
     bool useMergeOps = true;
     unsigned simd_exec_width = 1;
-
+    double  simd_inst_incr_factor = 0.5;
   public:
     cp_simd() : CP_OPDG_Builder<T, E> () {
     }
@@ -177,8 +177,14 @@ namespace simd {
     }
 
   public:
+
+    bool shouldVectorize(LoopInfo *CurLoop) {
+      return canVectorize(CurLoop, nonStrideAccessLegal,
+                          simd_inst_incr_factor);
+    }
+
     uint64_t numCycles() {
-      if (CurLoop && canVectorize(CurLoop, nonStrideAccessLegal)) {
+      if (CurLoop && shouldVectorize(CurLoop)) {
         // complete the loop ...
         completeSIMDLoop(CurLoop, CurLoopIter, false, true);
       }
@@ -213,6 +219,10 @@ namespace simd {
         useMergeOps = false;
         simd_exec_width = atoi(optarg);
       }
+      if (strcmp(name, "simd-inst-incr-factor") == 0) {
+        simd_inst_incr_factor = atof(optarg);
+      }
+
     }
 
     virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
@@ -245,7 +255,7 @@ namespace simd {
         std::cout << "Not an inner Loop\n";
 
 
-      if (canVectorize(li, nonStrideAccessLegal))
+      if (shouldVectorize(li))
         std::cout << "Vectorizable\n";
       else
         std::cout << "Nonvectorizable\n";
@@ -810,7 +820,7 @@ namespace simd {
 
         if (isLastInstACall
             && CurLoop
-            && canVectorize(CurLoop, nonStrideAccessLegal)) {
+            && shouldVectorize(CurLoop)) {
           if (op->func()->nice_name() == "__libm_sse2_sincosf") {
             // We can vectorize this function as well.
             StackLoop = CurLoop;
@@ -832,7 +842,7 @@ namespace simd {
 
         if (!StackLoop
             && CurLoop
-            && canVectorize(CurLoop, nonStrideAccessLegal)) {
+            && shouldVectorize(CurLoop)) {
           completeSIMDLoop(CurLoop, CurLoopIter, forceCompleteWithIT, true);
           forceCompleteWithIT = false;
         }
@@ -884,7 +894,7 @@ namespace simd {
             #endif
           }
         // set insertSIMDInstr if curloopiter is a multiple of _simd_len.
-        insertSIMDInst =  (canVectorize(CurLoop, nonStrideAccessLegal)
+        insertSIMDInst =  (shouldVectorize(CurLoop)
                            && CurLoopIter && (CurLoopIter % _simd_vec_len == 0)
                            && !StackLoop);
       }
@@ -894,7 +904,7 @@ namespace simd {
         isLastInstAReturn = op->isReturn();
       }
 
-      if (!StackLoop && !canVectorize(li, nonStrideAccessLegal)) {
+      if (!StackLoop && !shouldVectorize(li)) {
 
         insert_inst_to_default_pipe(img, index, op);
 
