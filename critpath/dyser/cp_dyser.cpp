@@ -7,11 +7,11 @@
 
 unsigned DySER::dyser_inst::Send_Recv_Latency = 1;
 
-static RegisterCP<DySER::cp_dyser> XOut("dyser", false);
-static RegisterCP<DySER::cp_dyser> XIn("dyser", true);
+static RegisterCP<DySER::cp_dyser> XOut("scalardyser", false);
+static RegisterCP<DySER::cp_dyser> XIn("scalardyser", true);
 
-static RegisterCP<DySER::cp_vec_dyser> VecOut("vec-dyser", false);
-static RegisterCP<DySER::cp_vec_dyser> VecIn("vec-dyser", true);
+static RegisterCP<DySER::cp_vec_dyser> VecOut("dyser", false);
+static RegisterCP<DySER::cp_vec_dyser> VecIn("dyser", true);
 
 static RegisterCP<DySER::cp_orig_dyser> OrigOut("orig-dyser", false);
 static RegisterCP<DySER::cp_orig_dyser> OrigIn("orig-dyser", true);
