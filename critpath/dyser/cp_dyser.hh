@@ -288,7 +288,8 @@ namespace DySER {
         // check whether we are in call to sin/cos function
         if (CurLoop
             && canDySERize(CurLoop)
-            && op->func()->nice_name() == "sincosf") {
+            && (op->func()->nice_name() == "sincosf"
+                || (op->func()->nice_name() == "__libm_sse2_sincosf"))) {
           StackLoop = CurLoop;
           StackLoopIter = CurLoopIter;
         }
@@ -310,7 +311,8 @@ namespace DySER {
 
         if (StackLoop
             && PrevOp && PrevOp->isReturn()
-            && PrevOp->func()->nice_name() == "sincosf") {
+            && ( PrevOp->func()->nice_name() == "sincosf"
+                 || PrevOp->func()->nice_name() == "__libm_sse2_sincosf")) {
           StackLoop = 0;
           CurLoopIter = StackLoopIter;
           StackLoopIter = 0;
