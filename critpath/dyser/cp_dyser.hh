@@ -679,10 +679,11 @@ namespace DySER {
       InstPtr dy_send = createDySendInst(op);
 
       if (justSwitchedConfig) {
-        assert(ConfigInst.get() != 0);
-        getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
-                               *dy_send, Inst_t::Ready, 0,
-                               E_DyCR);
+        if (ConfigInst.get() != 0) {
+          getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
+                                 *dy_send, Inst_t::Ready, 0,
+                                 E_DyCR);
+        }
       }
 
       addPipeDeps(dy_send, op);
@@ -708,7 +709,7 @@ namespace DySER {
     }
 
     virtual InstPtr insertDyConfig(unsigned numCyclesToFetch) {
-      if (numCyclesToFetch)
+      if (numCyclesToFetch == 0)
         return 0;
       InstPtr dy_config = createDyConfigInst(numCyclesToFetch);
       if (_last_dyser_inst.get() != 0)
