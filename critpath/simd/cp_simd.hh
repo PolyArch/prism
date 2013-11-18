@@ -429,29 +429,30 @@ namespace simd {
       //}
       std::vector<InstPtr> unpackInsts;
       std::map<Op*, bool> emitted;
-      int curIter = 0;
+      int curIter = -1;
+      int nextIterationToPushPipe = 0;
       //std::cout << "\n====== completeSIMDLoopWithIT ======>>>\n";
       // Add trace to the pipe
       for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();
            I != E; ++I) {
         Op *op = I->first;
-        //printDisasm(op);
-        // assert((int)_op2Count[op] == CurLoopIter
-        //      && "Different control path inside simd loop??");
 
         if ((CurLoopIter == (int)vec_len) && emitted.count(op))
           continue;
 
-        if (_simd_full_dataflow) {
+        if (_simd_full_dataflow && (CurLoopIter >= 4)) {
           if (op->bb_pos() == 0 && li->loop_head() == op->bb()) {
             ++curIter;
-            if (curIter > 1) {
-              // one full iteration is inserted.
-              // in full data flow, all subsequent iterations
-              // follow the first iteration
-              break;
+            if (curIter != nextIterationToPushPipe) {
+              int tmpVal = floor_to_pow2(CurLoopIter - nextIterationToPushPipe);
+              if (tmpVal > 3)
+                nextIterationToPushPipe += tmpVal;
+              else
+                nextIterationToPushPipe = curIter;
             }
           }
+          if (curIter != nextIterationToPushPipe)
+            continue;
         }
 
         emitted.insert(std::make_pair(op, true));
