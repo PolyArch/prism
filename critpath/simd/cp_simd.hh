@@ -495,7 +495,7 @@ namespace simd {
         keepTrackOfInstOpMap(inst, op);
 
         // update for SIMD
-        updateInstWithTraceInfo(op, inst, true);
+        // updateInstWithTraceInfo(op, inst, true);
 
         if (unpackInsts[0].get()) {
           // create the depedence edge
