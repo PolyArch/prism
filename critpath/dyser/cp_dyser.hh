@@ -787,7 +787,7 @@ namespace DySER {
 
       keepTrackOfInstOpMap(dy_inst, op);
       if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)
-          && dyser_inst::Send_Recv_Latency > 0 && dyRecvLat > 0) {
+          && dyser_inst::Send_Recv_Latency > 0) {
         insertDyRecv(op, dy_inst, dyRecvLat);
       }
       return dy_inst;
