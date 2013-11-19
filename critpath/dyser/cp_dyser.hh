@@ -742,6 +742,7 @@ namespace DySER {
       if (SI->isInLoadSlice(op)) {
         // FIXME:: Should all loadslice is not floating point ???
         //if (op->isLoad())
+        if (getenv("MAFIA_DYSER_ENERGY_HACK") != 0)
         {
           // change it to int
           inst->_floating = false;
