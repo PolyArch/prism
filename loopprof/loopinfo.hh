@@ -315,13 +315,24 @@ public:
   }
 
   bool isSuperBlockProfitable(double factor) {
+
     uint64_t totalIterCount = getTotalIters();
     uint64_t totalDynamicInst = numInsts();
 
     uint64_t totalStaticInstCount = getStaticInstCount();
 
     uint64_t totalInstInSB = totalIterCount * totalStaticInstCount;
-    assert(totalInstInSB > 0);
+    // No instruction in the superblock ????
+    // actually, we should assert here and debug the benchmarks...
+    static bool messagePrinted = false;
+    if (totalInstInSB == 0) {
+      if (!messagePrinted) {
+        std::cout << "Warning: totalInstInSB is zero. please investigate...\n";
+        messagePrinted = true;
+      }
+      return false;
+    }
+
     double instrIncrFactor = (totalDynamicInst)/((double)totalInstInSB);
     return (instrIncrFactor >= factor);
   }
