@@ -440,15 +440,19 @@ namespace simd {
         if ((CurLoopIter == (int)vec_len) && emitted.count(op))
           continue;
 
+        bool isAccelerated = false;
         if (_simd_full_dataflow && (CurLoopIter >= 4)) {
+          isAccelerated = true;
           if (op->bb_pos() == 0 && li->loop_head() == op->bb()) {
             ++curIter;
             if (curIter != nextIterationToPushPipe) {
               int tmpVal = floor_to_pow2(CurLoopIter - nextIterationToPushPipe);
               if (tmpVal > 3)
                 nextIterationToPushPipe += tmpVal;
-              else
+              else {
                 nextIterationToPushPipe = curIter;
+                isAccelerated = false;
+              }
             }
           }
           if (curIter != nextIterationToPushPipe)
@@ -492,6 +496,9 @@ namespace simd {
         }
 
         InstPtr inst = I->second;
+        if (isAccelerated)
+          inst->isAccelerated = true;
+
         keepTrackOfInstOpMap(inst, op);
 
         // update for SIMD

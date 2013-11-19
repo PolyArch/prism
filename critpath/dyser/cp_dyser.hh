@@ -740,6 +740,10 @@ namespace DySER {
                                        bool emitDyRecv = true,
                                        unsigned dyRecvLat = 0) {
       if (SI->isInLoadSlice(op)) {
+        if (op->isLoad() || op->isStore()) {
+          inst->isAccelerated = true;
+        }
+
         // FIXME:: Should all loadslice is not floating point ???
         //if (op->isLoad())
         if (getenv("MAFIA_DYSER_ENERGY_HACK") != 0)
@@ -756,9 +760,6 @@ namespace DySER {
             && dyser_inst::Send_Recv_Latency > 0) {
           // Insert a dyser send instruction to pipeline
           return insertDySend(op);
-        }
-        if (op->isLoad() || op->isStore()) {
-          inst->isAccelerated = true;
         }
         return inst;
       }

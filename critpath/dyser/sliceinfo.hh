@@ -108,8 +108,8 @@ namespace DySER {
     void computeBundledNodes() {
       for (unsigned i = 0, e = OpList.size(); i < e; ++i) {
         Op *op = OpList[i];
-        Op *nxop = (i+1 != e) ? OpList[i+1] : 0;
-        Op *nx2op = (i+2 != e)? OpList[i+2] : 0;
+        Op *nxop = (i+1 < e) ? OpList[i+1] : 0;
+        Op *nx2op = (i+2 < e)? OpList[i+2] : 0;
         if (checkForBundledNodes(op, nxop, nx2op)) {
           bundledNodesMap[nxop] = op;
           bundledNodesMap[nx2op] = op;
