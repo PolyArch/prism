@@ -238,6 +238,10 @@ namespace DySER {
       if (overrideLat != (unsigned)-1)
         op_lat = overrideLat;
 
+      if (applyMaxLatToAccel) {
+        op_lat = std::min((unsigned)_max_ex_lat, op_lat);
+      }
+
       getCPDG()->insert_edge(*dyInst, dyser_compute_inst::DyExecute,
                              *dyInst, dyser_compute_inst::DyComplete,
                              op_lat,
