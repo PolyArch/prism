@@ -51,8 +51,8 @@ namespace DySER {
         forceVectorize = true;
     }
 
-    virtual bool shouldCompleteThisLoop(LoopInfo *CurLoop,
-                                        unsigned CurLoopIter)
+    bool shouldCompleteThisLoop(LoopInfo *CurLoop,
+                                unsigned CurLoopIter) override
     {
       if (!CurLoop)
         return false;
@@ -91,11 +91,12 @@ namespace DySER {
     }
 
     virtual void completeDySERLoopWithIT(LoopInfo *DyLoop,
-                                         unsigned curLoopIter)
+                                         unsigned curLoopIter,
+                                         bool loopDone) override
     {
       if (!(curLoopIter && ((curLoopIter % _dyser_vec_len) == 0))) {
         cp_dyser::completeDySERLoopWithIT(DyLoop,
-                                          CurLoopIter);
+                                          CurLoopIter, loopDone);
         return;
       }
 
@@ -134,7 +135,7 @@ namespace DySER {
         }
         // emit _dyser_vec_len times for op in computation slice.
         InstPtr inst = op_n_Inst.second;
-        insert_sliced_inst(SI, op, inst, false);
+        insert_sliced_inst(SI, op, inst, false, false);
       }
     }
 
@@ -175,7 +176,8 @@ namespace DySER {
     }
 
     virtual void completeDySERLoopWithLI(LoopInfo *LI,
-                                         int curLoopIter)
+                                         int curLoopIter,
+                                         bool loopdone) override
     {
       if (getenv("MAFIA_DYSER_LOOP_ARG") != 0) {
         if (canVectorize(LI, nonStrideAccessLegal, _dyser_inst_incr_factor)) {
@@ -187,15 +189,15 @@ namespace DySER {
       // we can vectorize 2, 4, 8, 16 .. to max _dyser_vec_len
 
       if (curLoopIter <= 3 ) {
-        cp_dyser::completeDySERLoopWithLI(LI, curLoopIter);
+        cp_dyser::completeDySERLoopWithLI(LI, curLoopIter, loopdone);
         return;
       }
       if (curLoopIter & (curLoopIter - 1)) {
         // call recursively
         int loopIter = floor_to_pow2(curLoopIter);
         assert(loopIter && loopIter >= 4 && loopIter < curLoopIter);
-        completeDySERLoopWithLI(LI, loopIter);
-        completeDySERLoopWithLI(LI, (curLoopIter - loopIter));
+        completeDySERLoopWithLI(LI, loopIter, false);
+        completeDySERLoopWithLI(LI, (curLoopIter - loopIter), loopdone);
         return;
       }
 
@@ -284,9 +286,10 @@ namespace DySER {
                                        : pipeId - 1);
 
                 InstPtr dy_inst =
-                  insert_sliced_inst(SI, op, inst,
+                  insert_sliced_inst(SI, op, inst, loopdone,
                                      false,
                                      cloneOp2InstMap[op][prevPipeId],
+                                     (clone == 0 && j == 0),
                                      (clone+1 == numClones && j+1 == depth),
                                      SI->hasSinCos()? (24*depth): 0);
                 useCloneOpMap = false;
@@ -314,18 +317,18 @@ namespace DySER {
               // create the inst
               // handle the non stride access...
               if (isStrideAccess(op)) {
-                insert_sliced_inst(SI, op, inst);
+                insert_sliced_inst(SI, op, inst, loopdone);
               } else {
                 for (unsigned i = 0; i < _dyser_vec_len-1; ++i) {
                   InstPtr tmpInst = createInst(op->img, 0, op);
-                  insert_sliced_inst(SI, op, tmpInst);
+                  insert_sliced_inst(SI, op, tmpInst, loopdone);
                   updateInstWithTraceInfo(op, inst, false);
                 }
-                insert_sliced_inst(SI, op, inst);
+                insert_sliced_inst(SI, op, inst, loopdone);
                 this->keepTrackOfInstOpMap(inst, op);
               }
             } else {
-              insert_sliced_inst(SI, op, inst);
+              insert_sliced_inst(SI, op, inst, loopdone);
             }
           }
         }

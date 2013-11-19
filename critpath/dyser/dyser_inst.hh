@@ -173,7 +173,7 @@ namespace DySER {
     }
 
     int adjustExecuteLatency(int lat) const {
-      return Send_Recv_Latency;
+      return Send_Recv_Latency + lat;
     }
 
   };

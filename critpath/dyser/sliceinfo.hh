@@ -17,6 +17,7 @@ namespace DySER {
     std::map<Op*, bool> IsInLoadSlice;
     std::map<Op*, unsigned> rpoIndex;
     std::map<Op*, bool> IsInput;
+    std::map<Op*, bool> InvariantInput;
     std::map<Op*, bool> IsOutput;
 
     unsigned _cs_size = 0;
@@ -257,6 +258,56 @@ namespace DySER {
         if (dumpIOInfo)
           printDasm(op);
 
+        if (getenv("MAFIA_DO_NOT_USE_OP_FOR_IO") == 0) {
+          for (auto UI = op->d_begin(), UE = op->d_end(); UI != UE; ++UI) {
+            Op *DepOp = *UI;
+
+            if (dumpIOInfo) {
+              std::cout << "   op.: "; printDasm(DepOp);
+            }
+
+
+            if (isInLoadSlice(op)) {
+              if (!IsInLoadSlice.count(DepOp))
+                continue;
+              if (!isInLoadSlice(DepOp)) {
+                IsInput[DepOp] = true;
+                if (dumpIOInfo) {
+                  std::cout << "           ---> input from CS??\n";
+                }
+              }
+            } else {
+              if (op == DepOp) {
+                // spurious use or accumulate
+                // FIXME: make this robust...
+                if (checkDisasmHas(op, "ADDSS_XMM_XMM")) {
+                  if (dumpIOInfo) {
+                    std::cout << "           ---> input,output\n";
+                  }
+
+                  IsInput[op] = true;
+                  IsOutput[op] = true;
+                  continue;
+                }
+              }
+
+              if (!IsInLoadSlice.count(DepOp)) {
+                InvariantInput[DepOp] = true;
+                if (dumpIOInfo) {
+                  std::cout << "           ---> input (invariant)\n";
+                }
+                continue;
+              }
+              if (isInLoadSlice(DepOp)) {
+                IsInput[DepOp] = true;
+                if (dumpIOInfo) {
+                  std::cout << "           ---> input\n";
+                }
+              }
+            }
+          }
+        }
+
         for (auto UI = op->u_begin(), UE = op->u_end(); UI != UE; ++UI) {
           Op *UseOp = *UI;
           if (dumpIOInfo) {
@@ -334,7 +385,8 @@ namespace DySER {
       for (auto I = OpList.begin(), E = OpList.end(); I != E; ++I) {
 
         if ((*I)->isCall() && !isInLoadSlice(*I)) {
-          if ((*I)->getCalledFuncName() == "sincosf")
+          if ((*I)->getCalledFuncName() == "sincosf"
+              || (*I)->getCalledFuncName() == "__libm_sse2_sincosf")
             _hasSinCos = true;
         }
 

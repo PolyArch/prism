@@ -272,15 +272,22 @@ namespace DySER {
     LoopInfo *StackLoop = 0;
     unsigned StackLoopIter = 0;
     Op *PrevOp = 0;
-
+    bool _shouldCompleteLoop = false;
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
-                     Op *op)
+                     Op *op) override
     {
-      bool shouldCompleteLoop = false;
+
       //ModelState prev_model_state = dyser_model_state;
       LoopInfo *li = getLoop(op,
                              PrevOp && PrevOp->isReturn(),
                              StackLoop);
+
+      if (_shouldCompleteLoop) {
+        completeDySERLoop(CurLoop, CurLoopIter, (CurLoop != li));
+        CurLoopIter = 0; // reset loop counter.
+        _shouldCompleteLoop = false;
+      }
+
 
       if (CurLoop != li) {
         // we switched to a different loop
@@ -296,7 +303,7 @@ namespace DySER {
 
         // otherwise, complete DySER Loop
         if (!StackLoop && (CurLoop != 0) & canDySERize(CurLoop)) {
-          completeDySERLoop(CurLoop, CurLoopIter);
+          completeDySERLoop(CurLoop, CurLoopIter, true);
 
           if (useReductionConfig) {
             // Insert dyser config instruction with double the penalty
@@ -328,8 +335,8 @@ namespace DySER {
             ++CurLoopIter;
             ++global_loop_iter;
           }
-        shouldCompleteLoop = shouldCompleteThisLoop(CurLoop,
-                                                    CurLoopIter);
+        _shouldCompleteLoop = shouldCompleteThisLoop(CurLoop,
+                                                     CurLoopIter);
       }
 
       if (!StackLoop && !canDySERize(li)) {
@@ -346,27 +353,24 @@ namespace DySER {
 
         trackLoopInsts(CurLoop, op, inst, img);
       }
-      if (shouldCompleteLoop) {
-        completeDySERLoop(CurLoop, CurLoopIter);
-        CurLoopIter = 0; // reset loop counter.
-      }
+
       PrevOp = op;
     }
 
-    virtual void accelSpecificStats(std::ostream& out, std::string &name) {
+    void accelSpecificStats(std::ostream& out, std::string &name) override {
       out << " numConfig:" << _num_config
           << " loops: " << _num_config_loop_switching
           << " config:" << _num_config_config_switching;
     }
 
-    uint64_t numCycles() {
+    uint64_t numCycles() override {
       //if (CurLoop) {
       //  completeDySERLoop(CurLoop, CurLoopIter);
       //}
       return _lastInst->finalCycle();
     }
 
-    void handle_argument(const char *name, const char *optarg) {
+    void handle_argument(const char *name, const char *optarg) override {
       if (strcmp(name, "dyser-size") == 0) {
         _dyser_size = atoi(optarg);
         if (_dyser_size < 16)
@@ -501,7 +505,8 @@ namespace DySER {
     std::list<LoopInfo *> _ConfigCache;
 
     virtual void completeDySERLoop(LoopInfo *DyLoop,
-                                   unsigned curLoopIter)
+                                   unsigned curLoopIter,
+                                   bool loopDone)
     {
       if (PrevLoop != DyLoop) {
         incrConfigSwitch(1, 0);
@@ -534,9 +539,9 @@ namespace DySER {
 
 
       if (0) {
-        this->completeDySERLoopWithIT(DyLoop, curLoopIter);
+        this->completeDySERLoopWithIT(DyLoop, curLoopIter, loopDone);
       } else {
-        this->completeDySERLoopWithLI(DyLoop, curLoopIter);
+        this->completeDySERLoopWithLI(DyLoop, curLoopIter, loopDone);
       }
 
       this->cleanupLoopInstTracking();
@@ -577,7 +582,8 @@ namespace DySER {
     }
 
     virtual void completeDySERLoopWithIT(LoopInfo *DyLoop,
-                                         unsigned curLoopIter) {
+                                         unsigned curLoopIter,
+                                         bool loopDone) {
       assert(DyLoop);
 
       SI = SliceInfo::get(DyLoop, _dyser_size);
@@ -593,13 +599,14 @@ namespace DySER {
         auto op_n_Inst  = *I;
         Op *op = op_n_Inst.first;
         InstPtr inst = op_n_Inst.second;
-        insert_sliced_inst(SI, op, inst);
+        insert_sliced_inst(SI, op, inst, loopDone);
       }
       DySERizingLoop = false;
     }
 
 
-    virtual void completeDySERLoopWithLI(LoopInfo *LI, int curLoopIter) {
+    virtual void completeDySERLoopWithLI(LoopInfo *LI, int curLoopIter,
+                                         bool loopDone) {
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
       if (getenv("MAFIA_DUMP_SLICE_INFO")) {
@@ -645,26 +652,26 @@ namespace DySER {
 
               if (firstOp && tryBundleDySEROps) {
                 if (bundledOp2Inst.count(firstOp) == 0) {
-                  insert_sliced_inst(SI, op, inst);
+                  insert_sliced_inst(SI, op, inst, loopDone);
                   bundledOp2Inst[firstOp] = inst;
                 } else {
                   this->keepTrackOfInstOpMap(bundledOp2Inst[firstOp], op);
                 }
               } else
-                insert_sliced_inst(SI, op, inst);
+                insert_sliced_inst(SI, op, inst, loopDone);
             } else {
               // load slice -- coalesce if possible
               if (coalesceMemOps && (op->isLoad() || op->isStore())) {
                 Op *firstOp = SI->getFirstMemNode(op);
                 if (memOp2Inst.count(firstOp) == 0) {
-                  insert_sliced_inst(SI, op, inst);
+                  insert_sliced_inst(SI, op, inst, loopDone);
                   memOp2Inst[firstOp] = inst;
                 } else {
                   // we already created the inst
                   this->keepTrackOfInstOpMap(memOp2Inst[firstOp], op);
                 }
               } else {
-                insert_sliced_inst(SI, op, inst);
+                insert_sliced_inst(SI, op, inst, loopDone);
               }
             }
           }
@@ -698,7 +705,7 @@ namespace DySER {
 
       getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
                              *dy_recv, Inst_t::Ready,
-                             latency,
+                             dy_recv->adjustExecuteLatency(latency),
                              E_RDep);
 
       addDeps(dy_recv, op);
@@ -726,8 +733,10 @@ namespace DySER {
 
 
     virtual InstPtr insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
+                                       bool loopDone,
                                        bool useOpMap = true,
                                        InstPtr prevInst = 0,
+                                       bool emitDySendForCS = true,
                                        bool emitDyRecv = true,
                                        unsigned dyRecvLat = 0) {
       if (SI->isInLoadSlice(op)) {
@@ -751,6 +760,12 @@ namespace DySER {
           inst->isAccelerated = true;
         }
         return inst;
+      }
+
+      if (emitDySendForCS && SI->isAInputToDySER(op)) {
+        // We are here, if op is an accumulate type instruction.
+        // We should insert this op in the loop head itself...
+        insertDySend(op);
       }
 
       InstPtr prevPipelinedInst = ((useOpMap)
@@ -787,7 +802,7 @@ namespace DySER {
 
       keepTrackOfInstOpMap(dy_inst, op);
       if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)
-          && dyser_inst::Send_Recv_Latency > 0) {
+          && (loopDone || dyser_inst::Send_Recv_Latency > 0)) {
         insertDyRecv(op, dy_inst, dyRecvLat);
       }
       return dy_inst;
