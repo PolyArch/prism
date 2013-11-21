@@ -281,7 +281,8 @@ int main(int argc, char *argv[])
     prevCall = img._iscall;
     prevRet = img._isreturn;
 
-    if (op != NULL) {
+    // FIXME:: make check for bb and func an assertion
+    if (op && op->bb() && op->func()) {
       if (!registry_off) {
         CPRegistry::get()->insert(img, count, op);
       }
