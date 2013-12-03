@@ -38,8 +38,8 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
   //get the bb for newCPC -- if this isn't a basic block head, return;
   BB* newBB = _funcInfo->getBB(cpc);
   
-
-  //new I'm not in a basic block, then just get out... this only happens
+  
+  //if I'm not in a basic block, then just get out... this only happens
   //during initializiation
   if(newBB==NULL && _prevBB==NULL) {
     return NULL;
@@ -47,9 +47,12 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
 
 
   if(newBB!=NULL) {
+    //cout << "BB" << newBB->rpoNum() 
+    //  << " (" << newBB->head().first << "." << newBB->head().second << ")"
+    //  << "\n";
+
     //cout << "\nBB" << newBB->rpoNum();
     //cout << "\nBB" << newBB->head().first << "." << newBB->head().second;
-
 
     processBB_phase2(dId, newBB);
 
@@ -97,6 +100,11 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
   
   
   Op* op = _prevBB->getOp(cpc);
+
+  //cout << "OP" << " (" << cpc.first << "." << cpc.second << ")"
+  //    << (op->isCtrl()?"   ctrl":"") << "\n";
+
+
   op->setBB(_prevBB);
   if(op->isMem() && _loopStack.size()>0) {
     _loopStack.back()->opAddr(op,addr,acc_size);

@@ -194,7 +194,7 @@ public:
   
       if(loopInfo->isInnerLoop()
          && hpi != -2 //no hot path
-         && loopInfo->getLoopBackRatio(hpi) >= 0.6
+         && loopInfo->getLoopBackRatio(hpi) >= 0.7
          && loopInfo->getTotalIters() >= 2
          && loopInfo->instsOnPath(hpi) <= (int)_beret_max_ops
          ) {

@@ -44,6 +44,7 @@ public:
   }
 
   virtual ~CP_DG_Builder() {
+    
   }
 
 
@@ -872,7 +873,7 @@ protected:
   }
 
   virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {
-    if(!_isInOrder) {
+    //if(!_isInOrder) {
       if(inst->_isstore) {
         int st_lat=stLat(inst->_st_lat,inst->_cache_prod,
                          inst->_true_cache_prod,inst->isAccelerated);
@@ -881,7 +882,7 @@ protected:
         checkNumMSHRs(inst,true);
         checkPP(*inst);
       }
-    }
+    //}
   }
 
   virtual bool predictTaken(Inst_t& dep_n, Inst_t &n) {

@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
   std::string prof_file(argv[optind]);
   size_t start_pos = prof_file.find_last_of("/");
   size_t lp_start_pos=start_pos;
-  if (start_pos == string::npos) {
+  if (lp_start_pos == string::npos) {
     lp_start_pos=0;
   }
   if (binary_name != "")

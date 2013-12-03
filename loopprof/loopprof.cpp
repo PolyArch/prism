@@ -161,7 +161,11 @@ int main(int argc, char *argv[])
 
   //prepare output filename ... continued
 
-  size_t dot_pos =  filename.find(".",start_pos);
+  size_t lp_start_pos=start_pos;
+  if(lp_start_pos == string::npos) {
+    lp_start_pos=0;
+  }
+  size_t dot_pos =  filename.find(".",lp_start_pos);
   filename = (string::npos == dot_pos)? filename : filename.substr(0, dot_pos);
   filename += string(".prof");
   std::cout << "created .prof file: \"" << filename << "\"\n";
