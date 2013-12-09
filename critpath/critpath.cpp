@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
   std::string prof_file(argv[optind]);
   size_t start_pos = prof_file.find_last_of("/");
   size_t lp_start_pos=start_pos;
-  if (start_pos == string::npos) {
+  if (lp_start_pos == string::npos) {
     lp_start_pos=0;
   }
   if (binary_name != "")
@@ -281,7 +281,8 @@ int main(int argc, char *argv[])
     prevCall = img._iscall;
     prevRet = img._isreturn;
 
-    if (op != NULL) {
+    // FIXME:: make check for bb and func an assertion
+    if (op && op->bb() && op->func()) {
       if (!registry_off) {
         CPRegistry::get()->insert(img, count, op);
       }
@@ -343,6 +344,7 @@ int main(int argc, char *argv[])
 
 
   if (!registry_off) {
+    system("mkdir -p stats/");
     CPRegistry::get()->results();
 
     if(!noMcPAT) {

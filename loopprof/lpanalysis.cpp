@@ -74,7 +74,10 @@ bool doLoopProfAnalysis(const char *trace_fname,
 
       if (pass == 1) {
         static int skipInsts = 0;
-        if (prevCtrl) {
+        //TODO! EXPERIMENTAL!
+        //This condition determines whether we start a new bb
+        if(prevCtrl && cp_array[ind]._upc==0) { 
+        //old way: if (prevCtrl) {
           if (skipInsts > 0) {
             //cout << "------------------skip ---------" << skipInsts << "\n";
             pathProf.setSkipInsts(skipInsts);

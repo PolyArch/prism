@@ -94,6 +94,7 @@ public:
   unsigned _beret_max_seb=6,_beret_max_mem=2,_beret_max_ops=80;
   unsigned _beret_config_time=1,_beret_iops=2;
   unsigned _beret_dataflow_seb=0,_beret_dataflow_pure=0;
+  unsigned _no_gams=false;
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "beret-max-seb") == 0) {
       unsigned temp = atoi(optarg);
@@ -151,6 +152,10 @@ public:
         std::cerr << "ERROR:" << name << " arg: \"" << optarg << "\" is invalid\n";
       }
     }
+    if (strcmp(name, "no-gams") == 0) {
+      _no_gams=true;
+    }
+
 
   }
 
@@ -194,7 +199,7 @@ public:
   
       if(loopInfo->isInnerLoop()
          && hpi != -2 //no hot path
-         && loopInfo->getLoopBackRatio(hpi) >= 0.6
+         && loopInfo->getLoopBackRatio(hpi) >= 0.7
          && loopInfo->getTotalIters() >= 2
          && loopInfo->instsOnPath(hpi) <= (int)_beret_max_ops
          ) {
@@ -202,11 +207,10 @@ public:
         part_gams_str << _run_name << "partition." << loopInfo->id() << ".gams";
   
         bool gams_details=false;
-        bool no_gams=false;
         std::cerr << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
             li2ssmap[loopInfo],li2sgmap[loopInfo],
-            gams_details,no_gams,_beret_max_seb,_beret_max_mem);
+            gams_details,_no_gams,_beret_max_seb,_beret_max_mem);
         if(worked) {
           std::cerr << " -- Beretized\n";
         } else {
