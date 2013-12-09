@@ -83,6 +83,63 @@ protected:
 
   virtual void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) = 0;
 
+
+  //cur_fi will always be on
+  //cur_li will either be null or have a loop
+  FunctionInfo* cur_fi;
+  LoopInfo* cur_li;
+  std::map<FunctionInfo*,uint64_t> cycleMapFunc;
+  std::map<LoopInfo*,uint64_t> cycleMapLoop;
+
+  uint64_t  cur_cycles=0;
+  //Update cycles spent in this config
+public:
+  virtual void update_cycles(Op* op) {
+    if(op->bb_pos()!=0) {
+      return;
+    }
+
+    FunctionInfo* fi = op->func();
+    LoopInfo* li = op->func()->getLoop(op->bb());
+    assert(fi);
+
+    if(cur_fi) {
+      // If there was a change
+      if(li!=cur_li || cur_fi!=fi) {
+        //get the current cycle
+        uint64_t cycles=this->numCycles();
+        uint64_t cycle_diff = cycles - cur_cycles;
+        cur_cycles=cycles;
+  
+        if(cur_li) {
+          cycleMapLoop[cur_li]+=cycle_diff;
+        } else {
+          cycleMapFunc[cur_fi]+=cycle_diff;
+        }  
+      }
+    }
+
+    cur_li=li;
+    cur_fi=fi;
+  }
+
+  void printRegionBreakdown(std::ostream& outf) {
+    //We need to print out loops and funcions
+    for(auto i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
+      FunctionInfo* fi = i->second;
+      outf << std::setw(30) << fi->nice_name() << " ";
+      outf << cycleMapFunc[fi] << "\n";
+
+      for(auto i=fi->li_begin(),e=fi->li_end();i!=e;++i) {
+        LoopInfo* li = i->second;
+        outf << std::setw(30) << li->nice_name() << " ";
+        outf << cycleMapLoop[li] << "\n";
+      }
+    }
+
+
+  }
+
 private:
   bool TraceOutputs = false;
   std::ofstream out;
@@ -237,6 +294,7 @@ public:
   }
 
   virtual uint64_t numCycles() = 0;
+  virtual uint64_t finish() {return numCycles();} //default does nothing
 
   virtual void calcAccelEnergy(std::string fname_base,int nm) {
     return;

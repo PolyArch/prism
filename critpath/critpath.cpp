@@ -344,6 +344,7 @@ int main(int argc, char *argv[])
 
 
   if (!registry_off) {
+    system("mkdir -p stats/");
     CPRegistry::get()->results();
 
     if(!noMcPAT) {

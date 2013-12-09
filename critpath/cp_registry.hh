@@ -10,7 +10,8 @@
 
 #include <vector>
 #include <tuple>
-
+#include <ostream>
+#include <fstream>
 #include "cp_utils.hh"
 
 
@@ -168,6 +169,7 @@ public:
   void insert(CP_NodeDiskImage img, uint64_t index, Op* op) {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       I->second->insert(img, index, op);
+      I->second->update_cycles(op);
     }
   }
 
@@ -178,8 +180,23 @@ public:
     }
     uint64_t baselineCycles = baselineCP ? baselineCP->numCycles() : 0;
 
+    std::string prefix = (!_run_name.empty()) ? _run_name + std::string(".") :
+                                                         std::string("");
+
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
+      I->second->finish();
       I->second->printResults(std::cout, I->first, baselineCycles);
+      std::string region_bdown=std::string("stats/") + prefix +
+                               I->first + std::string(".out");
+  
+      std::ofstream region_bdown_outf;
+      region_bdown_outf.open(region_bdown.c_str(),std::ofstream::out |
+                             std::ofstream::trunc);
+  
+      if(!region_bdown_outf.good()) {
+        std::cerr << "Cannot open file: " << region_bdown << "\n";
+      }
+      I->second->printRegionBreakdown(region_bdown_outf);
     }
   }
 

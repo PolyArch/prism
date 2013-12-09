@@ -28,5 +28,7 @@ static void init()
   CPRegistry::get()->register_argument("beret-dataflow-seb",true,&OOO.cp_obj);
   CPRegistry::get()->register_argument("beret-dataflow-seb",true,&In.cp_obj);
 
+  CPRegistry::get()->register_argument("no-gams", false, &OOO.cp_obj);
+  CPRegistry::get()->register_argument("no-gams", false, &In.cp_obj);
 }
 

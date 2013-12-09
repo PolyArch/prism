@@ -124,6 +124,11 @@ public:
   virtual dep_graph_t<Inst_t,T,E> * getCPDG() = 0;
 
   virtual uint64_t numCycles() {
+    return getCPDG()->getMaxCycles();
+  }
+ 
+
+  virtual uint64_t finish() {
     getCPDG()->finish(maxIndex);
     uint64_t final_cycle = getCPDG()->getMaxCycles();
     activityMap.insert(final_cycle);
@@ -311,6 +316,9 @@ protected:
 
     //delete irrelevent
     if(MSHRUseMap.begin()->first < curCycle) {
+      //debug MSHRUse Deletion
+      //std::cout << "MSHRUse " << MSHRUseMap.begin()->first << " < " << curCycle << "\n";
+
       auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
       auto firstMSHRUse = MSHRUseMap.begin();
       if(upperMSHRUse->first > firstMSHRUse->first) {
