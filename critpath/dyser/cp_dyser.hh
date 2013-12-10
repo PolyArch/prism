@@ -367,12 +367,14 @@ namespace DySER {
           << " config:" << _num_config_config_switching;
     }
 
+/*
     uint64_t numCycles() override {
       //if (CurLoop) {
       //  completeDySERLoop(CurLoop, CurLoopIter);
       //}
       return _lastInst->finalCycle();
     }
+*/
 
     void handle_argument(const char *name, const char *optarg) override {
       if (strcmp(name, "dyser-size") == 0) {

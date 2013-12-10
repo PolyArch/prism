@@ -184,6 +184,16 @@ namespace simd {
                           simd_inst_incr_factor);
     }
 
+    virtual uint64_t finish() {
+      if (CurLoop && shouldVectorize(CurLoop)) {
+        // complete the loop ...
+        completeSIMDLoop(CurLoop, CurLoopIter, false, true);
+      }
+     
+      return CP_DG_Builder::finish();
+    }
+
+/*
     uint64_t numCycles() {
       if (CurLoop && shouldVectorize(CurLoop)) {
         // complete the loop ...
@@ -191,7 +201,7 @@ namespace simd {
       }
       return _lastInst->finalCycle();
     }
-
+*/
     void handle_argument(const char *name, const char *optarg) {
       if (strcmp(name, "simd-len") == 0) {
         _simd_vec_len = atoi(optarg);
