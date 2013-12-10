@@ -138,7 +138,7 @@ public:
         LoopInfo* li = i->second;
         if(!li->cantFullyInline()) {
           float inlineValue=inline_value(li); 
-          std::cout << "->" << li->nice_name() << " (value " << inlineValue << ")\n";
+  //        std::cout << "->" << li->nice_name() << " (value " << inlineValue << ")\n";
           PQL.push(li,inlineValue);
         } else {
           //std::cout << "can't inline " << li->nice_name() << "\n";
@@ -147,7 +147,7 @@ public:
       }
       if(!fi->cantFullyInline()) {
         float inlineValue = inline_value(fi);
-        std::cout << "->" << fi->nice_name() << " (value " << inlineValue << ")\n";
+//        std::cout << "->" << fi->nice_name() << " (value " << inlineValue << ")\n";
         PQF.push(fi,inlineValue);
       } else {
         //std::cout << "can't inline " << fi->nice_name() << "\n";
@@ -177,10 +177,10 @@ public:
       if(loop_queue_v > func_queue_v) { //add a loop
         
         LoopInfo* li=PQL.begin()->second;
-          float inlineValue=PQL.begin()->first; 
-          std::cout << "-------------------------- pick loop: " 
-                    << li->func()->nice_name() << "_" << li->id()
-                    << "  (value " << inlineValue << ")\n";
+          //float inlineValue=PQL.begin()->first; 
+          //std::cout << "-------------------------- pick loop: " 
+            //        << li->func()->nice_name() << "_" << li->id()
+              //      << "  (value " << inlineValue << ")\n";
 
         PQL.erase(li);
         if(total + li->inlinedStaticInsts() < (int)_ccores_max_ops) {
@@ -191,9 +191,9 @@ public:
 
       } else { //add a func
         FunctionInfo* fi=PQF.begin()->second;
-           float inlineValue = PQF.begin()->first;
-           std::cout << "------------------------- pick func: " 
-                     << fi->nice_name() << " (value " << inlineValue << ")\n";
+           //float inlineValue = PQF.begin()->first;
+          // std::cout << "------------------------- pick func: " 
+            //         << fi->nice_name() << " (value " << inlineValue << ")\n";
 
         PQF.erase(fi);
         if(total + fi->inlinedStaticInsts() < (int)_ccores_max_ops) {
@@ -211,7 +211,7 @@ public:
     int totalUsed=0;
     uint64_t totalDynamicInsts=0;
 
-    std::cout << "Funcs: ";
+//    std::cout << "Funcs: ";
     for(auto i=_fi_ccores.begin(),e=_fi_ccores.end();i!=e;) {
       FunctionInfo* fi = *i;
       bool redundant = fi->calledOnlyFrom(_fi_ccores,_li_ccores);
@@ -221,13 +221,13 @@ public:
       } else {
         totalUsed+=fi->inlinedStaticInsts();
         totalDynamicInsts+=fi->totalDynamicInlinedInsts();
-        std::cout << fi->nice_name() 
-                  << "(" << fi->inlinedStaticInsts()
-                  << "," << fi->totalDynamicInlinedInsts() << ") ";
+  //      std::cout << fi->nice_name() 
+    //              << "(" << fi->inlinedStaticInsts()
+      //            << "," << fi->totalDynamicInlinedInsts() << ") ";
         ++i;
       }
     }
-    std::cout << "\nLoops: ";
+//    std::cout << "\nLoops: ";
     for(auto i=_li_ccores.begin(),e=_li_ccores.end();i!=e;) {
       LoopInfo* li = *i;
       bool redundant = li->calledOnlyFrom(_fi_ccores,_li_ccores);
@@ -236,15 +236,15 @@ public:
       } else {
         totalUsed+=li->inlinedStaticInsts();
         totalDynamicInsts+=li->totalDynamicInlinedInsts();
-        std::cout << li->nice_name()
-                  << "(" << li->inlinedStaticInsts()
-                  << "," << li->totalDynamicInlinedInsts() << ") ";
+//        std::cout << li->nice_name()
+  //                << "(" << li->inlinedStaticInsts()
+    //              << "," << li->totalDynamicInlinedInsts() << ") ";
         ++i;
       }
     }
-    std::cout<< "\n";
-    std::cout << "--- total used = " << totalUsed 
-               << ", total insts" << totalDynamicInsts << "---\n";
+//    std::cout<< "\n";
+  //  std::cout << "--- total used = " << totalUsed 
+    //           << ", total insts" << totalDynamicInsts << "---\n";
     return totalUsed;
   }
 
