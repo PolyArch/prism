@@ -798,13 +798,21 @@ public:
   //typedef typename std::vector<dg_inst<T,E> > KernelMarkerList;
   //KernelMarkerList  _kernel_markers;
   //typedef typename KernelMarkerList::iterator KernelMarkerListIterator;
-public:
+  uint64_t maximum_cycle_seen=0;
+  void updateMax(E* edge) {
+    uint64_t newest_cycle=edge->dest()->cycle();
+    if(newest_cycle > maximum_cycle_seen) {
+      maximum_cycle_seen=newest_cycle;
+    }
+  }
 
+public:
   E* insert_edge(T& event1, T& event2,
                      int len, 
                      unsigned etype=E_NONE) {
     E* edge = new E(&event1,&event2, len, etype);
     event1.add_edge(edge);
+    updateMax(edge);
     return edge;
   }
 
@@ -816,6 +824,7 @@ public:
                      unsigned etype=E_NONE) {
     E* edge = new E(&event,&destnodes[destTy], len, etype);
     event.add_edge(edge);
+    updateMax(edge);
     return edge;
   }
 
@@ -826,6 +835,7 @@ public:
                      unsigned etype=E_NONE) {
     E* edge = new E(&srcnodes[srcTy],&event, len, etype);
     srcnodes[srcTy].add_edge(edge);
+    updateMax(edge);
     return edge;
   }
 
@@ -837,6 +847,7 @@ public:
                      unsigned etype=E_NONE) {
     E* edge = new E(&srcnodes[srcTy],&destnodes[destTy], len, etype);
     srcnodes[srcTy].add_edge(edge);
+    updateMax(edge);
     return edge;
   }
 
@@ -857,6 +868,7 @@ public:
     //Inst_t &destnodes = queryNodes(destIdx);
     E* edge = new E(&srcnodes[srcTy],&destnodes[destTy], len, etype);
     srcnodes[srcTy].add_edge(edge);
+    updateMax(edge);
     return edge;
   }
 
@@ -872,11 +884,15 @@ public:
 
   uint64_t numCycles;
   uint64_t getMaxCycles() {
-    if (!_latestIdx)
-      return -1;
-
-    dg_inst_base<T,E> &inst = queryNodes(_latestIdx);
-    return inst.finalCycle();
+    #if 0
+      if (!_latestIdx)
+        return -1;
+ 
+      dg_inst_base<T,E> &inst = queryNodes(_latestIdx);
+      return inst.finalCycle();
+    #else
+      return maximum_cycle_seen;
+    #endif
   }
 
   void cleanup() {

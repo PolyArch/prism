@@ -109,6 +109,25 @@ public:
         //get the current cycle
         uint64_t cycles=this->numCycles();
         uint64_t cycle_diff = cycles - cur_cycles;
+
+        /*
+        if(cycles < cur_cycles) {
+          if(cycles + 200 < cur_cycles) {
+            std::cerr << "ERROR: WEIRD CYCLE COUNTS!" << "\n";
+            std::cerr << "previous last cycle: " << cur_cycles << "\n";
+            std::cerr << "new last cycle: " << cycles << "\n";
+          }
+          cycle_diff=0;
+        }*/
+        
+        if(cycles < cur_cycles || cycles     >= cur_cycles+ ((uint64_t)-1)/2 
+                               || cycle_diff >= ((uint64_t)-1)/2 ) {
+          std::cerr << "ERROR: WEIRD CYCLE COUNTS!" << "\n";
+          std::cerr << "previous last cycle: " << cur_cycles << "\n";
+          std::cerr << "new last cycle: " << cycles << "\n";
+          assert(0);
+        }
+
         cur_cycles=cycles;
   
         if(cur_li) {

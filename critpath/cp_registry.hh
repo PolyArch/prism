@@ -180,8 +180,9 @@ public:
     }
     uint64_t baselineCycles = baselineCP ? baselineCP->numCycles() : 0;
 
-    std::string prefix = (!_run_name.empty()) ? _run_name + std::string(".") :
-                                                         std::string("");
+    //std::string prefix = (!_run_name.empty()) ? _run_name + std::string(".") :
+    //                                                     std::string("");
+    std::string prefix = _run_name;
 
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       I->second->finish();
