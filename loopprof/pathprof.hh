@@ -98,6 +98,15 @@ public:
     }
     return -1;
   }
+
+  LoopInfo* curLoop() {
+    if(!isLooping()) {
+      return NULL;
+    } else {
+      return _loopStack.back();
+    }
+  }
+
   bool isLooping() {
     return _loopStack.size()>0;
   }
@@ -409,6 +418,10 @@ public:
 public:
   PathProf() {
     _dId=0;
+  }
+
+  StackFrame* curFrame() {
+    return &(_callStack.back());
   }
 
   void procSymTab(const char* filename) {

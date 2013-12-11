@@ -300,7 +300,11 @@ void FunctionInfo::loopNestAnalysis() {
 
 void FunctionInfo::toDotFile(std::ostream& out) {
     out << "digraph GA{\n";
-   
+
+    out << " graph [fontname = \"helvetica\"];\n";
+    out << " node  [fontname = \"helvetica\"];\n";
+    out << " edge  [fontname = \"helvetica\"];\n";  
+ 
     out << "labelloc=\"t\";\n";
     if(_sym!=0) {
       out <<  "label=\"" << ELF_parser::demangle(_sym->name.c_str());
@@ -309,6 +313,8 @@ void FunctionInfo::toDotFile(std::ostream& out) {
     }
 
     out << "\\n";
+    out << "ins=" << ninputs() << ", outs=" << noutputs() << ";\\n";
+
     if(_canRecurse) {
       out << "can-recurse";
     } else if(_callsRecursiveFunc){
@@ -418,7 +424,7 @@ void FunctionInfo::toDotFile(std::ostream& out) {
   
       out << "\"loop_" << li.loop_head()->head().first <<  "\" [label=\"";
       out << "L" << li.id(); 
-      out << " (depth = " << li.depth() << ",";
+      out << " (depth = " << li.depth();
       if(li.callsRecursiveFunc()) {
         out << ",calls-rec";
       } else if(li.containsCallReturn()){
@@ -432,21 +438,25 @@ void FunctionInfo::toDotFile(std::ostream& out) {
         out << ",can-inline";
       }
 
-      out << ")\\nst<" << li.myStaticInsts() 
+      out << ") \\n";
+
+      out << "ins=" << li.ninputs() << ", outs=" << li.noutputs() << ";";
+
+      out << "\\nst<" << li.myStaticInsts() 
           << "," << li.staticInsts()
           << "," << li.inlinedStaticInsts() << ">"
           << "\\ndy<" << li.numInsts() << "," << li.totalDynamicInlinedInsts() << ">"
 
           << ";\\n";
-      LoopInfo::BBset::iterator ib,eb;
-      for(ib=li.body_begin(),eb=li.body_end();ib!=eb;++ib) {
+
+      out << "BBs:"; 
+      for(auto ib=li.body_begin(),eb=li.body_end();ib!=eb;++ib) {
         BB* bb = *ib;
         out << bb->rpoNum() << ", ";
       }
       out << "\\n";
       
-      LoopInfo::LoopDepSet::iterator ldsi,ldse;
-      for(ldsi=li.ld_begin(),ldse=li.ld_end();ldsi!=ldse;++ldsi) {
+      for(auto ldsi=li.ld_begin(),ldse=li.ld_end();ldsi!=ldse;++ldsi) {
         LoopInfo::LoopDep dep = *ldsi;
         LoopInfo::LoopDep::iterator di,de;
         out << "dep: ";
@@ -456,22 +466,21 @@ void FunctionInfo::toDotFile(std::ostream& out) {
         out << "\\n";
       }
 
-      LoopInfo::PathMap::iterator ip,ep;
-      for(ip=li.paths_begin(),ep=li.paths_end();ip!=ep;++ip) {
+      out << "Paths: ";
+      for(auto ip=li.paths_begin(),ep=li.paths_end();ip!=ep;++ip) {
         int pathNum = ip->first;
         LoopInfo::BBvec& bbvec = ip->second;
         int freq = li.pathFreq(pathNum);
         out << pathNum << ": ";
   
-        LoopInfo::BBvec::iterator ib,eb;
-        for(ib=bbvec.begin(),eb=bbvec.end();ib!=eb;++ib) {
+        for(auto ib=bbvec.begin(),eb=bbvec.end();ib!=eb;++ib) {
           BB* bb = *ib;
           out << bb->rpoNum() <<" ";
         }
         out << "(" << freq << " times)\\n";
       }
   
-      out << "\"];\n";     
+      out << "\", shape=box, margin=\"0.2,0.2\"];\n";     
     }
 
 

@@ -92,6 +92,9 @@ private:
   int    _loopCount = 0; //total number of loops
   int    _curIter = 0;
 
+  int _ninputs = -1;
+  int _noutputs = -1;
+
   uint64_t  _numInsts = 0; //total number of instructions executed in this loop
   uint64_t  _numCycles = 0; //total number of cycles (roughly) in this loop
 
@@ -183,7 +186,50 @@ public:
     return staticForwardDep(dop,op);
   }
 
+  void calcInsOuts() {
+    std::set<Op*> inputOps;
+    std::set<Op*> outputOps;
 
+    for(auto bbi=_loopBody.begin(),bbe=_loopBody.end();bbi!=bbe;++bbi) {  
+      BB* bb = *bbi;
+      for(auto i=bb->op_begin(),e=bb->op_end();i!=e;++i) {
+        Op* op = *i;
+
+        //check each dependence
+        for(auto dsi=op->d_begin(),dse=op->d_end();dsi!=dse;++dsi) {
+          Op* dep_op = *dsi;
+          if(!this->inLoop(dep_op->bb())&&dep_op->func() == func()) {
+            inputOps.insert(dep_op);
+          }
+        }
+
+        //check each use
+        for(auto usi=op->u_begin(),use=op->u_end();usi!=use;++usi) {
+          Op* use_op = *usi;
+          if(!this->inLoop(use_op->bb())&&use_op->func() == func()) {
+            outputOps.insert(use_op);
+          }
+        }
+
+      }
+    }
+    _ninputs=inputOps.size();
+    _noutputs=outputOps.size();
+  }
+
+  int ninputs() {
+    if(_ninputs==-1) {
+      calcInsOuts();
+    }
+    return _ninputs;
+  }
+
+  int noutputs() {
+    if(_noutputs==-1) {
+      calcInsOuts();
+    }
+    return _noutputs;
+  }
 
   bool containsCallReturn() {
     for(auto bbi=_loopBody.begin(),bbe=_loopBody.end();bbi!=bbe;++bbi) {  

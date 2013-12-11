@@ -90,6 +90,7 @@ protected:
   LoopInfo* cur_li;
   std::map<FunctionInfo*,uint64_t> cycleMapFunc;
   std::map<LoopInfo*,uint64_t> cycleMapLoop;
+  BB* cur_bb;
 
   uint64_t  cur_cycles=0;
   //Update cycles spent in this config
@@ -100,7 +101,9 @@ public:
     }
 
     FunctionInfo* fi = op->func();
-    LoopInfo* li = op->func()->getLoop(op->bb());
+    //LoopInfo* li = op->func()->getLoop(op->bb());
+    LoopInfo* li = Prof::get().curFrame()->curLoop();
+
     assert(fi);
 
     if(cur_fi) {
@@ -130,14 +133,21 @@ public:
 
         cur_cycles=cycles;
   
+        std::cout << "BBs: [" << cur_bb->rpoNum() << "->" << op->bb()->rpoNum()  << ")";
+       
+        std::cout << "contrib " << cycle_diff << " to ";
         if(cur_li) {
+          std::cout  << cur_li->nice_name();
           cycleMapLoop[cur_li]+=cycle_diff;
         } else {
+          std::cout  << cur_fi->nice_name();
           cycleMapFunc[cur_fi]+=cycle_diff;
-        }  
+        }
+        std::cout << "\n";
       }
-    }
+    } 
 
+    cur_bb=op->bb();
     cur_li=li;
     cur_fi=fi;
   }

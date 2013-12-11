@@ -64,6 +64,8 @@ private:
   bool _canRecurse=false;
   bool _callsRecursiveFunc=false;
 
+  int _ninputs=0, _noutputs=-1;
+
 friend class boost::serialization::access;
 template<class Archive>
   void serialize(Archive & ar, const unsigned int version) {
@@ -476,8 +478,16 @@ public:
 protected:
   arg_op_map _argsMap;
 
-
 public:
+  int ninputs() {
+    computeArguments(); 
+    return _argsMap.size();
+  }
+  int noutputs() {
+    //TODO -- IMPLEMENT THIS?
+    return 0; 
+  }
+
   arg_op_iterator arg_op_begin() { return _argsMap.begin(); }
   arg_op_iterator arg_op_end()   { return _argsMap.end(); }
 

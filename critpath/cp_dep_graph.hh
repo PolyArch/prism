@@ -883,13 +883,15 @@ public:
 */
 
   uint64_t numCycles;
+
+
   uint64_t getMaxCycles() {
     #if 0
       if (!_latestIdx)
         return -1;
  
       dg_inst_base<T,E> &inst = queryNodes(_latestIdx);
-      return inst.finalCycle();
+      return inst.cycleOfStage(inst.eventComplete());//inst.finalCycle();
     #else
       return maximum_cycle_seen;
     #endif
