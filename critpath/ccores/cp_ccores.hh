@@ -476,7 +476,7 @@ private:
     }
 
     //at this point, we can clean up the old entries
-    cleanLSQEntries(inst.cycleOfStage(CCoresInst::BBready));
+    cleanLSQEntries(inst.cycleOfStage(CCoresInst::BBReady));
   }
 
   //"Execute" represents when current BB is about to execute 
