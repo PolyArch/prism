@@ -133,17 +133,17 @@ public:
 
         cur_cycles=cycles;
   
-        std::cout << "BBs: [" << cur_bb->rpoNum() << "->" << op->bb()->rpoNum()  << ")";
+//        std::cout << "BBs: [" << cur_bb->rpoNum() << "->" << op->bb()->rpoNum()  << ")";
        
-        std::cout << "contrib " << cycle_diff << " to ";
+//        std::cout << "contrib " << cycle_diff << " to ";
         if(cur_li) {
-          std::cout  << cur_li->nice_name();
+//          std::cout  << cur_li->nice_name();
           cycleMapLoop[cur_li]+=cycle_diff;
         } else {
-          std::cout  << cur_fi->nice_name();
+//          std::cout  << cur_fi->nice_name();
           cycleMapFunc[cur_fi]+=cycle_diff;
         }
-        std::cout << "\n";
+//        std::cout << "\n";
       }
     } 
 
