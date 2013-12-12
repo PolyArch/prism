@@ -220,7 +220,7 @@ protected:
   typedef std::multimap<uint64_t,Inst_t*> ResVec;
   ResVec InstQueue;
 
-  typedef std::vector<std::shared_ptr<Inst_t>> ResQueue;  
+  typedef std::vector<std::shared_ptr<BaseInst_t>> ResQueue;  
   ResQueue SQ, LQ; 
   unsigned SQind;
   unsigned LQind;
@@ -365,11 +365,7 @@ protected:
 
   }
 
-
-  virtual void inserted(std::shared_ptr<Inst_t>& inst) {
-    maxIndex = inst->index();
-    _curCycle = inst->cycleOfStage(Inst_t::Fetch);
-
+  virtual void insertLSQ(std::shared_ptr<BaseInst_t> inst) {
     //Update Queues: IQ, LQ, SQ
     if (inst->_isload) {
       LQ[LQind]=inst;
@@ -379,6 +375,14 @@ protected:
       SQ[SQind]=inst;
       SQind=(SQind+1)%SQ_SIZE;
     }
+  }
+
+
+  virtual void inserted(std::shared_ptr<Inst_t>& inst) {
+    maxIndex = inst->index();
+    _curCycle = inst->cycleOfStage(Inst_t::Fetch);
+
+    insertLSQ(inst);
 
     //add to activity
     for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
@@ -652,6 +656,42 @@ protected:
     }
   }
 
+
+  //This eliminates LSQ entries which can be freed before "cycle"
+  virtual void cleanLSQEntries(uint64_t cycle) {
+    //HANDLE LSQ HEADS
+    //Loads leave at complete
+    do {
+      auto depInst = LQ[lq_head_at_dispatch];
+      if (depInst.get() == 0) {
+        break;
+      }
+      //TODO should this be complete or commit?
+      if (depInst->cycleOfStage(depInst->memComplete()) < cycle ) {
+        LQ[lq_head_at_dispatch] = 0;
+        lq_head_at_dispatch += 1;
+        lq_head_at_dispatch %= LQ_SIZE;
+      } else {
+        break;
+      }
+    } while (lq_head_at_dispatch != LQind);
+
+    do {
+      auto depInst = SQ[sq_head_at_dispatch];
+      if(depInst.get() == 0) {
+        break;
+      }
+      if (depInst->cycleOfStage(depInst->memComplete()) < cycle ) {
+        SQ[sq_head_at_dispatch] = 0;
+        sq_head_at_dispatch += 1;
+        sq_head_at_dispatch %= SQ_SIZE;
+      } else {
+        break;
+      }
+    } while (sq_head_at_dispatch != SQind);
+  }
+
+
   virtual void setDispatchCycle(Inst_t &inst) {
     checkFD(inst);
     checkDD(inst);
@@ -662,7 +702,7 @@ protected:
     } else {
       checkROBSize(inst); //Finite Rob Size
       checkIQStalls(inst);
-      checkLSQSize(inst);
+      checkLSQSize(inst[Inst_t::Dispatch],inst._isload,inst._isstore);
 
       // ------ ENERGY EVENTS -------
       if(inst._floating) {
@@ -709,36 +749,7 @@ protected:
 
     prev_rob_head_at_dispatch=rob_head_at_dispatch;
 
-
-    //HANDLE LSQ HEADS
-    //Loads leave at complete
-    do {
-      auto depInst = LQ[lq_head_at_dispatch];
-      if (depInst.get() == 0) {
-        break;
-      }
-      if (depInst->cycleOfStage(Inst_t::Commit) < dispatch_cycle ) {
-        LQ[lq_head_at_dispatch] = 0;
-        lq_head_at_dispatch += 1;
-        lq_head_at_dispatch %= LQ_SIZE;
-      } else {
-        break;
-      }
-    } while (lq_head_at_dispatch != LQind);
-
-    do {
-      auto depInst = SQ[sq_head_at_dispatch];
-      if(depInst.get() == 0) {
-        break;
-      }
-      if (depInst->cycleOfStage(Inst_t::Writeback) < dispatch_cycle ) {
-        SQ[sq_head_at_dispatch] = 0;
-        sq_head_at_dispatch += 1;
-        sq_head_at_dispatch %= SQ_SIZE;
-      } else {
-        break;
-      }
-    } while (sq_head_at_dispatch != SQind);
+    cleanLSQEntries(dispatch_cycle);
   }
 
   virtual void setReadyCycle(Inst_t &inst) {
@@ -1175,21 +1186,20 @@ protected:
   }
 
   //Finite LQ & SQ
-  virtual Inst_t &checkLSQSize(Inst_t &n) {
-    if (n._isload) {
+  //This function delays the event until there is an open spot in the LSQ
+  virtual void checkLSQSize(T& event,bool isload, bool isstore) {
+    if (isload) {
       if(LQ[LQind]) {
-        getCPDG()->insert_edge(*LQ[LQind], Inst_t::Commit,
-                               n, Inst_t::Dispatch, 1,E_LSQ);
+        getCPDG()->insert_edge(*LQ[LQind], LQ[LQind]->memComplete(),
+                               event, 1+2,E_LSQ); //TODO: complete or commit
       }
-      //LQ[LQind]=inst;
     }
-    if (n._isstore) {
+    if (isstore) {
       if(SQ[SQind]) {
-        getCPDG()->insert_edge(*SQ[SQind], Inst_t::Writeback,
-                               n, Inst_t::Dispatch, 1,E_LSQ);
+        getCPDG()->insert_edge(*SQ[SQind], SQ[SQind]->memComplete(),
+                               event, 1,E_LSQ);
       }
     }
-    return n;
   }
 
 
@@ -1207,7 +1217,7 @@ protected:
     if (n._nonSpec) {
       int ind=(SQind-1+SQ_SIZE)%SQ_SIZE;
       if(SQ[ind]) {
-        getCPDG()->insert_edge(*SQ[ind], Inst_t::Writeback,
+        getCPDG()->insert_edge(*SQ[ind], SQ[ind]->memComplete(),
                                n, Inst_t::Ready, 1,E_NSpc);
       }
     }

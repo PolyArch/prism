@@ -282,7 +282,7 @@ public:
   }
   virtual unsigned memComplete() {
     if(this->_isload) {
-      return Complete;
+      return Complete; //TODO: Complete or commit?
     } else if (this->_isstore) {
       return Writeback;
     } else {

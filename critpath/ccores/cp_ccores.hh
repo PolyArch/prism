@@ -51,6 +51,7 @@ public:
   //arguements
   unsigned _ccores_num_mem=1, _ccores_max_ops=1000,_ccores_iops=2;
   unsigned _ccores_bb_runahead=0, _ccores_full_dataflow=0;
+  unsigned _st_buf_size=16;
 
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "ccores-num-mem") == 0) {
@@ -393,6 +394,9 @@ public:
         }
       }
       addCCoreDeps(sh_inst,img);
+      //have to insert it into the lsq as well
+      //after all the deps are determined
+      insertLSQ(sh_inst); 
 
       if(sh_inst->_floating) {
         _ccores_fp_ops++;
@@ -461,11 +465,18 @@ private:
         getCPDG()->insert_edge(*cc_inst, CCoresInst::Complete,
                                inst, CCoresInst::BBReady, 0);
     }*/
+
+    //make sure we haven't run out of LSQ entries
+    checkLSQSize(inst[CCoresInst::BBReady],inst._isload,inst._isstore);
+
     if(prev_bb_end) {
       inst.startBB=prev_bb_end;
       getCPDG()->insert_edge(*prev_bb_end,
                                inst, CCoresInst::BBReady, 0);
     }
+
+    //at this point, we can clean up the old entries
+    cleanLSQEntries(inst.cycleOfStage(CCoresInst::BBready));
   }
 
   //"Execute" represents when current BB is about to execute 
@@ -543,7 +554,6 @@ private:
       } else {
         getCPDG()->insert_edge(inst, CCoresInst::Complete,
                                *cur_bb_end, 0,E_BBC);
-
       }
     }
   }
