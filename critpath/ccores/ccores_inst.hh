@@ -14,6 +14,7 @@ public:
       BBReady = 0,
       Execute = 1,
       Complete = 2,
+      Writeback = 3,
       NumStages
   };
 private:
@@ -91,10 +92,18 @@ public:
   virtual unsigned eventComplete() {
     return Complete;
   }
-  virtual unsigned memComplete() {
+/*  virtual unsigned memComplete() {
     return Complete;
+  }*/
+  virtual unsigned memComplete() {
+    if(this->_isload) {
+      return Complete; //TODO: Complete or commit?
+    } else if (this->_isstore) {
+      return Writeback;
+    } else {
+      assert(0 && "no mem access allowed");
+    }
   }
-
 
 };
 

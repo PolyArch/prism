@@ -48,7 +48,7 @@ public:
   uint64_t _eff_addr;
   bool _floating=false;
   bool _iscall=false;
-  E* ex_edge;
+  E* ex_edge, *st_edge;
 
   void updateImg(const CP_NodeDiskImage &img) {
     _opclass=img._opclass;
@@ -88,6 +88,10 @@ public:
     ex_edge->_len=lat;
   }
 
+  void updateStLat(uint16_t lat) {
+    st_edge->_len=lat;
+  }
+
   uint16_t ex_lat() {
     return ex_edge->_len;
   }
@@ -110,9 +114,21 @@ public:
   virtual unsigned eventComplete() {
     return Complete; 
   }
+
   virtual unsigned memComplete() {
-    return Complete;
+    if(this->_isload) {
+      return Complete; //TODO: Complete or commit?
+    } else if (this->_isstore) {
+      return Writeback;
+    } else {
+      assert(0 && "no mem access allowed");
+    }
   }
+
+
+/*  virtual unsigned memComplete() {
+    return Complete;
+  }*/
 
 };
 

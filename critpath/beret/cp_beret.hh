@@ -302,6 +302,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
       std::shared_ptr<T> endSEB(new T());
       endSEB->_index=343;
 
+      //if load or store queue is full, then delay
+      checkLSQSize(*startIterEv,true,true);
+
+
       if(_beret_dataflow_pure) {
         if(!prevEndSEB && xfer_cycles!=0 && startIterEv) {
           getCPDG()->insert_edge(*startIterEv,*startSEB, xfer_cycles, E_BXFR);
@@ -347,8 +351,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         b_inst->ex_edge = getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
                    *b_inst, BeretInst::Complete,/*op->avg_lat()*/1, E_SEBL);
 
-        getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
+        b_inst->st_edge = getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
                                *b_inst, BeretInst::Writeback, 0, E_SEBW);
+
+
 
       }
       prevEndSEB=endSEB;
@@ -459,8 +465,12 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
         if(commit_iter && b_inst->_isstore) {
+          //make sure we can fit all of our stores
           // stores must come after all computation is complete
           checkNumMSHRs(b_inst, last_cycle); 
+
+          //update the LSQ with this info
+          insertLSQ(b_inst); 
         }
         //done with this instruction
         //getCPDG()->done(sh_inst);
@@ -495,6 +505,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
   std::shared_ptr<T> beretEndEv;
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
+    //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
+
     switch(beret_state) {
       case CPU:
         //Started BERET Loop
@@ -528,6 +540,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
           std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
+          //TODO, why do I need this to be so high?
+          cleanLSQEntries(beretEndEv->cycle());
           cleanUp(beretEndEv->cycle()-std::min((uint64_t)100000,beretEndEv->cycle()));
           beretEndEv=event;
           assert(beretEndEv);
@@ -579,6 +593,11 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             //Done Replaying up to the instruction before the bad instruction!
             //The CPU execution is now caught up.
             replay_queue.clear();
+          } else {
+            //still on the loop
+            assert(Prof::get().curFrame()->curLoop()==li);
+
+
           }
         }
         break;
@@ -619,6 +638,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         int lat=epLat(img._cc-img._ec,img._opclass,img._isload,
                img._isstore,img._cache_prod,img._true_cache_prod,true);
         b_inst->updateLat(lat);
+        int st_lat=stLat(img._xc-img._wc,img._cache_prod,
+                         img._true_cache_prod,true/*is accelerated*/);
+        b_inst->updateStLat(st_lat);
         b_inst->updateImg(img);
         b_inst->_index=index;
 
@@ -675,8 +697,7 @@ private:
                            mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
       if(min_node) {
           getCPDG()->insert_edge(*min_node, min_node->memComplete(),
-                         *n, BeretInst::Execute, mshrT+respDelayT, E_MSHR);
-          //TODO: Execute is the wrong stage here.... need to add a node here for writeback...
+                         *n, BeretInst::Writeback, mshrT+respDelayT, E_MSHR);
       }
     }
   }

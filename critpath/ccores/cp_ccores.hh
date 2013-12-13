@@ -455,6 +455,7 @@ private:
     setBBReadyCycle_cc(*inst,img);
     setExecuteCycle_cc(inst,img);
     setCompleteCycle_cc(*inst,img);
+    setWritebackCycle_cc(inst,img);
   }
 
   //This node when current ccores BB is active
@@ -522,7 +523,7 @@ private:
     }
 
     //check to make sure that L1 cache bandwidth is satisfied
-    if(inst->_isload || inst->_isstore) {
+    if(inst->_isload) {
       checkNumMSHRs(inst);
     }
   }
@@ -556,6 +557,18 @@ private:
                                *cur_bb_end, 0,E_BBC);
       }
     }
+  }
+
+  virtual void setWritebackCycle_cc(std::shared_ptr<CCoresInst>& inst, const CP_NodeDiskImage &img) {
+    if(inst->_isstore) {
+      int st_lat=stLat(inst->_st_lat,inst->_cache_prod,
+                       inst->_true_cache_prod,true/*is accelerated*/);
+      getCPDG()->insert_edge(*inst, CCoresInst::Complete,
+                             *inst, CCoresInst::Writeback, 2+st_lat, E_WB);
+      checkNumMSHRs(inst,true);
+      //checkPP(*inst); //this is interesting
+    }
+
   }
 
   virtual uint64_t numCycles() {
@@ -597,13 +610,13 @@ private:
           getCPDG()->insert_edge(*min_node, min_node->memComplete(),
                          *n, CCoresInst::Execute, mshrT+respDelayT, E_MSHR);
       }
-    } else {
+    } else { //Store
       BaseInst_t* min_node =
            addMSHRResource(access_time, 
                            mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
       if(min_node) {
           getCPDG()->insert_edge(*min_node, min_node->memComplete(),
-                         *n, CCoresInst::Execute, mshrT+respDelayT, E_MSHR);
+                         *n, CCoresInst::Writeback, mshrT+respDelayT, E_MSHR);
         }
     }
   }
