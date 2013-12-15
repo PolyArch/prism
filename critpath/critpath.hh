@@ -156,12 +156,14 @@ public:
     //We need to print out loops and funcions
     for(auto i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
       FunctionInfo* fi = i->second;
-      outf << std::setw(30) << fi->nice_name() << " ";
+      std::string quote_name = std::string("\"") + fi->nice_name() + std::string("\"");
+      outf << std::setw(30) << quote_name << " ";
       outf << cycleMapFunc[fi] << "\n";
 
       for(auto i=fi->li_begin(),e=fi->li_end();i!=e;++i) {
         LoopInfo* li = i->second;
-        outf << std::setw(30) << li->nice_name() << " ";
+        std::string quote_name = std::string("\"") + li->nice_name() + std::string("\"");
+        outf << std::setw(30) << quote_name << " ";
         outf << cycleMapLoop[li] << "\n";
       }
     }
