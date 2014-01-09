@@ -1816,19 +1816,23 @@ protected:
   }
 
   //Cache Line Producer
-  virtual Inst_t &checkPP(Inst_t &n) {
-    return n;
-   
-    //This edge doesn't work...
-    uint64_t cache_prod = n._cache_prod;
+  virtual void checkPP(Inst_t &n) {
+    //lets only do this for loads
 
-    if (cache_prod > 0 && cache_prod < n.index()) {
-      BaseInst_t& depInst = getCPDG()->queryNodes(n.index()-cache_prod);
+    if(n._isload) {
+      //This edge doesn't work...
+      uint64_t cache_prod = n._cache_prod;
 
-      getCPDG()->insert_edge(depInst, depInst.memComplete(),
-                             n, n.memComplete(), 0, E_PP);
+      if (cache_prod > 0 && cache_prod < n.index()) {
+        BaseInst_t& depInst = getCPDG()->queryNodes(n.index()-cache_prod);
+
+        if(depInst._isload) {
+          getCPDG()->insert_edge(depInst, depInst.memComplete(),
+                                 n, n.memComplete(), 1, E_PP);
+        }
+      }
     }
-    return n;
+    return;
   }
 
   //For inorder, commit comes after execute, by 

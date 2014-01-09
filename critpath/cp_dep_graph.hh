@@ -358,7 +358,8 @@ public:
     _numFPDestRegs=img._numFPDestRegs;
     _numIntDestRegs=img._numIntDestRegs;
     _eff_addr=img._eff_addr;
- 
+
+   /* 
     for (int i = 0; i < NumStages; ++i) {
       events[i].set_inst(this);
       if (img._isload)
@@ -369,6 +370,7 @@ public:
         events[i].setCtrl();
       events[i].prop_changed();
     }
+    */
   }
 
   void set_ex_lat(uint16_t lat) {_ex_lat=lat;}
@@ -424,9 +426,9 @@ public:
 
   uint64_t _index;
   uint64_t _cycle;
-  int _ty;
+  //int _ty;
   //EPtr ff_edge;
-  bool _load, _store, _ctrl;
+  //bool _load, _store, _ctrl;
   bool _dirty=false;
   dg_inst<NodeTy, E> *_inst;
 
@@ -434,13 +436,18 @@ public:
   //std::map<dg_event_base*, EPtr> _pred_edge_map;
   std::vector<EPtr> _pred_edges; //predecessor edges
 
-  dg_event_impl_t(): _index(0), _cycle(0), _ty(0), //ff_edge(0),
-                      _load(false), _store(0), _ctrl(false),
-                      _inst(0) {
+  dg_event_impl_t(): _index(0), _cycle(0),
+    //_ty(0), //ff_edge(0),
+    //                  _load(false), _store(0), _ctrl(false),
+                      _inst(0) 
+  {
   }
   dg_event_impl_t(uint64_t index, int ty): 
-                   _index(index), _cycle(0), _ty(ty), //ff_edge(0),
-                   _load(false), _store(0), _ctrl(false), _inst(0) {
+                   _index(index), _cycle(0),
+                    //_ty(ty), //ff_edge(0),
+    //             _load(false), _store(0), _ctrl(false), 
+                   _inst(0)
+  {
   }
 
   virtual int numPredEdges() {
@@ -594,15 +601,15 @@ public:
     }
   }
 
-  void setLoad() { _load = true;}
-  void setStore() { _store = true;}
-  void setCtrl() { _ctrl =  true; }
+  //void setLoad() { _load = true;}
+  //void setStore() { _store = true;}
+  //void setCtrl() { _ctrl =  true; }
 
-  bool isMem() { return isLoad() || isStore(); }
-  bool isLoad() { return _load; }
-  bool isStore() { return _store; }
+  //bool isMem() { return isLoad() || isStore(); }
+  //bool isLoad() { return _load; }
+  //bool isStore() { return _store; }
 
-  bool isCtrl() { return _ctrl; }
+  //bool isCtrl() { return _ctrl; }
 
   uint64_t cycle() { return _cycle; }
 };
