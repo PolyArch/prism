@@ -35,9 +35,13 @@ public:
 
 template<typename T, typename E>
 class CP_OPDG_Builder : public CP_DG_Builder<T, E> {
-
+  public:
   typedef dg_inst<T, E> Inst_t;
+  typedef dg_inst_base<T, E> BaseInst_t;
+
   typedef std::shared_ptr<Inst_t> InstPtr;
+  typedef std::shared_ptr<BaseInst_t> BaseInstPtr;
+
 protected:
   bool  usePipeDeps = false;
   bool  useOpDeps   = false;
@@ -82,7 +86,7 @@ public:
 
   void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
-    InstPtr sh_inst = createInst(img, index, op);
+    InstPtr sh_inst = this->createInst(img, index, op);
     getCPDG()->addInst(sh_inst, index);
     this->addDeps(sh_inst, op);
     this->pushPipe(sh_inst);
@@ -134,7 +138,7 @@ public:
       return n;
     }
 
-    Op *op = getOpForInst(n);
+    Op *op = this->getOpForInst(n);
     if (!op) {
       assert(n.hasDisasm() && n.getDisasm() == "dyser_config");
       return n;
@@ -142,7 +146,7 @@ public:
 
     for (auto I = op->d_begin(), IE = op->d_end(); I != IE; ++I) {
       Op *DepOp = *I;
-      InstPtr depInst = getInstForOp(DepOp);
+      BaseInstPtr depInst = this->getInstForOp(DepOp);
       if (!depInst.get())
         continue;
       getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
@@ -152,7 +156,7 @@ public:
   }
 
   // Override DataDependence Check
-  virtual Inst_t &checkMemoryDependence(Inst_t &n) {
+  virtual void checkMemoryDependence(Inst_t &n) {
     if (!useOpDependence() && !n.hasMemOperandInsts())
       return CP_DG_Builder<T, E>::checkMemoryDependence(n);
 
@@ -162,77 +166,31 @@ public:
         Inst_t *depInst = dynamic_cast<Inst_t*>(inst.get());
         this->insert_mem_dep_edge(*depInst, n);
       }
-      return n;
+      return;
     }
 
-    Op *op = getOpForInst(n);
+    Op *op = this->getOpForInst(n);
 
     if (!op) {
       assert(n.hasDisasm() && n.getDisasm() == "dyser_config");
-      return n;
+      return;
     }
 
 
     for (auto I = op->m_begin(), IE = op->m_end(); I != IE; ++I) {
       Op *DepOp = *I;
-      InstPtr depInst = getInstForOp(DepOp);
-      Inst_t *depInstPtr = depInst.get();
+      BaseInstPtr depInst = this->getInstForOp(DepOp);
+
+      BaseInst_t *depInstPtr = depInst.get();
       if (!depInstPtr)
         continue;
       this->insert_mem_dep_edge(*depInstPtr, n);
     }
-    return n;
   }
 
 protected:
   InstPtr _lastInst = 0;
 
-  std::map<Op *, InstPtr> _op2InstPtr;
-  std::map<Inst_t *, Op*> _inst2Op;
-
-
-  virtual InstPtr createInst(const CP_NodeDiskImage &img,
-                             uint64_t index,
-                             Op *op)
-  {
-    InstPtr ret = InstPtr(new Inst_t(img, index));
-    if (op)
-      keepTrackOfInstOpMap(ret, op);
-    return ret;
-  }
-
-  void remove_instr(dg_inst_base<T, E> *p) {
-    Inst_t *ptr = dynamic_cast<Inst_t*>(p);
-    assert(ptr);
-    _inst2Op.erase(ptr);
-  }
-
-  virtual void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
-    _op2InstPtr[op] = ret;
-    _inst2Op[ret.get()] = op;
-  }
-
-  virtual Op* getOpForInst(Inst_t &n, bool allowNull = false) {
-    auto I2Op = _inst2Op.find(&n);
-    if (I2Op != _inst2Op.end())
-      return I2Op->second;
-    if (!allowNull) {
-      if (n.hasDisasm())
-        return 0; // Fake instructions ....
-      assert(0 && "inst2Op map does not have inst??");
-    }
-    return 0;
-  }
-
-  virtual InstPtr getInstForOp(Op *op) {
-    auto Op2I = _op2InstPtr.find(op);
-    if (Op2I != _op2InstPtr.end())
-      return Op2I->second;
-    return 0;
-  }
-
-
-protected:
 
   template <class _F, class _S, class _T>
   struct _InstInfo {

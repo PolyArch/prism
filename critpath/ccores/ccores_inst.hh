@@ -51,7 +51,7 @@ public:
   bool _floating=false;
   bool _iscall=false;
 
-  CCoresInst(const CP_NodeDiskImage &img, uint64_t index):
+  CCoresInst(const CP_NodeDiskImage &img, uint64_t index,Op* op):
               dg_inst_base<T,E>(index){
     _opclass=img._opclass;
     _isload=img._isload;
@@ -72,7 +72,7 @@ public:
     _upc=img._upc;
     _floating=img._floating;
     _iscall=img._iscall;
-
+    _op=op;
   }
 
   CCoresInst() : dg_inst_base<T,E>() {}
@@ -91,6 +91,9 @@ public:
   }
   virtual unsigned eventComplete() {
     return Complete;
+  }
+  virtual unsigned eventReady() {
+    return Execute; 
   }
 /*  virtual unsigned memComplete() {
     return Complete;

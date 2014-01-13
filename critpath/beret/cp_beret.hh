@@ -281,7 +281,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   std::map<Op*,std::shared_ptr<BeretInst>> binstMap;
   LoopInfo* li;
   Op* curLoopHead;
-  std::vector<std::pair<CP_NodeDiskImage,uint64_t>> replay_queue;
+  std::vector<std::tuple<CP_NodeDiskImage,uint64_t,Op*>> replay_queue;
   unsigned _whichBB;
   uint64_t _curBeretStartCycle=0, _curBeretStartInst=0;
   uint64_t _totalBeretCycles=0, _totalBeretInsts=0;
@@ -335,7 +335,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
       for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
-        BeretInst* b_inst = new BeretInst();
+        BeretInst* b_inst = new BeretInst(op);
 
         b_inst->startSEB=startSEB;
         b_inst->endSEB=endSEB;
@@ -575,14 +575,15 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             if(replay) {
               //Replay BERET on CPU
               for(unsigned i=0; i < replay_queue.size();++i) {
-                CP_NodeDiskImage& img = replay_queue[i].first;
-                uint64_t& index = replay_queue[i].second;
-                Inst_t* inst = new Inst_t(img,index);
+                CP_NodeDiskImage& img = std::get<0>(replay_queue[i]);
+                uint64_t& index = std::get<1>(replay_queue[i]);
+                Op* op = std::get<2>(replay_queue[i]);
+
+                InstPtr sh_inst = createInst(img,index,op);
                 if(i==0) {
                   getCPDG()->insert_edge(*finalBeretEvent,
-                                         *inst, Inst_t::Fetch,8/_beret_iops,E_BXFR); 
+                                         *sh_inst, Inst_t::Fetch,8/_beret_iops,E_BXFR); 
                 }
-                std::shared_ptr<Inst_t> sh_inst(inst);
                 getCPDG()->addInst(sh_inst,index);
                 addDeps(sh_inst); //regular add deps
                 pushPipe(sh_inst);
@@ -609,8 +610,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     switch(beret_state) {
       case CPU: {
         //base cpu model
-        Inst_t* inst = new Inst_t(img,index);
-        std::shared_ptr<Inst_t> sh_inst = std::shared_ptr<Inst_t>(inst);
+        InstPtr sh_inst = createInst(img,index,op);
         getCPDG()->addInst(sh_inst,index);
         if(beretEndEv) {
           getCPDG()->insert_edge(*beretEndEv,
@@ -651,7 +651,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         } else if (_beret_dataflow_seb) {
           add_dataflow_seb_dep(*b_inst); 
         }
-        replay_queue.push_back(std::make_pair(img,index));
+        replay_queue.push_back(std::make_tuple(img,index,op));
         break;
       } default:
         assert(0); //not sure what to do

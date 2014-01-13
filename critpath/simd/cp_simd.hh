@@ -121,7 +121,7 @@ namespace simd {
       unsigned max = 0;
       for (auto I = resultsOp.begin(), E = resultsOp.end(); I != E; ++I) {
         Op *op = *I;
-        InstPtr inst = getInstForOp(op);
+        BaseInstPtr inst = getInstForOp(op);
         if (!inst.get())
           continue;
         unsigned completeCycle = inst->cycleOfStage(inst->eventComplete());
@@ -310,7 +310,7 @@ namespace simd {
 
     InstPtr createShuffleInst(InstPtr inst, Op *op = 0)
     {
-      InstPtr ret = InstPtr(new shuffle_inst());
+      InstPtr ret = InstPtr(new shuffle_inst(op));
       ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
@@ -319,7 +319,7 @@ namespace simd {
 
     InstPtr createPackInst(int prod1, int prod2, Op *op = 0)
     {
-      InstPtr ret = InstPtr(new pack_inst(prod1, prod2));
+      InstPtr ret = InstPtr(new pack_inst(prod1, prod2,op));
       ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
@@ -328,7 +328,7 @@ namespace simd {
 
     InstPtr createReduceInst(InstPtr di, Op *op = 0)
     {
-      InstPtr ret = InstPtr(new reduce_inst(di));
+      InstPtr ret = InstPtr(new reduce_inst(di, op));
       ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
@@ -337,7 +337,7 @@ namespace simd {
 
     InstPtr createUnpackInst(InstPtr di, Op *op = 0)
     {
-      InstPtr ret = InstPtr(new unpack_inst(di));
+      InstPtr ret = InstPtr(new unpack_inst(di, op));
       ret->isAccelerated=true;
       if (op)
         keepTrackOfInstOpMap(ret, op);
@@ -346,7 +346,7 @@ namespace simd {
 
     InstPtr createSIMDInst(Op *op)
     {
-      InstPtr ret = InstPtr(new Inst_t(op->img, 0));
+      InstPtr ret = InstPtr(new Inst_t(op->img, 0, op));
       ret->isAccelerated=true;
       keepTrackOfInstOpMap(ret, op);
       return ret;
@@ -481,7 +481,8 @@ namespace simd {
 
             for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
               Op *DepOp = *I;
-              InstPtr depInst = getInstForOp(DepOp);
+              InstPtr depInst = 
+                std::static_pointer_cast<Inst_t>(getInstForOp(DepOp));
               if (!depInst.get())
                 continue;
               uint64_t completeCycle =
@@ -623,7 +624,9 @@ namespace simd {
           if (useReductionTree && loopDone) {
             for (auto I = resultOps.begin(), E = resultOps.end(); I != E; ++I) {
               Op *op = *I; //getMaxResultOp(resultOps)) {
-              InstPtr resultInst = getInstForOp(op);
+              //Tony: I put the cast here, because i guess you need it.  hope it works!
+              BaseInstPtr resultInst_base =  this->getInstForOp(op);
+              InstPtr resultInst = std::static_pointer_cast<Inst_t>(resultInst_base);
               // FIXME: very conservative code -- for kmeans ????
               for (unsigned i = 0; i < _simd_vec_len-1; ++i) {
                 InstPtr tmpInst = createReduceInst(resultInst, op);
@@ -680,7 +683,8 @@ namespace simd {
 
               for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
                 Op *DepOp = *I;
-                InstPtr depInst = getInstForOp(DepOp);
+                InstPtr depInst = std::static_pointer_cast<Inst_t>(
+                                               getInstForOp(DepOp));
                 if (!depInst.get())
                   continue;
                 uint64_t completeCycle =

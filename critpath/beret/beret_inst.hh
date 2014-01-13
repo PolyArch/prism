@@ -24,6 +24,10 @@ public:
   std::shared_ptr<T> startSEB;
   std::shared_ptr<T> endSEB;
 
+  BeretInst(Op* op) {
+    this->_op=op;
+  }
+
   virtual ~BeretInst() { 
     //std::cout << "deleting beret inst" << _index << "\n";
     /*for (int i = 0; i < 3; ++i) {
@@ -72,9 +76,10 @@ public:
     _iscall=img._iscall;
   }
 
-  BeretInst(const CP_NodeDiskImage &img, uint64_t index):
+  BeretInst(const CP_NodeDiskImage &img, uint64_t index, Op* op):
               dg_inst_base<T,E>(index){
     updateImg(img);
+    this->_op=op;
   }
 
   BeretInst() : dg_inst_base<T,E>() {}
@@ -113,6 +118,9 @@ public:
   }
   virtual unsigned eventComplete() {
     return Complete; 
+  }
+  virtual unsigned eventReady() { //this is when to delay the begining of execution
+    return Execute; 
   }
 
   virtual unsigned memComplete() {

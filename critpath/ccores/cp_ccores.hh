@@ -362,7 +362,7 @@ public:
     }
 
     if(inCCore()) {
-      CCoresInst* cc_inst = new CCoresInst(img,index);
+      CCoresInst* cc_inst = new CCoresInst(img,index,op);
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
       getCPDG()->addInst(sh_inst,index);
 
@@ -412,7 +412,7 @@ public:
         inCCore=false;
       }*/
     } else {
-      Inst_t* inst = new Inst_t(img,index);
+      Inst_t* inst = new Inst_t(img,index,op);
       std::shared_ptr<Inst_t> sh_inst(inst);
       getCPDG()->addInst(sh_inst,index);
       if(transitioned) { 

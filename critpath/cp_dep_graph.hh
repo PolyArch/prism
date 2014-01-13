@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "cpnode.hh"
+#include "op.hh"
 
 #include <iostream>
 #include <stdio.h>
@@ -136,6 +137,8 @@ public:
   uint16_t _opclass = 0;
   bool _isload = false;
   bool _isstore = false;
+  Op* _op = NULL;
+
 
   virtual T &operator[](const unsigned i) =0;
 
@@ -184,6 +187,8 @@ public:
 
   virtual unsigned eventComplete() {return (unsigned)-1;} //return the index of when the node's data is ready
   virtual unsigned memComplete() {return (unsigned)-1;} //return the index of when the memory operation is ready
+  virtual unsigned eventReady() {return (unsigned)-1;} //return the index of when the node's data is ready
+
 
   virtual unsigned eventCommit() {return numStages()-1;}
 
@@ -280,6 +285,9 @@ public:
   virtual unsigned eventComplete() {
     return Complete;
   }
+  virtual unsigned eventReady() {
+    return Ready;
+  }
   virtual unsigned memComplete() {
     if(this->_isload) {
       return Complete; //TODO: Complete or commit?
@@ -331,7 +339,7 @@ public:
   uint8_t btb_read_accesses=0, btb_write_accesses=0;
 
 
-  dg_inst(const CP_NodeDiskImage &img,uint64_t index):
+  dg_inst(const CP_NodeDiskImage &img,uint64_t index,Op* op=NULL):
     dg_inst_base<T,E>(index) {
     this->_opclass=img._opclass;
     this->_isload=img._isload;
@@ -358,7 +366,7 @@ public:
     _numFPDestRegs=img._numFPDestRegs;
     _numIntDestRegs=img._numIntDestRegs;
     _eff_addr=img._eff_addr;
-
+    this->_op=op;
    /* 
     for (int i = 0; i < NumStages; ++i) {
       events[i].set_inst(this);

@@ -23,7 +23,7 @@ namespace simd {
 
   class shuffle_inst: public simd_inst {
   public:
-    shuffle_inst() {
+    shuffle_inst(Op* op) {
       _opclass = 0;
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
@@ -56,6 +56,8 @@ namespace simd {
         events[i].set_inst(this);
         events[i].prop_changed();
       }
+
+      _op=op;
     }
 
     virtual bool hasDisasm() const { return true; }
@@ -69,7 +71,7 @@ namespace simd {
 
   class pack_inst: public simd_inst {
   public:
-    pack_inst(int prod1, int prod2) {
+    pack_inst(int prod1, int prod2, Op* op) {
       _opclass = 4;
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
@@ -103,6 +105,7 @@ namespace simd {
         events[i].set_inst(this);
         events[i].prop_changed();
       }
+      _op=op;
     }
 
     bool hasDisasm() const { return true; }
@@ -116,7 +119,7 @@ namespace simd {
   class reduce_inst: public simd_inst {
     InstPtr _depInst;
   public:
-    reduce_inst(InstPtr di) {
+    reduce_inst(InstPtr di, Op* op) {
       _opclass = 4; // FloatAdd
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
@@ -152,6 +155,8 @@ namespace simd {
         events[i].set_inst(this);
         events[i].prop_changed();
       }
+
+      _op=op;
     }
 
     bool hasDisasm() const { return true; }
@@ -174,7 +179,7 @@ namespace simd {
   class unpack_inst: public simd_inst {
     InstPtr _depInst;
   public:
-    unpack_inst(InstPtr di) {
+    unpack_inst(InstPtr di, Op* op) {
       _opclass = 4; // FloatAdd
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
@@ -210,6 +215,8 @@ namespace simd {
         events[i].set_inst(this);
         events[i].prop_changed();
       }
+
+      _op=op;
     }
 
     bool hasDisasm() const { return true; }

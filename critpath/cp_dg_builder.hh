@@ -19,6 +19,8 @@ class CP_DG_Builder : public CriticalPath {
 public:
   typedef dg_inst_base<T, E> BaseInst_t;
   typedef dg_inst<T, E> Inst_t;
+
+  typedef std::shared_ptr<BaseInst_t> BaseInstPtr;
   typedef std::shared_ptr<Inst_t> InstPtr;
 
   CP_DG_Builder() : CriticalPath() {
@@ -41,6 +43,7 @@ public:
 
      rob_growth_rate=0;
      avg_rob_head=20;
+
   }
 
   virtual ~CP_DG_Builder() {
@@ -98,8 +101,7 @@ public:
   virtual void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
 
-    Inst_t* inst = new Inst_t(img,index);
-    std::shared_ptr<Inst_t> sh_inst(inst);
+    InstPtr sh_inst = createInst(img,index,op);
     getCPDG()->addInst(sh_inst,index);
     addDeps(sh_inst,op);
     pushPipe(sh_inst);
@@ -205,6 +207,64 @@ public:
 
 protected:
 
+  //Code to map instructions to ops, and back
+  std::map<Op *, InstPtr> _op2InstPtr;
+  //std::map<Inst_t *, Op*> _inst2Op;
+
+  virtual InstPtr createInst(const CP_NodeDiskImage &img, 
+                             uint64_t index, Op *op)
+  {
+    InstPtr ret = InstPtr(new Inst_t(img, index, op));
+    if (op) {
+      keepTrackOfInstOpMap(ret, op);
+    }
+    return ret;
+  }
+
+  /*
+   * This is never called!  (so Tony commented it)
+  void remove_instr(dg_inst_base<T, E> *p) {
+    Inst_t *ptr = dynamic_cast<Inst_t*>(p);
+    assert(ptr);
+    _inst2Op.erase(ptr);
+  }*/
+
+  virtual void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
+    _op2InstPtr[op] = ret;
+    //_inst2Op[ret.get()] = op;
+  }
+
+  virtual Op* getOpForInst(Inst_t &n, bool allowNull = false) {
+    /* //old version
+     * auto I2Op = _inst2Op.find(&n);
+    if (I2Op != _inst2Op.end())
+      return I2Op->second;
+    if (!allowNull) {
+      if (n.hasDisasm())
+        return 0; // Fake instructions ....
+      assert(0 && "inst2Op map does not have inst??");
+    }
+    */
+    if (n._op!=NULL) {
+      return n._op; 
+    }
+
+    if (!allowNull) {
+      if (n.hasDisasm()) {
+        return 0; // Fake instructions ....
+      }
+      assert(0 &&  "inst2Op map does not have inst??");
+    }
+    return 0;
+  }
+
+  virtual BaseInstPtr getInstForOp(Op *op) {
+    auto Op2I = _op2InstPtr.find(op);
+    if (Op2I != _op2InstPtr.end())
+      return Op2I->second;
+    return 0;
+  }
+
   //function to add dependences onto uarch event nodes -- for the pipeline
   virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op = NULL) {
     setFetchCycle(*inst);
@@ -244,6 +304,8 @@ protected:
   typedef std::set<uint64_t> ActivityMap;
   ActivityMap activityMap;
   
+  typedef std::unordered_map<Op*,std::set<Op*>> MemDepSet;
+  MemDepSet memDepSet;
 
   int rob_head_at_dispatch;
   int prev_rob_head_at_dispatch;
@@ -1231,7 +1293,8 @@ protected:
     checkRegisterDependence(n);
 
     //memory dependence
-    return checkMemoryDependence(n);
+    checkMemoryDependence(n);
+    return n;
   }
 
   // Register Data Dependence
@@ -1250,36 +1313,69 @@ protected:
     }
     return n;
   }
+
+
   // Memory Dependence
-  virtual Inst_t &checkMemoryDependence(Inst_t &n) {
-    if (n._mem_prod > 0 && n._mem_prod < n.index()) {
-
+  virtual void checkMemoryDependence(Inst_t &n) {
+    if ( (n._mem_prod > 0 && n._mem_prod < n.index() )  ) {
       BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
-
-      if(dep_inst.isPipelineInst()) {
-        Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
-        insert_mem_dep_edge(prev_node, n);
-      }
+      addTrueMemDep(dep_inst,n);
+      //if(dep_inst.isPipelineInst()) {
+      //  Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
+      //  insert_mem_dep_edge(prev_node, n);
+      //}
     }
-    return n;
+    insert_mem_predicted_edges(n); //TODO: probably creating duplicate edges
+                                   //in the common case.  fix for effeciency!
   }
 
-  virtual void insert_mem_dep_edge(Inst_t &prev_node, Inst_t &n)
+  virtual void addTrueMemDep(BaseInst_t& dep_n, BaseInst_t& n) {
+    insert_mem_dep_edge(dep_n,n);
+    if(n._op!=NULL && dep_n._op!=NULL) {
+      //add this to the memory predictor list
+      memDepSet[n._op].insert(dep_n._op);
+    }
+  }
+
+  int numMemChecks=0;
+  virtual void checkClearMemDep() {
+    if(++numMemChecks==250000) {
+      memDepSet.clear();
+    }
+  }
+
+  //Inserts edges predicted by memory dependence predictor
+  virtual void insert_mem_predicted_edges(BaseInst_t& n) {
+    checkClearMemDep();
+    //insert edges 
+    for(auto i=memDepSet[n._op].begin(), e=memDepSet[n._op].end(); i!=e;++i) {
+      Op* dep_op = *i;
+      BaseInstPtr sh_inst = getInstForOp(dep_op);
+      if(sh_inst) {
+        insert_mem_dep_edge(*sh_inst,n);
+      }
+    } 
+  }
+
+
+  virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n)
   {
     if (prev_node._isstore && n._isload) {
       // RAW true dependence
-      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
-                             n, Inst_t::Ready, 0, E_MDep);
+      getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                             n, n.eventReady(), 0, E_MDep);
     } else if (prev_node._isstore && n._isstore) {
       // WAW dependence (output-dep)
-      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
-                             n, Inst_t::Complete, 0, E_MDep);
+      getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                             n, n.eventComplete(), 0, E_MDep);
     } else if (prev_node._isload && n._isstore) {
       // WAR dependence (load-store)
-      getCPDG()->insert_edge(prev_node, Inst_t::Complete,
-                             n, Inst_t::Ready, 0, E_MDep);
+      getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                             n, n.eventReady(), 0, E_MDep);
     }
   }
+
+
 
   //==========EXECUTION ==============
   //Execution follows Ready

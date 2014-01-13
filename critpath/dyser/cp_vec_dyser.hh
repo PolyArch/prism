@@ -145,11 +145,11 @@ namespace DySER {
     std::map<Op*, std::map<unsigned, InstPtr > > cloneOp2InstMap;
     //std::map<unsigned, InstPtr > > sincosInstMap;
 
-    InstPtr getInstForOp(Op* op) {
+    BaseInstPtr getInstForOp(Op* op) {
       bool dumpClone = true;
       InstPtr ret = 0;
       if (!useCloneOpMap || SI->isInLoadSlice(op, true)) {
-        ret =  cp_dyser::getInstForOp(op);
+        ret = std::static_pointer_cast<Inst_t>(cp_dyser::getInstForOp(op));
         dumpClone = false;
       } else if (cloneOp2InstMap.count(op) != 0 &&
                  cloneOp2InstMap[op].count(pipeId) != 0) {

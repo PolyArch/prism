@@ -172,7 +172,8 @@ namespace DySER {
           continue;
         }
 
-        InstPtr depInst = getInstForOp(DepOp);
+        InstPtr depInst = std::static_pointer_cast<Inst_t>(
+                                                getInstForOp(DepOp));
         if (!depInst.get())
           continue;
         // we should never have dependence on dyser_recv -- a spurious use...
@@ -777,7 +778,8 @@ namespace DySER {
       }
 
       InstPtr prevPipelinedInst = ((useOpMap)
-                                   ? getInstForOp(op)
+                                   ? std::static_pointer_cast<Inst_t>(
+                                     getInstForOp(op))
                                    : prevInst);
 
       InstPtr dy_inst = createDyComputeInst(op,
