@@ -525,7 +525,7 @@ void PathProf::runAnalysis() {
   }
 }
 
-void PathProf::runAnalysis2(bool no_gams, bool gams_details) {
+void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus) {
 
   std::multimap<uint64_t,LoopInfo*> loops;
  
@@ -570,6 +570,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details) {
 
     bool worked=false;
 
+    // BERET Scheduling
     if(loopInfo->isInnerLoop()
        && hpi != -2 //no hot path
        && loopInfo->getLoopBackRatio(hpi) >= 0.5
@@ -578,14 +579,37 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details) {
       stringstream part_gams_str;
       part_gams_str << "partition." << loopInfo->id() << ".gams";
 
-      worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),gams_details,no_gams);
+      if(size_based_cfus) {
+        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+                   NULL,
+                   gams_details,no_gams);
+      } else {
+        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+                   &_beret_cfus,
+                   gams_details,no_gams);
+      }
       if(worked) {
         cerr << " -- Beretized\n";
       } else {
-        cerr << " -- NOT Beretized (Func Calls)\n";
+        cerr << " -- NOT Beretized (Func Calls?)\n";
       }
     } else {
       cerr << " -- NOT Beretized\n";
+    }
+
+    //NLA Scheduling
+    if(!loopInfo->cantFullyInline()) {
+       if(size_based_cfus) {
+         worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams);
+       } else {
+         worked = loopInfo->scheduleNLA(&_beret_cfus, gams_details, no_gams);
+       }
+
+      if(worked) {
+        cerr << " -- NLA'D\n";
+      } else {
+        cerr << " -- NOT NLA'd\n";
+      }    
     }
 
     //update stats

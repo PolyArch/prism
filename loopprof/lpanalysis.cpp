@@ -13,6 +13,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
                         uint64_t max_inst,
                         int winsize,
                         bool verbose,
+                        bool size_based_cfus,
                         bool no_gams,
                         bool gams_details,
                         uint64_t &count,
@@ -115,7 +116,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
     if (pass == 1) {
       pathProf.runAnalysis();
     } else if (pass == 2) {
-      pathProf.runAnalysis2(no_gams, gams_details);
+      pathProf.runAnalysis2(no_gams, gams_details, size_based_cfus);
     }
     inf.close();
   }

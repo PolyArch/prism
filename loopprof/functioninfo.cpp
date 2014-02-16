@@ -266,8 +266,7 @@ void FunctionInfo::detectLoops() {
   for(ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) {
     BB* bb = *ii;
      
-    BB::BBvec::iterator ip,ep;
-    for(ip=bb->pred_begin(),ep=bb->pred_end();ip!=ep;++ip) {
+    for(auto ip=bb->pred_begin(),ep=bb->pred_end();ip!=ep;++ip) {
       BB* pred_bb = *ip;
       if(dominates(bb,pred_bb)) {
         //found a loop!

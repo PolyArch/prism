@@ -65,6 +65,7 @@ void Prof::init_from_trace(const char *trace_fname,
                           max_inst,
                           1024,  // winsize
                           false, // verbose
+                          false, //size_based_fus
                           false, // no_gams
                           false, //gams_details
                           count,

@@ -135,7 +135,9 @@ public:
     uint64_t final_cycle = getCPDG()->getMaxCycles();
     activityMap.insert(final_cycle);
     activityMap.insert(final_cycle+1);
-    cleanUp(final_cycle+2000);
+    std::cout << _name << " has finished!\n";
+    std::cout << _name << " cleanup until cycle: " << final_cycle+3000 << "\n";
+    cleanUp(final_cycle+3000);
     return final_cycle;
   }
 
@@ -334,8 +336,13 @@ protected:
 
   uint64_t maxIndex;
   uint64_t _curCycle;
+  uint64_t _lastCleaned=0;
+  uint64_t _latestCleaned=0;
 
   virtual void cleanUp(uint64_t curCycle) {
+    _lastCleaned=curCycle;
+    _latestCleaned=std::max(curCycle,_latestCleaned);
+
     //delete irrelevent 
     typename SingleCycleRes::iterator upperbound_sc;
     upperbound_sc = wbBusRes.upper_bound(curCycle);
@@ -1488,35 +1495,6 @@ protected:
       return 6;
     }
     assert(0);
-  }
-
-  virtual bool isSameOpClass(int opclass1, int opclass2) {
-    if (opclass1 == opclass2)
-      return true;
-    if (opclass1 > 9 && opclass2 > 9 && opclass1 < 30 && opclass2 < 30) {
-      //all simd units are same
-      return true;
-    }
-    switch(opclass1) {
-    default: return false;
-    case 1:
-      return (opclass2 == 1);
-    case 2:
-    case 3:
-      return (opclass2 == 2 || opclass2 == 3);
-    case 4:
-    case 5:
-    case 6:
-      return (opclass2 == 4 || opclass2 == 5 || opclass2 == 6);
-    case 7:
-    case 8:
-    case 9:
-      return (opclass2 == 7 || opclass2 == 8 || opclass2 == 9);
-    case 30: //MemRead
-    case 31: //MemWrite
-      return (opclass2 == 30 || opclass2 == 31);
-    }
-    return false;
   }
 
   virtual unsigned getNumFUAvailable(Inst_t &n) {

@@ -6,11 +6,11 @@
 
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/vector.hpp>
-
-#include "loopinfo.hh"
-#include "bb.hh"
-
 #include "elfparse.hh"
+
+#include "bb.hh"
+#include "loopinfo.hh"
+
 
 class FunctionInfo {
 

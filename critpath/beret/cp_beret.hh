@@ -209,7 +209,9 @@ public:
         bool gams_details=false;
         std::cerr << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+            loopInfo->getHotPath(),
             li2ssmap[loopInfo],li2sgmap[loopInfo],
+            Prof::get().beret_cfus(),
             gams_details,_no_gams,_beret_max_seb,_beret_max_mem);
         if(worked) {
           std::cerr << " -- Beretized\n";
@@ -504,6 +506,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   }
 
   std::shared_ptr<T> beretEndEv;
+
+  //Debugging
+  uint64_t last_iter_switch_cycle=0,last_replay_cycle=0;
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
 
@@ -540,9 +546,12 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
           std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
-          //TODO, why do I need this to be so high?
           cleanLSQEntries(beretEndEv->cycle());
-          cleanUp(beretEndEv->cycle()-std::min((uint64_t)100000,beretEndEv->cycle()));
+          //TODO, why do I need this to be so high?
+          uint64_t clean_cycle=beretEndEv->cycle()-std::min((uint64_t)100000,beretEndEv->cycle());
+          cleanUp(clean_cycle);
+          last_iter_switch_cycle=clean_cycle;
+
           beretEndEv=event;
           assert(beretEndEv);
         } else if(op->bb_pos()==0) {
@@ -588,6 +597,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
                 addDeps(sh_inst); //regular add deps
                 pushPipe(sh_inst);
                 inserted(sh_inst);
+                last_replay_cycle=sh_inst->cycleOfStage(Inst_t::Fetch);
               }
               beretEndEv = NULL;
             }
@@ -680,7 +690,7 @@ private:
     uint64_t access_time=reqDelayT + n->cycleOfStage(BeretInst::Execute);
 
     if (minT > access_time) {
-      minT=access_time;
+      access_time=minT;
     } 
 
     if(n->_isload) {

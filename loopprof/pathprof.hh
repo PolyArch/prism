@@ -285,6 +285,9 @@ public:
   int write_port_issueLat=1;
   int write_port_opLat=1;
 
+  CFU_set* beret_cfus() {return &_beret_cfus;}
+
+
 private:
   //KNOWN_ISSUE: FunctionInfo's are not deleted
 
@@ -297,6 +300,7 @@ private:
     maxFuncs = FunctionInfo::_idcounter;
     ar & sym_tab;
     ar & _funcMap;
+    ar & _beret_cfus;
     ar & maxOps;
     ar & maxBBs;
     ar & maxLoops;
@@ -322,6 +326,8 @@ private:
   std::vector<uint64_t> _origstack;
 
   FuncMap _funcMap;
+  CFU_set _beret_cfus;
+
   std::list<StackFrame> _callStack;
 
   //Phase 1 Processing
@@ -417,6 +423,7 @@ public:
 
 public:
   PathProf() {
+    _beret_cfus.beret_set();
     _dId=0;
   }
 
@@ -439,7 +446,7 @@ public:
 
   void processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet);
   void runAnalysis();
-  void runAnalysis2(bool no_gams, bool gams_details);
+  void runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus);
 
   void processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
                        CP_NodeDiskImage& img);
@@ -513,6 +520,13 @@ public:
 
           li->printSubgraphDot(dotOutFile);
 	}
+        if(li->hasSubgraphs(true)) {
+	  filename.str("");
+	  filename << dir << "/func_" << fi.id() << "_" << fi.calls() << ".NLA.loopsg" << li->id() << ".dot"; 
+          std::ofstream dotOutFile(filename.str().c_str()); 
+          li->printSubgraphDot(dotOutFile,true);
+	}
+
       }
     }
   }

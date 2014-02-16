@@ -1,6 +1,8 @@
 #include "loopinfo.hh"
 #include "functioninfo.hh"
 
+#include "cfu.hh"
+
 using namespace std;
 
 uint32_t Subgraph::_idCounter=0;
@@ -30,6 +32,8 @@ void Subgraph::checkVec() {
   } 
   assert(_ops.size() == _opVec.size());
 }
+
+
 
 
 
@@ -117,7 +121,20 @@ void LoopInfo::iterComplete(int pathIndex, BBvec& path) {
   }
 }
 
+/*
+ * Remeber, this is only valid for inner loops with a hot path...
+ */
 bool LoopInfo::dependenceInPath(Op* dop, Op* op) {
+  if(_instsInPath.empty()) {
+    BBvec& theHotPath = getHotPath();
+    for(auto i=theHotPath.begin(),e=theHotPath.end();i!=e;++i) {
+      BB* bb= *i;
+      for(auto oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
+        Op* op = *oi;
+        _instsInPath.insert(op);
+      }
+    }
+  }
   return dependenceInPath(_instsInPath,dop,op);
 }
 
@@ -270,9 +287,310 @@ void LoopInfo::opAddr(Op* op, uint64_t addr, uint8_t acc_size) {
 
 
 
+void LoopInfo::checkCompatible(std::set<Op*>& ops,
+                     std::set<std::pair<Op*,Op*>>& closeSet, 
+                     Op* orig_op, 
+                     Op* cur_op,
+                     CFU_node* cur_fu,
+                     std::set<Op*> doneOps,
+                     std::set<CFU_node*> doneFUs) {
+  
+
+  if(!CFU_node::kind_match(cur_op,cur_fu)) {
+    return; //didn't match, bail out
+  }
+  if(orig_op!=cur_op) {
+    closeSet.insert(std::make_pair(orig_op,cur_op));
+/*    cout << orig_op->id() << ") ";
+    cout << cur_op->id() << "." << cur_fu->ind() << ": ";
+    for(auto const& elem : doneOps) {
+      cout << " " << elem->id();
+    }
+    cout << ":";
+    for(auto const& elem : doneFUs) {
+      cout << " " << elem->ind();
+    }
+    cout << "\n";
+    */
+  }
+  doneOps.insert(cur_op);
+  doneFUs.insert(cur_fu);
+
+  for(auto ui=cur_op->u_begin(),ue=cur_op->u_end();ui!=ue;++ui) {
+    Op* uop = *ui;   //forwards
+    if(doneOps.count(uop)!=0 || !dependenceInPath(ops,cur_op,uop)) {
+      continue;
+    }
+    for(auto ii=cur_fu->outs_begin(), ee=cur_fu->outs_end(); ii!=ee; ++ii) {
+      CFU_node* ufu = *ii;
+      if(doneFUs.count(ufu) != 0) {
+        continue;
+      }
+      checkCompatible(ops,closeSet,orig_op,uop,ufu,doneOps,doneFUs);
+    }
+  }
+
+  for(auto di=cur_op->d_begin(),de=cur_op->d_end();di!=de;++di) {
+    Op* dop = *di;   //backwards
+    if(doneOps.count(dop)!=0 || !dependenceInPath(ops,dop,cur_op)) {
+      continue;
+    }
+    for(auto ii=cur_fu->ins_begin(), ee=cur_fu->ins_end(); ii!=ee; ++ii) {
+      CFU_node* dfu = *ii;
+      if(doneFUs.count(dfu) != 0) {
+        continue;
+      }
+      checkCompatible(ops,closeSet,orig_op,dop,dfu,doneOps,doneFUs);
+    }
+  }
+}
+
+
+
+void LoopInfo::calcPossibleMappings(std::set<Op*>& ops, CFU_set* cfu_set, 
+                          std::set<std::pair<Op*,Op*>>& closeSet) {
+  std::set<Op*> emptyOps;
+  std::set<CFU_node*> emptyNodes;
+
+  for(auto i=ops.begin(),e=ops.end();i!=e;++i) {
+    Op* op = *i;
+
+    for(auto cfui = cfu_set->cfus_begin(), 
+             cfue = cfu_set->cfus_end(); cfui != cfue; ++cfui) {
+      CFU* cfu = *cfui;
+      for(auto ni = cfu->nodes_begin(), ne = cfu->nodes_end(); ni != ne; ++ni) {
+        CFU_node* cfu_node = *ni;
+
+        checkCompatible(ops,closeSet,op,op,cfu_node,emptyOps,emptyNodes);
+
+      }
+    }
+  }
+}
+
+void LoopInfo::printSGPartText(std::ostream& out,
+                           std::string resultfile, 
+                           std::string fixes,
+                           CFU_set* cfu_set) {
+
+out << "file stdout / \"" << resultfile << "\" /;\n"
+    << "stdout.pc=8;stdout.pw=4096;put stdout;\n";
+
+
+  cfu_set->print_to_stream(out);  
+
+const char * text_pre = R"HERE(
+
+binary variable Mvn(v,n), Bvv(v,v);
+positive variable Tv(v);
+positive variable U(v,v,fu);
+variable LAT, READS, WRITES, GOAL;
+alias(v,v1,v2,v3,v4);
+alias(n,n1,n2);
+alias(fu,fu1,fu2);
+alias(s,s1,s2);
+
+* if v1 is close to v2
+set close_dep(v1,v2);
+set iter_close(v1,v2);
+
+close_dep(v1,v2)$(ORD(v1) eq ORD(v2)) = YES;
+scalar depth;
+for (depth = 0 to 4,
+  loop((v1,v2,v3)$( (A(v2,v3) and close_dep(v1,v2)) or
+                    (A(v3,v2) and close_dep(v2,v1))),
+    iter_close(v1,v3) = YES;
+  );
+  close_dep(v1,v2)$iter_close(v1,v2)=YES;
+);
+
+display close_dep;
+
+Bvv.fx(v1,v2)$(not possDep(v1,v2))=1;
+
+
+)HERE";
+
+
+
+
+out << text_pre;
+out << fixes;
+
+const char * text = R"HERE(
+
+* generate compatibility matrix
+set c(v,n);
+loop(k,
+    c(v,n)$(kv(v,k) and kn(n,k))=YES;
+)
+display c;
+c(v,'nreg')=YES;
+
+
+Equations 
+  map1(v),
+  map2(v),
+  route1(v,v,n),
+  regforce(v,v),
+*  init_used(v,n),
+*  prop_used1(v,v,n,v),
+*  prop_used2(v,v,n,v),
+*  restrict_use(v,n),
+
+  transitive_sameness1(v,v,v),
+  transitive_sameness2(v,v,v),
+  transitive_sameness3(v,v,v),
+  restrict_fu(v,v,n),
+
+  boundary(v,v,n),
+  timing1(v,v),
+  timing2(v,v),
+  c_lat(v),
+  c_writes,
+  c_reads,
+  c_goal
+  ;
+
+
+*All nodes mapped to some FU. (include kind in this later)
+map1(v)..                    sum(fu$     c(v,fu),  Mvn(v,fu)) =e= 1;
+map2(v)..                    sum(fu$(not c(v,fu)), Mvn(v,fu)) =e= 0;
+
+route1(v1,v2,fu2)$(A(v1,v2) and c(v2,fu2)).. 
+      Mvn(v2,fu2) =l= sum(n1$(c(v1,n1) and Hnn(n1,fu2)), Mvn(v1,n1));
+
+regforce(v1,v2)$A(v1,v2).. Bvv(v1,v2) =l= Mvn(v1,'nreg');
+
+*init_used(v1,fu1)$(c(v1,fu1)).. U(v1,v1,fu1) =g= Mvn(v1,fu1); 
+*prop_used1(v1,v2,fu1,v3)
+*  $(A(v1,v2) and possDep(v2,v3)).. 
+*  U(v2,v3,fu1) =g= U(v1,v3,fu1) - Bvv(v1,v2);
+*prop_used2(v1,v2,fu1,v3)
+*  $(A(v1,v2) and possDep(v1,v3))..
+*  U(v1,v3,fu1) =g= U(v2,v3,fu1) - Bvv(v1,v2);
+*restrict_use(v1,fu)$(c(v1,fu)).. 
+*  sum(v2$(c(v2,fu) and possDep(v1,v2)),U(v1,v2,fu)) =l= 1;
+
+
+boundary(v1,v2,fu2)$(A(v1,v2) and c(v2,fu2))..
+         Bvv(v1,v2) =g= -sum(fu1$(c(v1,fu1) and Hnn(fu1,fu2)),Mvn(v1,fu1)) + Mvn(v2,fu2);
+
+transitive_sameness1(v1,v2,v3)$(ORD(v1) lt ORD(v2) and ORD(v2) lt ORD(v3) and
+                              close_dep(v1,v2) and close_dep(v2,v3) and close_dep(v1,v3))..
+                              (1-Bvv(v1,v2)) + (1-Bvv(v2,v3)) -1 =l= (1-Bvv(v1,v3));
+
+transitive_sameness2(v1,v2,v3)$(ORD(v1) lt ORD(v2) and ORD(v2) lt ORD(v3) and
+                              close_dep(v1,v2) and close_dep(v2,v3) and close_dep(v1,v3))..
+                              (1-Bvv(v1,v3)) + (1-Bvv(v2,v3)) -1 =l= (1-Bvv(v1,v2));
+
+transitive_sameness3(v1,v2,v3)$(ORD(v1) lt ORD(v2) and ORD(v2) lt ORD(v3) and
+                              close_dep(v1,v2) and close_dep(v2,v3) and close_dep(v1,v3))..
+                              (1-Bvv(v1,v2)) + (1-Bvv(v1,v3)) -1 =l= (1-Bvv(v2,v3));
+
+
+* Enforce that !Bvv(v1,v2) -> M(v,fu1), M(v,fu2) fu1!=fu2
+restrict_fu(v1,v2,fu)$(c(v1,fu) and c(v2,fu) and (ORD(v1) lt ORD(v2)) and possDep(v1,v2))..
+                              Mvn(v1,fu) + Mvn(v2,fu) =l= Bvv(v1,v2) +1;
+
+timing1(v1,v2)$(A(v1,v2))..
+                              Tv(v2) =g= Bvv(v1,v2) + Tv(v1);
+
+timing2(v1,v2)$(A(v1,v2))..
+                              Tv(v2) =l= 20*Bvv(v1,v2) + Tv(v1);
+
+c_writes.. WRITES =e= sum(v, Mvn(v,'nreg'));
+c_reads..  READS  =e= sum((v1,v2)$(A(v1,v2)), Bvv(v1,v2));
+
+c_lat(v)$(sum(v2$A(v,v2),1) eq 0).. LAT    =g= Tv(v);
+c_goal..   GOAL   =e= LAT + WRITES + READS;
+
+
+option optca = 1.9999;
+option optcr = 0.1;
+option reslim = 200;
+option threads = 16;
+
+Model sg/all/;
+sg.limrow=10000
+solve sg using mip minimizing GOAL;
+
+display Tv.l;
+display Mvn.l;
+display Bvv.l;
+display LAT.l;
+
+scalar t;
+
+*loop(v,
+*put v.tl Tv.l(v)/
+*);
+
+*loop((v,n)$Mvn.l(v,n),
+*put v.tl n.tl/
+*);
+
+
+* all verticies at this time step
+set par(v); 
+* the current subgraph which we are printing
+set curr(v);
+
+
+for (t = 0 to LAT.l,
+*  put "TIME" t" "/
+
+  loop(v,par(v)=NO);
+  loop(v,
+    if(Tv.l(v) >= t-0.05 and Tv.l(v) <= t+0.05,
+       par(v)=YES;
+    );
+  );
+  loop(v,
+    if(par(v),
+      loop(v1,curr(v1)=NO);
+ 
+      loop((s,n)$(Mvn.l(v,n) and cfu(s,n)),
+        put s.tl;
+      );
+     
+      
+      par(v)=NO;
+      curr(v)=YES;
+      loop(v3$par(v3),
+        loop((v1,v2,fu1,fu2)$(A(v1,v2)    and Hnn(fu1,fu2)  and 
+                              Mvn.l(v1,fu1) and Mvn.l(v2,fu2) and
+                              (curr(v2) or curr(v1)) 
+                              and Tv.l(v1) >= t-0.05 and Tv.l(v1) <= t+0.05
+                              and Tv.l(v2) >= t-0.05 and Tv.l(v2) <= t+0.05
+                              ),
+          curr(v1)=YES;
+          curr(v2)=YES;
+          par(v1)=NO;
+          par(v2)=NO;
+        );
+      );
+      loop((v1,fu1)$(curr(v1) and Mvn.l(v1,fu1)),
+        put v1.tl fu1.tl;
+      );
+      put /;
+    );
+  );
+
+*  put /;
+);
+
+
+
+)HERE";
+
+    out << text;
+
+}
 
 void LoopInfo::printGamsPartitionText(std::ostream& out,int count,
-                              std::string resultfile,std::string fixes,
+                              std::string resultfile,
+                              std::string fixes,
                               int nMemDepOps, int max_beret_size, int max_mem_ops) {
   int maxSize = max_beret_size;
   int minSize = 2;
@@ -298,7 +616,7 @@ set first_l(l) first element of l
     first_l(l) = ord(l) = 1;
     last_l(l) = ord(l) = card(l);
 
-alias(V,u,v);
+alias(u,v);
 alias(l,l1,l2,l3);
 
 variable interf_edges;
@@ -413,34 +731,86 @@ obj/;
     << "loop(l,loop(v,if(y.l(v,l) <> 0,put v.tl ;););put /;);\n"
     << "display x.l\n"
     << "display y.l\n";
-  }
-bool LoopInfo::printGamsPartitionProgram(std::string filename,
+}
+
+bool LoopInfo::printGamsPartitionProgram(std::string filename, CFU_set* cfu_set,
     bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops) {
     
     _subgraphSet.clear();
     _subgraphVec.clear();
+    BBvec& bbVec = getHotPath();
     return LoopInfo::printGamsPartitionProgram(filename,
-      _subgraphSet, _subgraphVec,
-       gams_details, no_gams);
+       bbVec,
+       _subgraphSet, _subgraphVec,
+      cfu_set, gams_details, no_gams);
+}
+
+
+bool LoopInfo::scheduleNLA(CFU_set* cfu_set,   
+                 bool gams_details, bool no_gams) { 
+
+  _subgraphSetNLA.clear();
+  _subgraphVecNLA.clear();
+
+  return scheduleNLA(cfu_set, _subgraphSetNLA, _subgraphVecNLA, gams_details, no_gams);
+}
+
+
+/* This algo Searches chunks up the outer loop into peices, and and schedules
+ * each one at a time.  This will create a bunch of BBs
+ */
+bool LoopInfo::scheduleNLA(CFU_set* cfu_set,   
+                 SubgraphSet& subgraphSet,  
+                 SubgraphVec& subgraphVec,
+                 bool gams_details,
+                 bool no_gams) { 
+  //Find successive basic blocks, throw those at the gams scheduler
+  BBvec curVec;
+  int piece=0;
+
+  for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii, ++piece) {
+    BB* bb = *ii;  
+
+    curVec.push_back(bb);
+   
+    if(bb->succ_size()!=1 || ii==_rpo.end()) {
+      //time to schedule!
+      stringstream ss;
+      ss << "schedNLA." << id() << "." << piece; 
+      bool ret = printGamsPartitionProgram(ss.str(),
+                     curVec,subgraphSet,subgraphVec,
+                     cfu_set, gams_details, no_gams,100,100); 
+      if(!ret) {
+        return false; //fail if any piece fails
+      }
+
+      curVec.clear();
+    }
+  }
+  return true;
 }
 
 
 bool LoopInfo::printGamsPartitionProgram(std::string filename,
+     BBvec& bbVec,
      SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
-     bool gams_details,bool no_gams,
+     CFU_set* cfu_set, bool gams_details,bool no_gams,
      int max_beret_size, int max_mem_ops) {
 
-  BBvec& hotPath = getHotPath();
+  //BBvec& bbVec = getHotPath();
+
   std::set<Op*> instsInPath;
   std::map<uint32_t, Op*> intOpMap;
 
   std::stringstream ss;
 
-  ss << "$ONEMPTY; \n set V/";
+  ss << "$ONEMPTY;\n";
+  CFU_node::print_kinds(ss);
+  ss << "set v/";
 
   int countElements=0;
   //find all instructions in path;
-  for(auto i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+  for(auto i=bbVec.begin(),e=bbVec.end();i!=e;++i) {
     BB* bb= *i;
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
@@ -456,7 +826,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   }
   ss << "/;\n"; 
 
-  _instsInPath=instsInPath;
+
   if(setContainsCallReturn(instsInPath)) {
     //if loop contains call, don't perform subgraph matching...
     return false;
@@ -466,13 +836,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   out << ss.str();
 
   out << "set A(v,v)/";
-  std::stringstream fixes,streamD,streamM;
+  std::stringstream fixes,fixes2,streamD,streamM,streamK;
   countElements=0;
   int countOps=0;
-  int countElementsD=0,countElementsM=0;
+  int countElementsD=0,countElementsM=0,countElementsK=0;
   int nMemDepOps=0;
   //print graph
-  for(auto i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+  for(auto i=bbVec.begin(),e=bbVec.end();i!=e;++i) {
     BB* bb= *i;
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
@@ -483,6 +853,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         //Don't consider any irrelevant edges.
         if(!dependenceInPath(instsInPath,op,uop)) {
           fixes << "x.fx('" << op->id() << "')=1;\n"; // must write reg
+          fixes2 << "Mvn.fx('" << op->id() << "','nreg')=1;\n"; // must write reg
           continue;
         }
         if(countElements++ != 0) {
@@ -498,6 +869,12 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         countElementsM++;
       }
 
+      if(countElementsK++ != 0) {
+        streamK <<",";
+      }
+      streamK << op->id() << "." << CFU_node::kindName(CFU_node::kindOf(op->opclass()));
+      
+
       for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
         Op* mop = *di;
         if(dependenceInPath(instsInPath,mop,op)) {
@@ -511,6 +888,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
       if(op->numUses()==0) {
         fixes << "x.fx('" << op->id() << "')=0;\n"; //inst does not write reg
+        fixes2 << "Mvn.fx('" << op->id() << "','nreg')=0;\n"; //inst does not write reg
       }
     }
   }
@@ -522,6 +900,27 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   out << "set M(v)/";
   out << streamM.str();
   out << "/;\n"; 
+  out << "set kv(v,k)/";
+  out << streamK.str();
+  out << "/;\n"; 
+
+
+  
+  if(cfu_set) {
+    std::set<std::pair<Op*,Op*>> closeSet;
+    calcPossibleMappings(instsInPath, cfu_set,closeSet);
+
+    out << "set possDep(v,v)/";
+    for(auto i = closeSet.begin(), e = closeSet.end(); i!=e; ++i) {
+      Op* op1 = i->first;
+      Op* op2 = i->second;
+      if(i!=closeSet.begin()) {
+        out << ",";
+      }
+      out << op1->id() << "." << op2->id();
+    }
+    out << "/;\n"; 
+  }
 
   std::string resultfile=filename + ".out";
 
@@ -529,18 +928,24 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     nMemDepOps = countElementsM/max_mem_ops;
   }
 
-  printGamsPartitionText(out,instsInPath.size(),resultfile,
-                         fixes.str(),nMemDepOps,max_beret_size,max_mem_ops);
+
+  if(!cfu_set) {
+    printGamsPartitionText(out,instsInPath.size(),resultfile,
+                           fixes.str(),nMemDepOps,max_beret_size,max_mem_ops);
+  } else {
+    printSGPartText(out,resultfile,fixes2.str(),cfu_set);
+  }
+
 
   out.close(); 
-
   Subgraph* subgraph=NULL;
-
   //Delete 225? Directories
 
   int ops_in_a_subgraph = 0;
 
   system("rm -rf 225?/");
+
+  CFU* curCFU = NULL;
 
   if(!no_gams && countOps<=MAX_GAMS_SIZE) {
     //run gams
@@ -557,18 +962,40 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   
       char_separator<char> sep(" ");
       tokenizer<char_separator<char>> tokens(line, sep);
+
+      Op* prev_op; //previous op
       for (const auto& t : tokens) {
         if(subgraph==NULL) {
           subgraph=new Subgraph();
           subgraphSet.insert(subgraph);
           subgraphVec.push_back(subgraph);
         }
-  
+ 
+        string t_post = t.substr(1,string::npos);
+
+        if(t[0] == 's') {
+          uint32_t i = std::stoi(t_post);
+          curCFU=cfu_set->getCFU(i);
+          subgraph->setCFU(curCFU);
+          continue;
+        }
+
+        if(t[0] == 'n') {
+          uint32_t i = std::stoi(t_post);
+          assert(curCFU);
+          assert(prev_op);
+          CFU_node* cfu_node=curCFU->getCFUNode(i);
+          subgraph->setCFUNode(prev_op,cfu_node);
+          continue;
+        }
+
+
         uint32_t i = std::stoi(t);
         Op* op = intOpMap[i];
         //op->setSubgraph(subgraph);
         subgraph->insertOp(op);
         ops_in_a_subgraph++;
+        prev_op=op;
       }
       subgraph=NULL; //reset subgraph for next group
     }
@@ -583,11 +1010,16 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //std::cerr << "ops_in_a_subgraph:" << ops_in_a_subgraph << "\n";
     //std::cerr << "countElements:" << countOps << "\n";
     //std::cerr << "GAMS COULD NOT SCHEDULE FOR BERET --- So I'm going to do it manually\n";
-    std::cerr << "GAMS-FAILED";
-    
+    if(!no_gams) {
+      std::cerr << "GAMS-FAILED falling back to size-based model";
+    }
+
+    if(cfu_set) {
+      assert(0 && "No Heuristic Method For CFU Scheduling");
+    }
 
     int curOp=0;
-    for(auto i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+    for(auto i=bbVec.begin(),e=bbVec.end();i!=e;++i) {
       BB* bb= *i;
       BB::OpVec::iterator oi,oe;
       for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
@@ -714,10 +1146,10 @@ bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
 //the are already serialized
 void LoopInfo::serializeSubgraphs() {
 /*  SubgraphSet checker;
-  BBvec& hotPath = getHotPath();
+  BBvec& bbVec = getHotPath();
   BBvec::iterator i,e;
 
-  for(i=hotPath.begin(),e=hotPath.end();i!=e;++i) {
+  for(i=bbVec.begin(),e=bbVec.end();i!=e;++i) {
     BB* bb= *i;
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
@@ -761,21 +1193,28 @@ void LoopInfo::serializeSubgraphs() {
     return "?";
   }
 
-
-void LoopInfo::printSubgraphDot(std::ostream& out) {
+void LoopInfo::printSubgraphDot(std::ostream& out, 
+                                SubgraphSet& subgraphSet, 
+                                bool NLA) {
   out << "digraph GB{\n";
   out << "compound=true\n";
 
   SubgraphSet::iterator i,e;
-  for(i=_subgraphSet.begin(), e=_subgraphSet.end(); i!=e;++i) {
+  for(i=subgraphSet.begin(), e=subgraphSet.end(); i!=e;++i) {
     Subgraph* sg = *(i);
     out << "subgraph"
         << "\"cluster_" << sg->id() << "\"{" 
    
-        << "label=\"sg " << sg->id() << "\"\n";
+        << "label=\"sg " << sg->id();
+        
+    if(sg->cfu()) {
+     out << " (cfu" << sg->cfu()->ind() << ")";
+    }
+    out << "\"\n";
 
     out << "style=\"filled,rounded\"\n";
     out << "color=lightgrey\n";
+
 
     Subgraph::OpSet::iterator oi,oe;
     int i;
@@ -796,38 +1235,26 @@ void LoopInfo::printSubgraphDot(std::ostream& out) {
       } else if(op->isCtrl()) {
         out << "ctrl";
       } else {
-        out << "~" << opname(op->opclass());
+        out << opname(op->opclass());
       }
 
 
-      out << i << "\" style=filled, color=white]\n";
+      out << op->id();
+
+      if(sg->getCFUNode(op)) {
+        out << " (fu" << sg->getCFUNode(op)->ind() << ")";
+      }
+
+      out <<  "\" style=filled, color=white]\n";
+
     }
 
     out << "}\n";
  
  //Iterate through Ops
-
     for(oi=sg->op_begin(),oe=sg->op_end(),i=0;oi!=oe;++oi,++i) {
       Op* op = *oi;
       
-      /*
-      Op::Deps::iterator di,de; //deps
-      for(di=op->d_begin(),de=op->d_end();di!=de;++di) {
-        Op* dop = *di;
-        if(dop->func()==op->func()) { //only check deps inside the function
-          if(dependenceInPath(pathOps,dop,op)) {  //for forward deps
-             out << "\"" << dop->id() << "\"" << " -> "
-                 << "\"" << op->id() << "\"[";
-
-             out << "weight=0.5]\n";
-          } else {
-             out << "\"" << dop->id() << "\"" << " -> "
-                 << "\"" << op->id() << "\"[";
-
-             out << "weight=0.5,color=blue]\n";
-          }
-        }
-      }*/
       Op::Deps::iterator ui,ue; //uses
       for(ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
         Op* uop = *ui;
@@ -841,7 +1268,7 @@ void LoopInfo::printSubgraphDot(std::ostream& out) {
              out << "\"" << op->id() << "\"" << " -> "
                  << "\"" << uop->id() << "\"[";
 
-             out << "weight=0.5,color=red]\n";
+             out << "weight=0.5,color=red,constraint=false]\n";
           }
         }
       }

@@ -13,6 +13,8 @@
 #include <fstream>
 #include "bb.hh"
 
+#include "cfu.hh"
+
 class Subgraph {
 public:
   typedef std::set<Op*> OpSet;
@@ -20,15 +22,22 @@ public:
 
 private:
   OpSet _ops;
-  OpVec _opVec;
+  OpVec _opVec; //no need to save in serializer -- recomputed
   static uint32_t _idCounter;
   uint32_t _id;
+  CFU* _cfu=NULL;
+  std::map<Op*, CFU_node*> _opMap;
 
 public:
 friend class boost::serialization::access;
 template<class Archive>
   void serialize(Archive & ar, const unsigned int version){
+    ar & _id;
     ar & _ops;
+    ar & _cfu;
+    ar & _opMap;
+    ar & _cfu;
+    ar & _opMap;
   }
 
   Subgraph():_id(_idCounter++){
@@ -49,7 +58,24 @@ template<class Archive>
   unsigned size() {return _ops.size();}
 
   uint32_t id() {return _id;}
+
+  void setCFU(CFU* cfu) {_cfu=cfu;}
+  CFU* cfu() {return _cfu;}
+
+  void setCFUNode(Op* op, CFU_node* node) {
+    _opMap[op]=node;
+  }
+
+  CFU_node* getCFUNode(Op* op) {
+    return _opMap[op];
+  }
+
 };
+
+
+
+
+
 
 class LoopInfo {
 public:
@@ -120,6 +146,10 @@ private:
   SubgraphSet _subgraphSet;
   SubgraphVec _subgraphVec;
 
+  SubgraphSet _subgraphSetNLA;
+  SubgraphVec _subgraphVecNLA;
+
+
   //which op did the call, how many times
   CallToMap _calledToMap;
   CallToSet _calledTo;
@@ -153,6 +183,8 @@ template<class Archive>
     ar & _hotPathIndex;
     ar & _subgraphSet;
     ar & _subgraphVec;
+    ar & _subgraphSetNLA;
+    ar & _subgraphVecNLA;
     ar & _calledToMap;
   }
 
@@ -255,8 +287,12 @@ public:
   std::string nice_name();
 
   void setFuncInfo(FunctionInfo* f) {_funcInfo=f;}
-  bool hasSubgraphs() {
-    return _subgraphSet.size()>0;
+  bool hasSubgraphs(bool NLA=false) {
+    if(NLA) {
+      return _subgraphSetNLA.size()>0;
+    } else {
+      return _subgraphSet.size()>0;
+    }
   }
 
   unsigned              body_size()   { return _loopBody.size(); }
@@ -292,20 +328,56 @@ public:
   bool dependenceInPath(Op* dop, Op* op); 
   bool dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op);
 
+  void checkCompatible(std::set<Op*>& ops,
+                     std::set<std::pair<Op*,Op*>>& closeSet, 
+                     Op* orig_op, 
+                     Op* cur_op,
+                     CFU_node* cur_fu,
+                     std::set<Op*> doneOps,
+                     std::set<CFU_node*> doneCFUs);
+  void calcPossibleMappings(std::set<Op*>& ops, CFU_set* cfu_set,
+                            std::set<std::pair<Op*,Op*>>& closeSet);
+
+  
+
+  void printSGPartText(std::ostream& out,
+                              std::string resultfile, 
+                              std::string fixes, CFU_set* cfu_set);
+
   void printGamsPartitionText(std::ostream& out,int count,
                               std::string resultfile, 
                               std::string fixes,int nMemDepOps,
                               int max_beret_ops, int max_mem_ops);
 
-  bool printGamsPartitionProgram(std::string filename, bool gams_details,
-                                bool no_gams, int max_beret_ops=6, int max_mem_ops=2);
 
-  bool printGamsPartitionProgram(std::string filename,
-     SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
-     bool gams_details,bool no_gams,
-     int max_beret_ops=6, int max_mem_ops=2);
+  bool printGamsPartitionProgram(std::string filename, CFU_set* cfu_set=NULL, 
+                                 bool gams_details=false, bool no_gams=false, 
+                                 int max_beret_ops=6, int max_mem_ops=2);
 
-  void printSubgraphDot(std::ostream& out);
+  bool printGamsPartitionProgram(std::string filename, 
+    BBvec& bbVec,
+    SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
+    CFU_set* cfu_set=NULL, bool gams_details=false, bool no_gams=false,
+    int max_beret_ops=6, int max_mem_ops=2);
+
+  void printSubgraphDot(std::ostream& out, bool NLA=false) {
+    if(NLA) {
+      printSubgraphDot(out,_subgraphSetNLA,true);
+    } else {
+      printSubgraphDot(out,_subgraphSet,false);
+    }
+  }
+
+
+  bool scheduleNLA(CFU_set* cfu_set, bool gams_details, bool no_gams); 
+  bool scheduleNLA(CFU_set* cfu_set,   
+                 SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
+                 bool gams_details, bool no_gams);
+
+
+  void printSubgraphDot(std::ostream& out, 
+                        SubgraphSet& subgraphSet, 
+                        bool NLA);
 
   void calledTo(Op* op, FunctionInfo* fi) {
     _calledToMap[std::make_pair(op,fi)]++;

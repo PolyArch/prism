@@ -29,6 +29,8 @@ int main(int argc, char *argv[])
   bool verbose = false;
   bool gams_details = false;
   bool no_gams = false;
+  bool size_based_cfus = false;
+
 
   //Parse the Options
   uint64_t max_inst= (uint64_t)-1;
@@ -40,6 +42,7 @@ int main(int argc, char *argv[])
     {"verbose",no_argument, 0, 'v'},
     {"gams-details",no_argument, 0, 'g'},
     {"no-gams",no_argument, 0, 'n'},
+    {"size-based-cfus",no_argument, 0, 's'},
     {"max-insts", required_argument, 0, 'm'},
     {"cfgdir", required_argument, 0, 'd'},
     {0,0,0,0}
@@ -68,6 +71,7 @@ int main(int argc, char *argv[])
       return(0);
     case 'g': gams_details = true; break;
     case 'n': no_gams = true; break;
+    case 's': size_based_cfus = true; break;
     case 'v': verbose = true; break;
     case 'm': max_inst = atoi(optarg); break;
     case '?': break;
@@ -131,6 +135,7 @@ int main(int argc, char *argv[])
 
   if (!doLoopProfAnalysis(argv[optind],
                           max_inst, winsize, verbose,
+                          size_based_cfus,
                           no_gams, gams_details,
                           count, pathProf))
     return 1;
