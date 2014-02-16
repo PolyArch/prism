@@ -160,15 +160,20 @@ public:
     if (!useOpDependence() && !n.hasMemOperandInsts())
       return CP_DG_Builder<T, E>::checkMemoryDependence(n);
 
+    //Tony: When does this happen?
     if (n.hasMemOperandInsts()) {
       for (auto I = n.mem_op_begin(), IE = n.mem_op_end(); I != IE; ++I) {
         std::shared_ptr<dg_inst_base<T, E> > inst = *I;
         Inst_t *depInst = dynamic_cast<Inst_t*>(inst.get());
-        this->insert_mem_dep_edge(*depInst, n);
+        //this->insert_mem_dep_edge(*depInst, n);
+        this->addTrueMemDep(*depInst,n); //this will keep track of dependent edges
+
       }
       return;
     }
 
+    //Tony: Is this super conservative, b/c you are adding any potential mem dep?
+    //Probably won't matter in practice, but still...
     Op *op = this->getOpForInst(n);
 
     if (!op) {
@@ -184,7 +189,8 @@ public:
       BaseInst_t *depInstPtr = depInst.get();
       if (!depInstPtr)
         continue;
-      this->insert_mem_dep_edge(*depInstPtr, n);
+      //this->insert_mem_dep_edge(*depInstPtr, n);
+      this->addTrueMemDep(*depInstPtr,n);
     }
   }
 
@@ -204,6 +210,7 @@ protected:
 
   std::list< _InstInfo<Op*, InstPtr, CP_NodeDiskImage> > _loop_InstTrace;
   std::map<Op*, uint16_t> _cacheLat;
+  //std::map<Op*, int> _cacheProd;
   std::map<Op*, bool> _trueCacheProd;
   std::map<Op*, bool> _ctrlMiss;
 

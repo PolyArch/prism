@@ -193,19 +193,25 @@ public:
            << "-" << (int)(rob_growth_rate*100);
     outs() << " iq:" << InstQueue.size();
 
-    int lqSize = (lq_head_at_dispatch<=LQind) ? (LQind-lq_head_at_dispatch):
-      (LQind-lq_head_at_dispatch+32);
-    outs() << " lq:" << lqSize;
-
-    int sqSize = (sq_head_at_dispatch<=SQind) ? (SQind-sq_head_at_dispatch):
-      (SQind-sq_head_at_dispatch+32);
-    outs() << " sq:" << sqSize;
+    outs() << " lq:" << lqSize();
+    outs() << " sq:" << sqSize();
 
     outs() << "\n";
   }
 
 
 protected:
+
+  int lqSize() {
+     return (lq_head_at_dispatch<=LQind) ? (LQind-lq_head_at_dispatch):
+      (LQind-lq_head_at_dispatch+32);
+  }
+
+  int sqSize() {
+    return (sq_head_at_dispatch<=SQind) ? (SQind-sq_head_at_dispatch):
+      (SQind-sq_head_at_dispatch+32);
+  }
+
 
   //Code to map instructions to ops, and back
   std::map<Op *, InstPtr> _op2InstPtr;
@@ -315,6 +321,12 @@ protected:
 
   int lq_head_at_dispatch;
   int sq_head_at_dispatch;
+
+  int pipe_index;
+  uint16_t lq_size_at_dispatch[PSIZE];
+  uint16_t sq_size_at_dispatch[PSIZE];
+
+
 
   void cleanup() {
     getCPDG()->cleanup();
@@ -714,7 +726,7 @@ protected:
 //      checkBranchPredict(inst,op); //just control dependence
     } else {
       //checkIQStalls(inst);
-      //checkLSQStalls(inst);
+      checkLSQStalls(inst);
     }
   }
 
@@ -751,6 +763,8 @@ protected:
         break;
       }
     } while (sq_head_at_dispatch != SQind);
+    lq_size_at_dispatch[getCPDG()->getPipeLoc()%PSIZE] = lqSize();
+    sq_size_at_dispatch[getCPDG()->getPipeLoc()%PSIZE] = sqSize();
   }
 
 
@@ -968,12 +982,13 @@ protected:
 
   virtual bool predictTaken(Inst_t& dep_n, Inst_t &n) {
     bool predict_taken = false;
-    if(dep_n._pc == n._pc) {
+    if(dep_n._pc == n._pc) { //this probably doesn't happen much!
       predict_taken = dep_n._upc + 1 != n._upc;
     } else {
       predict_taken |= n._pc < dep_n._pc;
-      predict_taken |= n._pc > dep_n._pc+8;//proxy for inst width
+      predict_taken |= n._pc > dep_n._pc+3;//x86 jumps are 2-3 bytes, I think
     }
+
     return predict_taken;
   }
 
@@ -989,7 +1004,7 @@ protected:
     if(depInst->_isctrl) {
       //check if previous inst was a predict taken branch
       bool predict_taken=predictTaken(*depInst,n);
-      if(predict_taken && lat==0) {
+      if(predict_taken && lat==0/* TODO: check this*/) {
         lat+=1;
       }
 
@@ -1041,10 +1056,12 @@ protected:
     }
 
     int length=1;
-    Inst_t* prevInst = getCPDG()->peekPipe(-1);
-    if(prevInst && !prevInst->_isctrl) {
-      length+=n._icache_lat;
-    }
+    //TODO: Do we need this?
+    //Inst_t* prevInst = getCPDG()->peekPipe(-1);
+    //if(prevInst && !prevInst->_isctrl) {
+      //length+=n._icache_lat; //TODO: Which is correct, this one seems to conservative sometimes
+      //length=std::max(length,n._icache_lat);  //this steems too optimistic sometimes
+    //}
 
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
                            n, Inst_t::Fetch, length, E_FBW); 
@@ -1157,10 +1174,52 @@ protected:
 
 
 
- /* 
- //Getting rid of this because i don't think lsq should stall fetch --
- //it should work like a rob for just loads, where it stalls dispatch
+  int numInstsNotInRob=0;
+  //This should be called after FBW
   virtual Inst_t &checkLSQStalls(Inst_t &n) {
+     Inst_t* prevInst = getCPDG()->peekPipe(-1); 
+     if(!prevInst) {
+       return n;
+     }
+
+     uint64_t cycleOfFetch = n.cycleOfStage(Inst_t::Fetch);
+     if(prevInst->cycleOfStage(Inst_t::Fetch) == cycleOfFetch) {
+       return n; //only check this on first fetch of new cycle
+     }
+   
+
+     int pipeLoc = getCPDG()->getPipeLoc();
+
+     //Caculate number of insts not in rob at time of fetch
+     int i = 1;
+     for(; i < PSIZE; ++i) {
+       Inst_t* depInst = getCPDG()->peekPipe(-i); 
+       if(!depInst) {
+         return n;
+       }
+       if(depInst->cycleOfStage(Inst_t::Dispatch) <= cycleOfFetch) {
+         break;
+       } 
+     }
+ 
+    numInstsNotInRob=i;
+    int blocking_dispatch=i;
+
+    if(numInstsNotInRob + lq_size_at_dispatch[((pipeLoc-blocking_dispatch))%PSIZE]
+         > LQ_SIZE) {
+      Inst_t* depInst = getCPDG()->peekPipe(-blocking_dispatch); 
+      getCPDG()->insert_edge(*depInst, Inst_t::Dispatch,
+                              n, Inst_t::Fetch, 2, E_LQTF); //3 cycles emperical
+    }
+
+
+    
+    
+ 
+/*
+  //Getting rid of this because i don't think lsq should stall fetch --
+ //it should work like a rob for just loads, where it stalls dispatch
+
     //number of load/store instructions not executed exceeds the LSQ_WIDTH,
     //stall the fetch
     //TODO XXX This isn't really consistent with simulator code... overly
@@ -1181,9 +1240,11 @@ protected:
     }
     getCPDG()->insert_edge(min_node, Inst_t::Commit,
                            n, Inst_t::Fetch, n._icache_lat+1,E_LSQ);
+    */
     return n;
+    
   }
-*/
+
 
   //========== DISPATCH ==============
 
@@ -1282,6 +1343,12 @@ protected:
         getCPDG()->insert_edge(*SQ[ind], SQ[ind]->memComplete(),
                                n, Inst_t::Ready, 1,E_NSpc);
       }
+      Inst_t* depInst = getCPDG()->peekPipe(-1); 
+      if(depInst) {
+        getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                                 n, Inst_t::Ready, 2,E_NSpc);
+      }
+
     }
     return n;
   }
@@ -1293,7 +1360,12 @@ protected:
     checkRegisterDependence(n);
 
     //memory dependence
-    checkMemoryDependence(n);
+    if(n._isload || n._isstore) {
+      checkMemoryDependence(n);
+      insert_mem_predicted_edges(n); //TODO: probably creating duplicate edges
+                                     //in the common case.  fix for effeciency!
+                                     //DIDIT: check if it works
+    }
     return n;
   }
 
@@ -1325,15 +1397,24 @@ protected:
       //  insert_mem_dep_edge(prev_node, n);
       //}
     }
-    insert_mem_predicted_edges(n); //TODO: probably creating duplicate edges
-                                   //in the common case.  fix for effeciency!
   }
 
+
+  //Instructions dep_n and n are truely dependent
   virtual void addTrueMemDep(BaseInst_t& dep_n, BaseInst_t& n) {
-    insert_mem_dep_edge(dep_n,n);
-    if(n._op!=NULL && dep_n._op!=NULL) {
-      //add this to the memory predictor list
-      memDepSet[n._op].insert(dep_n._op);
+    //This should only get seen as a mem dep, if the dependent instruction is 
+    //actually not complete "yet"
+    if(dep_n.cycleOfStage(dep_n.eventComplete()) > 
+           n.cycleOfStage(n.eventReady())) {
+
+      if(n._op!=NULL && dep_n._op!=NULL) {
+        //add this to the memory predictor list
+        memDepSet[n._op].insert(dep_n._op);
+      } else {
+        //We better insert the mem-dep now, because it didn't get added to memDepSet
+        //This is sort of an error, should probably fix any cases like this.
+        insert_mem_dep_edge(dep_n,n);
+      }
     }
   }
 
@@ -1346,15 +1427,15 @@ protected:
 
   //Inserts edges predicted by memory dependence predictor
   virtual void insert_mem_predicted_edges(BaseInst_t& n) {
-    checkClearMemDep();
-    //insert edges 
-    for(auto i=memDepSet[n._op].begin(), e=memDepSet[n._op].end(); i!=e;++i) {
-      Op* dep_op = *i;
-      BaseInstPtr sh_inst = getInstForOp(dep_op);
-      if(sh_inst) {
-        insert_mem_dep_edge(*sh_inst,n);
-      }
-    } 
+      checkClearMemDep();
+      //insert edges 
+      for(auto i=memDepSet[n._op].begin(), e=memDepSet[n._op].end(); i!=e;++i) {
+        Op* dep_op = *i;
+        BaseInstPtr sh_inst = getInstForOp(dep_op);
+        if(sh_inst) {
+          insert_mem_dep_edge(*sh_inst,n);
+        }
+      } 
   }
 
 
@@ -1710,7 +1791,6 @@ protected:
           activityMap.insert(i);
         }
 
-
       }
     } else { //if store
        BaseInst_t* min_node =
@@ -1728,8 +1808,12 @@ protected:
 
   //Ready to Execute Stage -- no delay
   virtual Inst_t &checkRE(Inst_t &n) {
+    int len=0;
+    if(n._nonSpec) {
+      len+=1;
+    }
     getCPDG()->insert_edge(n, Inst_t::Ready,
-                           n, Inst_t::Execute, 0,E_RE);
+                           n, Inst_t::Execute, len,E_RE);
     return n;
   }
 

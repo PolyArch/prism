@@ -406,10 +406,11 @@ namespace simd {
       insert_inst_trace_to_default_pipe();
 
       markStartPipe();
-      if (_useInstTrace || useIT)
+      if (_useInstTrace || useIT) {
         completeSIMDLoopWithInstTrace(li, CurLoopIter, useIT, _simd_vec_len);
-      else
+      } else {
         completeSIMDLoopWithLI(li, CurLoopIter, loopDone);
+      }
       if (!dumped.count(li)) {
         dumped.insert(li);
         dumpPipe();
@@ -761,7 +762,7 @@ namespace simd {
           }
 
           if (op->isLoad()) {
-            if (unalignedVecAccess) {
+            if (unalignedVecAccess) { //Tony: this is not determined dynamically...
               // Create another instruction to simulate the unaligned access
               InstPtr inst = createSIMDInst(op);
               updateInstWithTraceInfo(op, inst, false);
@@ -778,7 +779,7 @@ namespace simd {
             }
 
             // Non strided -- create more loads
-            if (!isStrideAccess(op)) {
+            if (!isStrideAccess(op) ) {
               std::vector<unsigned> loadInsts(vec_len);
               loadInsts[0] =  0;
               for (unsigned i = 1; i < vec_len; ++i) {

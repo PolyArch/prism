@@ -83,6 +83,10 @@ private:
   enum stride_value_type stride_ty = st_Unknown;
   friend class boost::serialization::access;
 
+  unsigned _acc_size = 4;
+  uint64_t _first_effAddr = 0;
+
+
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version) {
     uint8_t temp_flags = _flags.to_ulong();
@@ -90,7 +94,6 @@ private:
     void* img_ptr = reinterpret_cast<void*>(&img);
     ar & boost::serialization::make_binary_object(img_ptr,
                                                   sizeof(CP_NodeDiskImage));
-
 
     ar & _id;
     ar & _cpc;
@@ -110,6 +113,9 @@ private:
     ar & _sameEffAddrOpSet;
     ar & _nextEffAddrOpSet;
     ar & _calledFunc;
+
+    ar & _acc_size;
+    ar & _first_effAddr;
 
     _flags = std::bitset<8>(temp_flags);
 
@@ -196,12 +202,10 @@ public:
     }
 #endif
   }
-  unsigned _acc_size = 4;
-  uint64_t _first_effAddr = 0;
   void initEffAddr(uint64_t addr, unsigned size, int iterCnt) {
     _first_effAddr = addr;
     _effAddr = addr;
-    // For old gem5, size can be zero..
+    // For old gem5, size can be zero.. 
     if (size) {
       _acc_size = size;
     }

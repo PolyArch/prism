@@ -28,6 +28,7 @@
   X(IC,   "IC",  "ICache Miss")                         \
   X(FBW,  "FBW", "Fetch Bandwidth")                     \
   X(FPip, "FPip","Frontend Pipe BW")                    \
+  X(LQTF, "LQTF","Load/Store Queue To Fetch")           \
   X(BP,   "BP",  "Branch Predict (in-order)")           \
   X(CM,   "CM",  "Control Miss (OoO)")                  \
   X(IQ,   "IQ",  "Instruction Queue Full")              \
