@@ -168,7 +168,7 @@ namespace DySER {
         Op *DepOp = *I;
 
         if (op == DepOp
-            && SliceInfo::checkDisasmHas(op, "RSQRTSS_XMM_XMM")) {
+            && Op::checkDisasmHas(op, "RSQRTSS_XMM_XMM")) {
           continue;
         }
 

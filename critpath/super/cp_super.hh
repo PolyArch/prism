@@ -236,7 +236,7 @@ private:
     //resource dependnece
     SuperInst* min_node = static_cast<SuperInst*>(
          addResource(n->_opclass, n->cycleOfStage(SuperInst::Execute), 
-                                   getFUIssueLatency(n->_opclass), n.get()));
+                                   getFUIssueLatency(n->_opclass), 10, n));
 
     if(min_node) {
       getCPDG()->insert_edge(min_node->index(), SuperInst::Execute,
@@ -315,7 +315,7 @@ private:
 
     //for funcUnitUsage
     for(FuUsage::iterator I=fuUsage.begin(),EE=fuUsage.end();I!=EE;++I) {
-      FuUsageMap& fuUseMap = *I;
+      FuUsageMap& fuUseMap = I->second;
       for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
         uint64_t cycle = i->first;
         assert(cycle!=0);
@@ -329,7 +329,7 @@ private:
     }
 
     for(auto I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
-      NodeRespMap& respMap = *I;
+      NodeRespMap& respMap = I->second;
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
         if (cycle  < min_cycle) {

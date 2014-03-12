@@ -1,4 +1,8 @@
 #include "functioninfo.hh"
+#include "exec_profile.hh"
+
+#include <boost/tokenizer.hpp>
+
 
 using namespace std;
 
@@ -548,14 +552,20 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
     for(oi=bb.op_begin(),oe=bb.op_end(),i=0;oi!=oe;++oi,++i) {
       Op* op = *oi;
       out << "\"" << op->cpc().first << "x" << op->cpc().second << "\" "
-          << "[label=\"op" << i << "\" style=filled, color=white]\n";
+          << "[";
+
+      out << op->dotty_name_and_tooltip();
+          
+      out << ",style=filled, color=white]\n";
     }
     out << "}\n";
  
+    
+
    //Iterate through Ops
     for(oi=bb.op_begin(),oe=bb.op_end(),i=0;oi!=oe;++oi,++i) {
       Op* op = *oi;
-      
+
       //out << "\"" << op->cpc().first << "x" << op->cpc().second << "\" "
       //    << "[label=\"op" << i << "\" style=filled, color=white]\n";
 
@@ -576,8 +586,7 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
       }
 */
 
-      Op::Deps::iterator di,de;
-      for(di=op->d_begin(),de=op->d_end();di!=de;++di) {
+      for(auto di=op->d_begin(),de=op->d_end();di!=de;++di) {
         Op* dep_op = *di;
         if(dep_op->func()==op->func()) {
           out << "\"" << dep_op->cpc().first << "x" << dep_op->cpc().second << "\""
@@ -719,9 +728,10 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
 
       assert(i == op->bb_pos());
 
-      out << "| <" << i << ">"
-          << i << ":";
+      out << "| <" << i << ">";
+      out << op->dotty_name();
 
+/*        << op->id() << ":";
 
       //print node name
       if(op->isLoad()) {
@@ -734,7 +744,7 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
         out << "ret";
       } else if(op->isCtrl()) {
         out << "ctrl";
-      }
+      }*/
 
       if(op->isMem()&&loop_for_bb) {
         if(loop_for_bb->isStriding(op)) {
@@ -751,7 +761,7 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
       for(di=op->d_begin(),de=op->d_end();di!=de;++di) {
         Op* dep_op = *di;
         if(dep_op->bb()==op->bb()) {
-          out << dep_op->bb_pos() << " ";
+          out << dep_op->id() << " ";
           //input dependences
         }
       }

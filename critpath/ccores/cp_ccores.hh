@@ -424,7 +424,7 @@ public:
           _startCCoresCycle=0;
         }
       }
-      addDeps(sh_inst);
+      addDeps(sh_inst,op);
       pushPipe(sh_inst);
       inserted(sh_inst);
     }

@@ -2,13 +2,16 @@
 
 .PHONY: all clean cp lp base simd dyser ccores beret static
 
-all: cp simd base dyser ccores beret super npu disasm verbose
+all: cp nla simd base dyser ccores beret super npu disasm verbose
 
 cp:: lp
 	+make -C critpath
 
 lp::
 	+make -C loopprof
+
+nla:
+	+make -C critpath/nla
 
 base:
 	+make -C critpath/base

@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 
+#include "op.hh"
 
 namespace {
   class exec_profile {
@@ -17,6 +18,7 @@ namespace {
 }
 
 static exec_profile _prof_instance;
+
 
 
 void exec_profile::init()
@@ -68,4 +70,5 @@ namespace ExecProfile {
     std::pair<uint64_t, int> pc_upc = std::make_pair(pc, upc);
     return _prof_instance.disasmMap[pc_upc];
   }
+
 }

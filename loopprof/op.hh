@@ -10,11 +10,15 @@
 #include <sstream>
 #include <vector>
 #include <iostream>
-
+#include <boost/tokenizer.hpp>
 
 #include <boost/serialization/binary_object.hpp>
 #include "cpu/crtpath/crtpathnode.hh"
+
 class Op;
+
+#include "exec_profile.hh"
+
 class FunctionInfo;
 class BB;
 class Subgraph;
@@ -55,6 +59,7 @@ namespace std {
 class Op {
 public:
   typedef std::set<Op*> Deps;
+  typedef std::map<Op*,std::set<Op*>> alt_deps;
   static uint32_t _idcounter;
   CP_NodeDiskImage img;
 
@@ -64,11 +69,9 @@ private:
   uint32_t _id;
 
   CPC _cpc;
-  Deps _deps;
-  Deps _uses; //forward use
-  Deps _memDeps;
-  Deps _cacheDeps;
-  Deps _ctrlDeps;
+  Deps _deps, _uses;
+  Deps _memDeps,_cacheDeps,_ctrlDeps;
+  Deps _adjDeps, _adjUses;
   unsigned _opclass=0;
   std::bitset<8> _flags;
   BB* _bb; //saved in parent
@@ -81,12 +84,14 @@ private:
   FunctionInfo *_calledFunc = 0;
   enum stride_value_type { st_Unknown, st_Constant, st_Variable, st_Cycle };
   enum stride_value_type stride_ty = st_Unknown;
-  friend class boost::serialization::access;
 
   unsigned _acc_size = 4;
   uint64_t _first_effAddr = 0;
 
 
+
+
+  friend class boost::serialization::access;
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version) {
     uint8_t temp_flags = _flags.to_ulong();
@@ -359,11 +364,13 @@ public:
      //assert(op!=this);
      assert(op);
     _uses.insert(op);
+    updated();
   }
 
   void addJustDep(Op* op) {
     assert(op);
     _deps.insert(op);
+    updated();
   }
 
   unsigned opclass() {return _opclass;}
@@ -376,19 +383,143 @@ public:
     assert(op);
     _deps.insert(op);
     op->addUse(this);
+    updated();
   }
   void addMemDep(Op* op) {
     assert(op->isLoad() || op->isStore());
     _memDeps.insert(op);
+    updated();
   }
 
-  void addCacheDep(Op* op) {_cacheDeps.insert(op);}
-  void addCtrlDep(Op* op) {_ctrlDeps.insert(op);}
+  void addCacheDep(Op* op) {_cacheDeps.insert(op); updated();}
+  void addCtrlDep(Op* op) {_ctrlDeps.insert(op); updated();}
 
   void executed(uint16_t lat) {
     assert(lat < 5000);
     _totLat+=lat; _times+=1;
   }
+
+  static bool checkDisasmHas(Op *op, const char *chkStr) {
+      uint64_t pc = op->cpc().first;
+      int upc = op->cpc().second;
+      std::string disasm =  ExecProfile::getDisasm(pc, upc);
+      if (disasm.find(chkStr) != std::string::npos)
+        return true;
+      return false;
+  }
+
+  bool shouldIgnoreInAccel() {
+    if(!_cached_ignore_valid) {
+      _cached_ignore=_shouldIgnoreInAccel();
+      _cached_ignore_valid=true;
+    }
+    return _cached_ignore;
+  }
+
+  bool plainMove() {
+    if(!_cached_plain_move_valid) {
+      _cached_plain_move=_plainMove();
+      _cached_plain_move_valid=true;
+    }
+    return _cached_plain_move;
+  }  
+  
+  std::string getUOPName() {
+    using namespace boost;
+
+    uint64_t pc = _cpc.first;
+    int upc = _cpc.second;
+    std::string disasm =  ExecProfile::getDisasm(pc, upc);
+    char_separator<char> sep(" ");
+    tokenizer<char_separator<char>> tokens(disasm, sep);
+
+    int i = 0;
+    for (const auto& t : tokens) {
+      ++i;
+      if(i==4) {
+        return t;
+      }
+    }
+    return std::string("");
+  }
+
+
+private:
+  void updated() {  //clear cached datastructs
+    _adjDeps.clear();
+    _adjUses.clear();
+  }
+
+  //Ignore op if it has no deps, or if it's a limm of some sort
+  bool _cached_ignore=false;
+  bool _cached_ignore_valid=false;
+  bool _shouldIgnoreInAccel() {
+    if(isStore() || isLoad() || isCtrl()) {
+      return false;
+    }
+    //if(numUses()==0) {  //This is a bad idea, because some deps won't show
+    //  return true;
+    //}
+    if(plainMove()) {
+      return true;
+    }
+    if(checkDisasmHas(this, "lfpimm") ||
+       checkDisasmHas(this, "limm") ||
+       checkDisasmHas(this, "rdip")
+       ) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _cached_plain_move=false;
+  bool _cached_plain_move_valid=false;
+
+  bool _plainMove() {
+     if(checkDisasmHas(this, "mov2fpsimp") ||
+        checkDisasmHas(this, "movsimp")) {
+       return true;
+     }
+     return false;
+  }
+
+
+public:
+
+  static const char* opname(int opclass) {
+    switch(opclass) {
+    case 0: //No_OpClass
+      return "nofu";
+    case 1: //IntALU
+      return "alu";
+
+    case 2: //IntMult
+      return "mul";
+    case 3: //IntDiv
+      return "div";
+
+    case 4: //FloatAdd
+      return "fadd";
+    case 5: //FloatCmp
+      return "fcmp";
+    case 6: //FloatCvt
+      return "fcvt";
+    case 7: //FloatMult
+      return "fmul";
+    case 8: //FloatDiv
+      return "fdiv";
+    case 9: //FloatSqrt
+      return "fsq";
+    case 30: //FloatSqrt
+      return "rdprt";
+    case 31: //FloatSqrt
+      return "wrprt";
+    default:
+      return "other";
+    }
+    return "?";
+  }
+
 
   bool dependsOn(Op* op) {return _deps.count(op)!=0;}
 
@@ -397,12 +528,126 @@ public:
   Deps::iterator d_begin() {return _deps.begin();}
   Deps::iterator d_end() {return _deps.end();}
 
+  void uSet(Deps& uses,Deps& skipped) {
+    for(auto& uop : _uses) {
+      if(skipped.count(uop) || uses.count(uop)) {
+        return;
+      }
+      if(!uop->plainMove()) {
+        uses.insert(uop);
+      } else {
+        skipped.insert(uop);
+        uop->uSet(uses,skipped);
+      }
+    } 
+  }
+
+  Deps::iterator adj_u_begin() {
+    if(_adjUses.empty()) {
+      Deps skipped;
+      uSet(_adjUses,skipped);
+    }
+    return _adjUses.begin();
+  }
+  Deps::iterator adj_u_end() {return _adjUses.end();}
+
+  void dSet(Deps& deps,Deps& skipped) {
+    for(auto& dop : _deps) {
+      if(skipped.count(dop) || deps.count(dop)) {
+        return;
+      }
+      if(!dop->plainMove()) {
+        deps.insert(dop);
+      } else {
+        skipped.insert(dop);
+        dop->dSet(deps,skipped);
+      }
+    } 
+  }
+
+  Deps::iterator adj_d_begin() {
+    if(_adjDeps.empty()) {
+      Deps skipped;
+      dSet(_adjDeps,skipped);
+    }
+    return _adjDeps.begin();
+  }
+  Deps::iterator adj_d_end() {return _adjDeps.end();}
+
   Deps::iterator u_begin() {return _uses.begin();}
   Deps::iterator u_end() {return _uses.end();}
   unsigned numDeps()  { return _deps.size(); }
   unsigned numMemDeps()  { return _memDeps.size(); }
   unsigned numUses() {return _uses.size();}
   uint32_t avg_lat() {return _totLat / _times;}
+
+
+  std::string dotty_name() {
+    std::stringstream out;
+    out << id() << ":" << getUOPName();
+    //out << "(";
+    //if(op->isLoad()) {
+    //  out << "ld";
+    //} else if(op->isStore()) {
+    //  out << "st";
+    //} else 
+    if(isCall()) {
+      out << "(call)";
+    } else if(isReturn()) {
+      out << "(ret)";
+    } else if(isCtrl()) {
+      out << "(ctrl)";
+    }
+
+    if(isMem()) {
+      out << "(x" << stride << ")";
+    } 
+
+    out << ":" << opname(opclass());
+    //out << ")";
+    return out.str();
+  }
+
+  std::string dotty_tooltip() {
+    std::stringstream out;
+    out <<  ExecProfile::getDisasm(cpc().first, cpc().second);
+      //iterate through 
+
+      out << "                                         ";
+      out << "defs:";
+      for(auto di=d_begin(),de=d_end();di!=de;++di) {
+        Op* dep_op = *di;
+        out << dep_op->id() << ",";
+      }
+      out << "   uses:";
+      for(auto ui=u_begin(),ue=u_end();ui!=ue;++ui) {
+        Op* use_op = *ui;
+        out << use_op->id() << ",";
+      }
+
+      out << "                                         ";
+      out << "adj defs:";
+      for(auto di=adj_d_begin(),de=adj_d_end();di!=de;++di) {
+        Op* dep_op = *di;
+        out << dep_op->id() << ",";
+      }
+      out << "adj uses:";
+      for(auto ui=adj_u_begin(),ue=adj_u_end();ui!=ue;++ui) {
+        Op* use_op = *ui;
+        out << use_op->id() << ",";
+      }
+
+      out << "   avg_lat: " << avg_lat(); 
+      return out.str();
+  }
+
+  std::string dotty_name_and_tooltip() {
+    std::stringstream out;
+    out << "label=\"" << dotty_name();
+    out << "\", ";
+    out << "tooltip=\"" << dotty_tooltip() << "\"";
+    return out.str();
+  }
 
 };
 

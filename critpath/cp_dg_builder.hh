@@ -10,7 +10,6 @@
 
 #include "edge_table.hh"
 #include "prof.hh"
-#define MAX_FU_POOLS 8
 #include "pugixml/pugixml.hpp"
 
 template<typename T, typename E>
@@ -24,12 +23,6 @@ public:
   typedef std::shared_ptr<Inst_t> InstPtr;
 
   CP_DG_Builder() : CriticalPath() {
-     fuUsage.resize(MAX_FU_POOLS);
-     nodeResp.resize(MAX_FU_POOLS);
-     for(int i = 0; i < MAX_FU_POOLS; ++i) {
-       fuUsage[i][0]=0; //begining usage is 0
-       fuUsage[i][(uint64_t)-10000]=0; //end usage is 0 too (1000 to prevent overflow)
-     }
      MSHRUseMap[0];
      MSHRUseMap[(uint64_t)-10000];
      MSHRResp[0];
@@ -43,7 +36,6 @@ public:
 
      rob_growth_rate=0;
      avg_rob_head=20;
-
   }
 
   virtual ~CP_DG_Builder() {
@@ -216,7 +208,7 @@ protected:
 
 
   //Code to map instructions to ops, and back
-  std::map<Op *, InstPtr> _op2InstPtr;
+  std::map<Op *, BaseInstPtr> _op2InstPtr;
   //std::map<Inst_t *, Op*> _inst2Op;
 
   virtual InstPtr createInst(const CP_NodeDiskImage &img, 
@@ -237,7 +229,7 @@ protected:
     _inst2Op.erase(ptr);
   }*/
 
-  virtual void keepTrackOfInstOpMap(InstPtr ret, Op *op) {
+  virtual void keepTrackOfInstOpMap(BaseInstPtr ret, Op *op) {
     _op2InstPtr[op] = ret;
     //_inst2Op[ret.get()] = op;
   }
@@ -298,13 +290,13 @@ protected:
   SingleCycleRes issueRes;
 
   typedef std::map<uint64_t,int> FuUsageMap;
-  typedef std::vector<FuUsageMap> FuUsage;
+  typedef std::map<uint64_t,FuUsageMap> FuUsage;
  
   std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
   std::map<uint64_t,std::shared_ptr<BaseInst_t>> MSHRResp;
 
-  typedef typename std::map<uint64_t,BaseInst_t*> NodeRespMap;
-  typedef typename std::vector<NodeRespMap> NodeResp;
+  typedef typename std::map<uint64_t,std::shared_ptr<BaseInst_t>> NodeRespMap;
+  typedef typename std::map<uint64_t,NodeRespMap> NodeResp;
 
   FuUsage fuUsage;
   NodeResp nodeResp; 
@@ -361,21 +353,19 @@ protected:
         I = activityMap.erase(I);
         prevCycle=cycle;
       } else {
-        //++I;
         break;
       }
     }
 
     //for funcUnitUsage
-    for(FuUsage::iterator I=fuUsage.begin(),EE=fuUsage.end();I!=EE;++I) {
-      FuUsageMap& fuUseMap = *I;
+    for(auto &pair : fuUsage) {
+      auto fuUseMap = pair.second;
       for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
         uint64_t cycle = i->first;
         assert(cycle!=0);
         if (cycle + 50  < curCycle) {
           i = fuUseMap.erase(i);
         } else {
-          //++i;
           break;
         }
       }
@@ -415,30 +405,14 @@ protected:
     }
 
 
-    for(auto I=nodeResp.begin(),EE=nodeResp.end();I!=EE;++I) {
-      NodeRespMap& respMap = *I;
+    for(auto &pair : nodeResp) {
+      auto respMap = pair.second;
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
-/*
-        std::cout << "remove? (" << i->first << "," << curCycle << ") " << i->second->_index << " " << i->second->_isload << " " << i->second->_isstore << "nri: " << nri << " " << i->second << i->second->cycleOfStage(0) << " " << i->second->cycleOfStage(5);
-        if(i->second->_isstore) {
-          std::cout << " " << i->second->cycleOfStage(6);
-        }
-        std::cout << "\n";
-*/
-
-    /*    if(!(i->second->_isload || i->second->_isstore)) {
-          std::cout << "wtf " << i->second->_index << " " << i->second->_isload << " " << i->second->_isstore << "nri:" << nri << " " << i->second << "\n";
-          assert(0);
-        }*/
 
         if (cycle  < curCycle) {
-          //std::cout << respMap.size() << " (yes)\n";
           i = respMap.erase(i);
-          //std::cout << respMap.size() << "\n";
         } else {
-          
-          //++i;
           break;
         }
       }
@@ -623,15 +597,23 @@ protected:
     return NULL;
   }
 
-  //Adds a resource to the resource utilization map.
-  BaseInst_t* addResource(int opclass, uint64_t min_cycle, uint32_t duration, 
-                       BaseInst_t* cpnode) { 
-    int fuIndex = fuPoolIdx(opclass);
-    FuUsageMap& fuUseMap = fuUsage[fuIndex];
-    NodeRespMap& nodeRespMap = nodeResp[fuIndex];
+  void checkResourceEmpty(FuUsageMap& fuUse) {
+    if(fuUse.size() == 0) {
+      for(auto &fuUse : fuUsage) {
+        fuUse.second[0]=0; //begining usage is 0
+        fuUse.second[(uint64_t)-10000]=0; //end usage is 0 too (1000 to prevent overflow)
+      }
+    }
+  }
 
-    int maxUnits = getNumFUAvailable(opclass);
-  
+  //Adds a resource to the resource utilization map.
+  BaseInst_t* addResource(uint64_t resource_id, uint64_t min_cycle, uint32_t duration, 
+                     int maxUnits, std::shared_ptr<BaseInst_t> cpnode) {
+    FuUsageMap& fuUseMap = fuUsage[resource_id];
+    NodeRespMap& nodeRespMap = nodeResp[resource_id];
+
+    checkResourceEmpty(fuUseMap);
+
     uint64_t cur_cycle=min_cycle;
     FuUsageMap::iterator cur_cycle_iter,next_cycle_iter,last_cycle_iter;
    
@@ -695,13 +677,13 @@ protected:
           assert(fuUseMap[cur_cycle+duration]>=0);
         }
         
-        typename NodeRespMap::iterator respIter = nodeRespMap.find(cur_cycle);
+        auto respIter = nodeRespMap.find(cur_cycle);
         nodeRespMap[cur_cycle+duration]=cpnode;
 
         if(respIter == nodeRespMap.end() || min_cycle == cur_cycle) {
           return NULL;
         } else {
-          return respIter->second;
+          return respIter->second.get();
         }
         
       }
@@ -873,7 +855,7 @@ protected:
       checkIssueWidth(*inst);
     }
 
-    checkFuncUnits(*inst);
+    checkFuncUnits(inst);
     if(inst->_isload) {
       //loads acquire MSHR at execute
       checkNumMSHRs(inst,false);
@@ -1369,9 +1351,7 @@ protected:
     //memory dependence
     if(n._isload || n._isstore) {
       checkMemoryDependence(n);
-      insert_mem_predicted_edges(n); //TODO: probably creating duplicate edges
-                                     //in the common case.  fix for effeciency!
-                                     //DIDIT: check if it works
+      insert_mem_predicted_edges(n); 
     }
     return n;
   }
@@ -1501,7 +1481,11 @@ protected:
     return getNumFUAvailable(n._opclass);
   }
 
-  virtual unsigned getNumFUAvailable(int opclass) {
+  virtual unsigned getNumFUAvailable(uint64_t opclass) {
+    if(opclass > 50) {
+      return 1;
+    }
+
     switch(opclass) {
     case 0: //No_OpClass
       return ROB_SIZE+IQ_WIDTH;
@@ -1631,31 +1615,25 @@ protected:
   }
 
   //Check Functional Units to see if they are full
-  virtual Inst_t &checkFuncUnits(Inst_t &n) {
-    countOpclassEnergy(n._opclass);
+  virtual void checkFuncUnits(std::shared_ptr<Inst_t>& inst) {
+    countOpclassEnergy(inst->_opclass);
 
     // no func units if load, store, or if it has no opclass
     //if (n._isload || n._isstore || n._opclass==0)
-    if (n._opclass==0) {
-      return n;
+    if (inst->_opclass==0) {
+      return;
     }
     
-/*    if (n._opclass==2) {
-      mult_ops++;
-    }*/
- 
-
-
+    int fuIndex = fuPoolIdx(inst->_opclass);
+    int maxUnits = getNumFUAvailable(inst->_opclass); //opclass
     Inst_t* min_node = static_cast<Inst_t*>(
-         addResource(n._opclass, n.cycleOfStage(Inst_t::Execute), 
-                                   getFUIssueLatency(n), &n));
+         addResource(fuIndex, inst->cycleOfStage(Inst_t::Execute), 
+                                   getFUIssueLatency(*inst), maxUnits, inst));
 
     if (min_node) {
-      //TODO: check min->node start
       getCPDG()->insert_edge(*min_node, Inst_t::Execute,
-                        n, Inst_t::Execute, getFUIssueLatency(*min_node),E_FU);
+                        *inst, Inst_t::Execute, getFUIssueLatency(*min_node),E_FU);
     }
-    return n;
   }
 
   virtual bool l1dTiming(bool isload, bool isstore, int ex_lat, int st_lat,

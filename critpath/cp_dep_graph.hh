@@ -67,7 +67,8 @@
   X(SEBS, "SEBS", "SEB Serialization")                  \
   X(SEBL, "SEBL", "SEB Execute to Complete Latency")    \
   X(SEB,  "SEB", "???")                                 \
-  X(SEBD, "SEBD", "SEB Data Dependence")                \
+  X(SEBD, "SEBD", "Intra-SEB Data Dependence")                \
+  X(SEBX, "SEBX", "Inter-SEB Data Dependence")                \
   X(BREP, "BREP", "Beret Replay")                               \
   X(BXFR, "BXFR", "Beret Data Transfer")                        \
   X(CHT,  "CHT",  "cheat edge for super insts")                 \
@@ -684,6 +685,7 @@ public:
   /*  virtual void insert_ff_edge(uint64_t srcIdx,
                               uint64_t destIdx, unsigned len) = 0;*/
   virtual dg_inst_base<T,E>& queryNodes(uint64_t idx) = 0;
+  virtual bool hasIdx(uint64_t idx) = 0;
 
   virtual std::shared_ptr< dg_inst_base<T, E> > queryInst(uint64_t idx) = 0;
   virtual uint64_t getMaxCycles() =0;
@@ -704,7 +706,6 @@ public:
 // Implementation for the entire graph
 #define BSIZE 4096 //max number of insts to keep for data/mem dependence
 #define PSIZE  512 //max number in-flight instructions, biggest ROB size
-#define DONE_SIZE 4096 //max number in-flight instructions, biggest ROB size
 
 template<typename Inst_t, typename T, typename E>
 class dep_graph_impl_t : public dep_graph_t<Inst_t,T,E> {
@@ -737,21 +738,21 @@ protected:
   }
 */
 
+public:
   bool hasIdx(uint64_t idx) {
-    bool haveIt=idx <= _latestIdx;
-    if(_latestIdx<BSIZE) {
-      return haveIt && idx >= 0;
-    } else {
-      return haveIt && idx > _latestIdx - BSIZE;
+    if(idx > _latestIdx) {
+      return false;  //don't have it -- looking into the future
     }
-        /*IndexMapIterator  I = _index2inst.find(idx);
-    if (I != _index2inst.end()) {
-      return true;
+    if(idx >= BSIZE && idx <= _latestIdx - BSIZE) {
+      return false;  //don't have it -- looking too far into the past
     }
-    return false;*/
+    int vec_ind = idx % BSIZE;
+    if(_vec[vec_ind]==NULL) {
+      return false;
+    }
+    return _vec[vec_ind]->_index == idx;
   }
 
-public:
   dg_inst_base<T,E>& queryNodes(uint64_t idx) {
     /*  IndexMapIterator I = _index2inst.find(idx);
     if (I != _index2inst.end()) {
@@ -778,7 +779,9 @@ public:
                        uint64_t index)
   {
 
-    assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
+    //Not forcing this anymore
+    //assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
+    assert(index + BSIZE >= _latestIdx);
     _latestIdx=index;
 
     int vec_ind = index%BSIZE;

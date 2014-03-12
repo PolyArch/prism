@@ -511,6 +511,7 @@ void PathProf::runAnalysis() {
       FunctionInfo::LoopList::iterator li,le;
       for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
         LoopInfo* loopInfo = li->second;
+        loopInfo->build_rpo();
         if(loopInfo->isInnerLoop()) {
           loopInfo->initializePathInfo();
         }

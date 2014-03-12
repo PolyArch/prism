@@ -83,8 +83,9 @@ public:
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
 
-  std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
-  std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
+  //std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
+  //std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
+  std::map<LoopInfo*,SGSched> li2sgmap;
   LoopInfo* _prevLoop=NULL;
 
   uint64_t _beret_int_ops=0, _beret_fp_ops=0, _beret_mult_ops=0;
@@ -210,7 +211,7 @@ public:
         std::cerr << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
             loopInfo->getHotPath(),
-            li2ssmap[loopInfo],li2sgmap[loopInfo],
+            li2sgmap[loopInfo],
             Prof::get().beret_cfus(),
             gams_details,_no_gams,_beret_max_seb,_beret_max_mem);
         if(worked) {
@@ -296,9 +297,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     _whichBB=0;
     //create instruction for each SEB
 
-    assert(li2sgmap[li].size()>0);
+    assert(li2sgmap[li].valid());
     std::shared_ptr<T> prevEndSEB   = NULL;
-    for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
+    for(auto i =li2sgmap[li].sg_begin(),e =li2sgmap[li].sg_end();i!=e;++i) {
       Subgraph* sg = *i;
       std::shared_ptr<T> startSEB(new T());
       std::shared_ptr<T> endSEB(new T());
@@ -306,7 +307,6 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
       //if load or store queue is full, then delay
       checkLSQSize(*startIterEv,true,true);
-
 
       if(_beret_dataflow_pure) {
         if(!prevEndSEB && xfer_cycles!=0 && startIterEv) {
@@ -366,14 +366,14 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     //Add Deps
     //(this is in a seperate loop, because we need to make sure that all the binsts
     //in each subgraph are created before continuing
-    for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
+    for(auto i =li2sgmap[li].sg_begin(),e =li2sgmap[li].sg_end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
 
-        for(auto di = op->d_begin(),de =op->d_end();di!=de;++di) {
+        for(auto di = op->adj_d_begin(),de =op->d_end();di!=de;++di) {
           Op* dop = *di;
            
           if(binstMap.count(dop) && li->forwardDep(dop,op)) {
@@ -397,7 +397,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   void reCalcBeretLoop(bool commit_iter) {
     //recalc loop, and get last cycle
     uint64_t last_cycle=0;
-    for(auto i =li2sgmap[li].begin(),e =li2sgmap[li].end();i!=e;++i) {
+    for(auto i =li2sgmap[li].sg_begin(),e =li2sgmap[li].sg_end();i!=e;++i) {
       Subgraph* sg = *i;
       for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -418,7 +418,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           _beret_int_ops++;
         }
        
-        for(auto di = op->d_begin(),de = op->d_end();di!=de;++di) {
+        for(auto di = op->adj_d_begin(),de = op->d_end();di!=de;++di) {
           Op* dop = *di;
           if(binstMap.count(dop) /*&& li->forwardDep(dop,op)*/) {
             //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
@@ -460,7 +460,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
     //write stores from store buffer
     int iseb=0;
-    for(auto i=li2sgmap[li].begin(), e=li2sgmap[li].end(); i!=e;++i,++iseb) {
+    for(auto i=li2sgmap[li].sg_begin(), e=li2sgmap[li].sg_end(); i!=e;++i,++iseb) {
       Subgraph* sg = *i;
       for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -519,11 +519,11 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op->bb_pos()==0) {
           li = op->func()->getLoop(op->bb());
          
-          if(li && li2sgmap.count(li)!=0 && li2sgmap[li].size()!=0) {
+          if(li && li2sgmap.count(li)!=0 && li2sgmap[li].valid()) {
             //std::cout << " .. and it's beret-able!\n";
             curLoopHead=op;
             beret_state=BERET;
-            unsigned config_time = _beret_config_time*li2sgmap[li].size();
+            unsigned config_time = _beret_config_time*li2sgmap[li].numSubgraphs();
             if(li==_prevLoop) {
               config_time=1;
             }
@@ -594,7 +594,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
                                          *sh_inst, Inst_t::Fetch,8/_beret_iops,E_BXFR); 
                 }
                 getCPDG()->addInst(sh_inst,index);
-                addDeps(sh_inst); //regular add deps
+                addDeps(sh_inst,op); //regular add deps
                 pushPipe(sh_inst);
                 inserted(sh_inst);
                 last_replay_cycle=sh_inst->cycleOfStage(Inst_t::Fetch);
@@ -628,7 +628,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
           beretEndEv = NULL;
         }
-        addDeps(sh_inst);
+        addDeps(sh_inst,op);
         pushPipe(sh_inst);
         inserted(sh_inst);
         break;
@@ -638,6 +638,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         std::shared_ptr<BeretInst> sh_inst = std::shared_ptr<BeretInst>(inst);
         getCPDG()->addInst(sh_inst,index);
         addBeretDeps(*inst);*/
+
+        if(!li2sgmap[li].opScheduled(op)) {
+          break;
+        }
 
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);

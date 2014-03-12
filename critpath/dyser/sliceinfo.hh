@@ -74,14 +74,14 @@ namespace DySER {
     }
 
 
-    static bool checkDisasmHas(Op *op, const char *chkStr) {
+/*    static bool Op::checkDisasmHas(Op *op, const char *chkStr) {
       uint64_t pc = op->cpc().first;
       int upc = op->cpc().second;
       std::string disasm =  ExecProfile::getDisasm(pc, upc);
       if (disasm.find(chkStr) != std::string::npos)
         return true;
       return false;
-    }
+    }*/
 
   protected:
 
@@ -92,14 +92,14 @@ namespace DySER {
       // FIXME::
       // For needle
       // Bundle max :: check the ops, and uses
-      if (!checkDisasmHas(op, "CMP_R_R"))
+      if (!Op::checkDisasmHas(op, "CMP_R_R"))
         return false;
 
-      if (checkDisasmHas(nxop, "CMOVLE_R_R")
-          && checkDisasmHas(nx2op, "CMOVLE_R_R"))
+      if (Op::checkDisasmHas(nxop, "CMOVLE_R_R")
+          && Op::checkDisasmHas(nx2op, "CMOVLE_R_R"))
         return true;
-      if (checkDisasmHas(nxop, "CMOVNLE_R_R")
-          && checkDisasmHas(nx2op, "CMOVNLE_R_R"))
+      if (Op::checkDisasmHas(nxop, "CMOVNLE_R_R")
+          && Op::checkDisasmHas(nx2op, "CMOVNLE_R_R"))
         return true;
 
       return false;
@@ -280,7 +280,7 @@ namespace DySER {
               if (op == DepOp) {
                 // spurious use or accumulate
                 // FIXME: make this robust...
-                if (checkDisasmHas(op, "ADDSS_XMM_XMM")) {
+                if (Op::checkDisasmHas(op, "ADDSS_XMM_XMM")) {
                   if (dumpIOInfo) {
                     std::cout << "           ---> input,output\n";
                   }
@@ -314,11 +314,11 @@ namespace DySER {
             std::cout << "   use: "; printDasm(UseOp);
           }
 
-          if (checkDisasmHas(op, "RSQRTSS_XMM_XMM") && op == UseOp) {
+          if (Op::checkDisasmHas(op, "RSQRTSS_XMM_XMM") && op == UseOp) {
             continue; // It is not a use -- spurious use from gem5..
           }
-          if (checkDisasmHas(op, "CMP_R_R") &&
-              checkDisasmHas(op, "UCOMISS_XMM_XMM")) {
+          if (Op::checkDisasmHas(op, "CMP_R_R") &&
+              Op::checkDisasmHas(op, "UCOMISS_XMM_XMM")) {
             continue; // It is not a uses
           }
 
@@ -343,9 +343,9 @@ namespace DySER {
               // We are assuming it is a spurious use if is part of XOR
               // or MOV
 
-              if (checkDisasmHas(UseOp, "XOR"))
+              if (Op::checkDisasmHas(UseOp, "XOR"))
                 continue;
-              if (checkDisasmHas(UseOp, "MOVAPS_XMM_XMM"))
+              if (Op::checkDisasmHas(UseOp, "MOVAPS_XMM_XMM"))
                 continue;
               IsOutput[op] = true;
               if (dumpIOInfo) {

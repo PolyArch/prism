@@ -14,8 +14,7 @@
 #include "prof.hh"
 
 // abstract class for all critical path
-class CriticalPath //: public insert_event_handler<dg_inst<T,E>>
-{
+class CriticalPath {
 protected:
   std::string _run_name = "";
   std::string _name = "";

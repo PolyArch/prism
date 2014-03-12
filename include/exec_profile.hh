@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string>
 
-
 namespace ExecProfile {
 
   __attribute__((__weak__))

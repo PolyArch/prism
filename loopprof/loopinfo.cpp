@@ -43,6 +43,25 @@ uint32_t LoopInfo::_idcounter=0;
 
 #define MAX_GAMS_SIZE 200
 
+void LoopInfo::build_rpo() {
+  BB* bb=_head;
+  std::set<BB*> seen;
+  build_rpo(bb,seen);
+}
+void LoopInfo::build_rpo(BB* bb, std::set<BB*>& seen) {
+  for(auto ip=bb->succ_begin(),ep=bb->succ_end(); ip!=ep;++ip) {
+    BB* succ_bb = *ip;
+    seen.insert(bb);
+    if(_loopBody.count(succ_bb)==0) {
+      continue;
+    }
+    if(seen.count(succ_bb)==0) {
+      build_rpo(succ_bb,seen);
+    }
+  }
+  _rpo.push_back(bb);  
+}
+
 void LoopInfo::initializePathInfo(BB* bb, map<BB*,int>& numPaths) {
   BB::BBvec::iterator ip,ep;
   numPaths[bb]=0;
@@ -75,7 +94,7 @@ void LoopInfo::initializePathInfo(BB* bb, map<BB*,int>& numPaths) {
   if(totalPaths > _maxPaths) {
     _maxPaths=totalPaths;
   }
-  _rpo.push_back(bb);  
+  //_rpo.push_back(bb);  
 }
 
 void LoopInfo::initializePathInfo() {
@@ -122,7 +141,7 @@ void LoopInfo::iterComplete(int pathIndex, BBvec& path) {
 }
 
 /*
- * Remeber, this is only valid for inner loops with a hot path...
+ * Remember, this is only valid for inner loops with a hot path...
  */
 bool LoopInfo::dependenceInPath(Op* dop, Op* op) {
   if(_instsInPath.empty()) {
@@ -301,7 +320,7 @@ void LoopInfo::checkCompatible(std::set<Op*>& ops,
   }
   if(orig_op!=cur_op) {
     closeSet.insert(std::make_pair(orig_op,cur_op));
-/*    cout << orig_op->id() << ") ";
+    cout << orig_op->id() << ") ";
     cout << cur_op->id() << "." << cur_fu->ind() << ": ";
     for(auto const& elem : doneOps) {
       cout << " " << elem->id();
@@ -311,12 +330,11 @@ void LoopInfo::checkCompatible(std::set<Op*>& ops,
       cout << " " << elem->ind();
     }
     cout << "\n";
-    */
   }
   doneOps.insert(cur_op);
   doneFUs.insert(cur_fu);
 
-  for(auto ui=cur_op->u_begin(),ue=cur_op->u_end();ui!=ue;++ui) {
+  for(auto ui=cur_op->adj_u_begin(),ue=cur_op->adj_u_end();ui!=ue;++ui) {
     Op* uop = *ui;   //forwards
     if(doneOps.count(uop)!=0 || !dependenceInPath(ops,cur_op,uop)) {
       continue;
@@ -330,7 +348,7 @@ void LoopInfo::checkCompatible(std::set<Op*>& ops,
     }
   }
 
-  for(auto di=cur_op->d_begin(),de=cur_op->d_end();di!=de;++di) {
+  for(auto di=cur_op->adj_d_begin(),de=cur_op->adj_d_end();di!=de;++di) {
     Op* dop = *di;   //backwards
     if(doneOps.count(dop)!=0 || !dependenceInPath(ops,dop,cur_op)) {
       continue;
@@ -735,24 +753,20 @@ obj/;
 
 bool LoopInfo::printGamsPartitionProgram(std::string filename, CFU_set* cfu_set,
     bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops) {
-    
-    _subgraphSet.clear();
-    _subgraphVec.clear();
+
+    _sgSchedBeret.reset();  
     BBvec& bbVec = getHotPath();
-    return LoopInfo::printGamsPartitionProgram(filename,
-       bbVec,
-       _subgraphSet, _subgraphVec,
+    return printGamsPartitionProgram(filename,
+      bbVec, _sgSchedBeret, 
       cfu_set, gams_details, no_gams);
 }
 
 
 bool LoopInfo::scheduleNLA(CFU_set* cfu_set,   
                  bool gams_details, bool no_gams) { 
-
-  _subgraphSetNLA.clear();
-  _subgraphVecNLA.clear();
-
-  return scheduleNLA(cfu_set, _subgraphSetNLA, _subgraphVecNLA, gams_details, no_gams);
+   _sgSchedNLA.reset();
+   _sgSchedNLA.setCFUSet(cfu_set);
+  return scheduleNLA(cfu_set, _sgSchedNLA, gams_details, no_gams);
 }
 
 
@@ -760,8 +774,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
  * each one at a time.  This will create a bunch of BBs
  */
 bool LoopInfo::scheduleNLA(CFU_set* cfu_set,   
-                 SubgraphSet& subgraphSet,  
-                 SubgraphVec& subgraphVec,
+                 SGSched& sgSched,
                  bool gams_details,
                  bool no_gams) { 
   //Find successive basic blocks, throw those at the gams scheduler
@@ -773,12 +786,12 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
 
     curVec.push_back(bb);
    
-    if(bb->succ_size()!=1 || ii==_rpo.end()) {
+    if(bb->succ_size()!=1 || (*bb->succ_begin())->pred_size()!=1 || ii==_rpo.end()) {
       //time to schedule!
       stringstream ss;
       ss << "schedNLA." << id() << "." << piece; 
       bool ret = printGamsPartitionProgram(ss.str(),
-                     curVec,subgraphSet,subgraphVec,
+                     curVec,sgSched,
                      cfu_set, gams_details, no_gams,100,100); 
       if(!ret) {
         return false; //fail if any piece fails
@@ -793,20 +806,20 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
 
 bool LoopInfo::printGamsPartitionProgram(std::string filename,
      BBvec& bbVec,
-     SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
+     SGSched& sgSched,
      CFU_set* cfu_set, bool gams_details,bool no_gams,
      int max_beret_size, int max_mem_ops) {
 
   //BBvec& bbVec = getHotPath();
 
-  std::set<Op*> instsInPath;
   std::map<uint32_t, Op*> intOpMap;
-
   std::stringstream ss;
 
   ss << "$ONEMPTY;\n";
   CFU_node::print_kinds(ss);
   ss << "set v/";
+
+  std::set<Op*> opSet;
 
   int countElements=0;
   //find all instructions in path;
@@ -815,7 +828,12 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
       Op* op = *oi;
-      instsInPath.insert(op);
+      if(op->shouldIgnoreInAccel() && !useOutsideLoop(op)) {
+        continue;
+      }
+
+      assert(op);
+      opSet.insert(op);
       intOpMap[op->id()]=op;
      
       if(countElements++ != 0) { 
@@ -827,7 +845,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   ss << "/;\n"; 
 
 
-  if(setContainsCallReturn(instsInPath)) {
+  if(setContainsCallReturn(opSet)) {
     //if loop contains call, don't perform subgraph matching...
     return false;
   }
@@ -847,11 +865,14 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
       Op* op = *oi;
+      if(!opSet.count(op)) {
+        continue;
+      }
       countOps++;
-      for(auto ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
+      for(auto ui=op->adj_u_begin(),ue=op->adj_u_end();ui!=ue;++ui) {
         Op* uop = *ui;
         //Don't consider any irrelevant edges.
-        if(!dependenceInPath(instsInPath,op,uop)) {
+        if(!dependenceInPath(opSet,op,uop)) {
           fixes << "x.fx('" << op->id() << "')=1;\n"; // must write reg
           fixes2 << "Mvn.fx('" << op->id() << "','nreg')=1;\n"; // must write reg
           continue;
@@ -877,7 +898,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
       for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
         Op* mop = *di;
-        if(dependenceInPath(instsInPath,mop,op)) {
+        if(dependenceInPath(opSet,mop,op)) {
           if(countElementsD++ != 0) {
             streamD <<",";
           }
@@ -908,7 +929,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   
   if(cfu_set) {
     std::set<std::pair<Op*,Op*>> closeSet;
-    calcPossibleMappings(instsInPath, cfu_set,closeSet);
+    calcPossibleMappings(opSet, cfu_set,closeSet);
 
     out << "set possDep(v,v)/";
     for(auto i = closeSet.begin(), e = closeSet.end(); i!=e; ++i) {
@@ -930,7 +951,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
 
   if(!cfu_set) {
-    printGamsPartitionText(out,instsInPath.size(),resultfile,
+    printGamsPartitionText(out,opSet.size(),resultfile,
                            fixes.str(),nMemDepOps,max_beret_size,max_mem_ops);
   } else {
     printSGPartText(out,resultfile,fixes2.str(),cfu_set);
@@ -967,8 +988,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       for (const auto& t : tokens) {
         if(subgraph==NULL) {
           subgraph=new Subgraph();
-          subgraphSet.insert(subgraph);
-          subgraphVec.push_back(subgraph);
+          sgSched.insertSG(subgraph);
         }
  
         string t_post = t.substr(1,string::npos);
@@ -985,13 +1005,14 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
           assert(curCFU);
           assert(prev_op);
           CFU_node* cfu_node=curCFU->getCFUNode(i);
-          subgraph->setCFUNode(prev_op,cfu_node);
+          sgSched.setMapping(prev_op,cfu_node,subgraph);
           continue;
         }
 
-
         uint32_t i = std::stoi(t);
+        assert(intOpMap.count(i));
         Op* op = intOpMap[i];
+        assert(op);
         //op->setSubgraph(subgraph);
         subgraph->insertOp(op);
         ops_in_a_subgraph++;
@@ -1024,46 +1045,54 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       BB::OpVec::iterator oi,oe;
       for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
         Op* op = *oi;
+        if(!sgSched.opScheduled(op)) {
+          continue;
+        }
         curOp++;
 
         //try to find a good spot
         //first find earliest possible subgraph which is legal:
         //it must come after all subgraphs with dependencies
-        int latestSGInd=0;
-        unsigned sg_ind =0;
+        
+        //int latestSGInd=0; replace with iterator below
+        SGSched::SubgraphVec::iterator latest_sg;
+        //unsigned sg_ind =0;
         bool someDep=false;
         int usesInPath=0;
 
         for(auto ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
           Op* use_op = *ui;
-          usesInPath+=dependenceInPath(instsInPath,op,use_op);
+          usesInPath+=dependenceInPath(opSet,op,use_op);
         }
 
 
-        for(auto sgi=subgraphVec.begin(),sge=subgraphVec.end();sgi!=sge;++sgi){
+        for(auto sgi=sgSched.sg_begin(), sge=sgSched.sg_end();sgi!=sge;++sgi){
           Subgraph* sg = *sgi;
-          for(auto dsi=op->d_begin(),dse=op->d_end();dsi!=dse;++dsi) {
+          for(auto dsi=op->adj_d_begin(),dse=op->adj_d_end();dsi!=dse;++dsi) {
             Op* dep_op = *dsi;
             if(/*dependenceInPath(instsInPath,dep_op,op) &&*/ sg->hasOp(dep_op)) {
-              latestSGInd=sg_ind;
+              //latestSGInd=sg_ind;
+              latest_sg=sgi;
               someDep = true;
             }
           }
           for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
             Op* mem_op = *di;
             if(sg->hasOp(mem_op)) {
-              latestSGInd=sg_ind+1;
+              //latestSGInd=sg_ind+1;
+              latest_sg=sgi;
             }
           }
-          sg_ind++;
+          //sg_ind++;
         }
 
         //find earliest position to put it in
         if(someDep || /*usesInPath*/ true || curOp + max_beret_size > countOps) {
           Subgraph* subgraphFound=NULL;
-          for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) {
-            if(subgraphVec[sg_ind]->size() < (unsigned)max_beret_size) {
-              Subgraph* sg = subgraphVec[sg_ind];
+          //for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) {
+          for(auto i=latest_sg, e=sgSched.sg_end();i!=e;++i) {
+		    Subgraph* sg = *i;
+            if(sg->size() < (unsigned)max_beret_size) {
               int mopsPerSubgraph=0;
               for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
                 Op* sg_op = *oi;
@@ -1073,7 +1102,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
               }
               //cout << mopsPerSubgraph << " " << max_mem_ops << "\n";
               if(!op->isMem() || mopsPerSubgraph < max_mem_ops) {
-                subgraphFound=subgraphVec[sg_ind];
+                subgraphFound=sg;
                 break;
               }
             }
@@ -1087,22 +1116,20 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
         //couldn't find any spots
         subgraph=new Subgraph();
-        subgraphSet.insert(subgraph);
-        subgraphVec.push_back(subgraph);
-        //op->setSubgraph(subgraph);
+        sgSched.insertSG(subgraph);
         subgraph->insertOp(op);
       }
     }
 
   }
-  
-  //assert(_subgraphVec.size() >= 0);
-  //serializeSubgraphs();
 
+  for(auto op : opSet) {
+    sgSched.insertOp(op);
+  }  
   return true;
 }
 
-
+//No one uses this, don't remember what its for
 bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
   set<Op*> seen;
   seen.insert(worklist.begin(),worklist.end());
@@ -1111,7 +1138,6 @@ bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
     Op* op = worklist.back();
     worklist.pop_back();
     seen.insert(op);
-
     if(!from) { //flow to
       for(auto i=op->u_begin(),e=op->u_end();i!=e;++i) {
         Op* use_op = *i;
@@ -1121,7 +1147,7 @@ bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
         if(use_op == dest_op) {
           return true;
         }
-        if(seen.count(use_op) == 0 ) {
+        if(seen.count(use_op) == 0) {
           worklist.push_back(use_op);
         }
       }
@@ -1145,63 +1171,17 @@ bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
 
 //the are already serialized
 void LoopInfo::serializeSubgraphs() {
-/*  SubgraphSet checker;
-  BBvec& bbVec = getHotPath();
-  BBvec::iterator i,e;
-
-  for(i=bbVec.begin(),e=bbVec.end();i!=e;++i) {
-    BB* bb= *i;
-    BB::OpVec::iterator oi,oe;
-    for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
-      Op* op = *oi;
-      if(checker.count(op->subgraph())==0) {
-        checker.insert(op->subgraph());
-        _subgraphVec.push_back(op->
-      }
-    }
-  }
-*/
+  assert(0 && "not implemented -- need to put in sgsched");
 }
 
-  static const char* opname(int opclass) {
-    switch(opclass) {
-    case 0: //No_OpClass
-      return "none";
-    case 1: //IntALU
-      return "ialu";
-
-    case 2: //IntMult
-      return "imult";
-    case 3: //IntDiv
-      return "idiv";
-
-    case 4: //FloatAdd
-      return "fadd";
-    case 5: //FloatCmp
-      return "fcmp";
-    case 6: //FloatCvt
-      return "fcvt";
-    case 7: //FloatMult
-      return "fmul";
-    case 8: //FloatDiv
-      return "fdiv";
-    case 9: //FloatSqrt
-      return "fsq";
-    default:
-      return "-";
-    }
-    return "?";
-  }
-
 void LoopInfo::printSubgraphDot(std::ostream& out, 
-                                SubgraphSet& subgraphSet, 
+                                SGSched& sgSched,
                                 bool NLA) {
   out << "digraph GB{\n";
   out << "compound=true\n";
 
-  SubgraphSet::iterator i,e;
-  for(i=subgraphSet.begin(), e=subgraphSet.end(); i!=e;++i) {
-    Subgraph* sg = *(i);
+  for(auto sgi=sgSched.sg_set_begin(), sge=sgSched.sg_set_end(); sgi!=sge;++sgi) {
+    Subgraph* sg = *(sgi);
     out << "subgraph"
         << "\"cluster_" << sg->id() << "\"{" 
    
@@ -1215,51 +1195,29 @@ void LoopInfo::printSubgraphDot(std::ostream& out,
     out << "style=\"filled,rounded\"\n";
     out << "color=lightgrey\n";
 
-
-    Subgraph::OpSet::iterator oi,oe;
-    int i;
-    for(oi=sg->op_begin(),oe=sg->op_end(),i=0;oi!=oe;++oi,++i) {
+    for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
       Op* op = *oi;
       
       out << "\"" << op->id() << "\" "
-          << "[label=\"";
+          << "[";
 
-      if(op->isLoad()) {
-        out << "ld";
-      } else if(op->isStore()) {
-        out << "st";
-      } else if(op->isCall()) {
-        out << "call";
-      } else if(op->isReturn()) {
-        out << "ret";
-      } else if(op->isCtrl()) {
-        out << "ctrl";
-      } else {
-        out << opname(op->opclass());
-      }
+      out << op->dotty_name_and_tooltip();
 
-
-      out << op->id();
-
-      if(sg->getCFUNode(op)) {
-        out << " (fu" << sg->getCFUNode(op)->ind() << ")";
-      }
-
-      out <<  "\" style=filled, color=white]\n";
+      out << ",style=filled, color=white]\n";
 
     }
 
     out << "}\n";
  
  //Iterate through Ops
-    for(oi=sg->op_begin(),oe=sg->op_end(),i=0;oi!=oe;++oi,++i) {
+    for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
       Op* op = *oi;
       
       Op::Deps::iterator ui,ue; //uses
-      for(ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
+      for(ui=op->adj_u_begin(),ue=op->adj_u_end();ui!=ue;++ui) {
         Op* uop = *ui;
         if(op->func()==uop->func()) { //only check deps inside the function
-          if(dependenceInPath(_instsInPath,op,uop)) {  //for forward deps
+          if(dependenceInPath(sgSched.opSet(),op,uop)) {  //for forward deps
              out << "\"" << op->id() << "\"" << " -> "
                  << "\"" << uop->id() << "\"[";
 

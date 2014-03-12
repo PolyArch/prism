@@ -15,6 +15,7 @@
 
 #include "cfu.hh"
 
+
 class Subgraph {
 public:
   typedef std::set<Op*> OpSet;
@@ -45,7 +46,7 @@ template<class Archive>
     _opVec.clear();
   }
 
-  void insertOp(Op* op) {_ops.insert(op);}
+  void insertOp(Op* op) {assert(op); _ops.insert(op);}
   void checkVec();
   bool hasOp(Op* op) {
     return _ops.count(op);
@@ -67,11 +68,74 @@ template<class Archive>
   }
 
   CFU_node* getCFUNode(Op* op) {
+    if(_opMap.count(op) == 0) {
+      return NULL;
+    }
     return _opMap[op];
   }
 
 };
 
+class SGSched {
+public:
+  typedef std::set<Subgraph*> SubgraphSet;
+  typedef std::vector<Subgraph*> SubgraphVec;
+
+  SubgraphSet _subgraphSet;
+  SubgraphVec _subgraphVec;
+  std::map<Op*,Subgraph*> _opSubgraphMap;
+  CFU_set* _cfu_set = NULL;
+  std::set<Op*> _opset;
+
+public:
+friend class boost::serialization::access;
+template<class Archive>
+  void serialize(Archive & ar, const unsigned int version){
+    ar & _subgraphSet;
+    ar & _subgraphVec;
+    ar & _opSubgraphMap;
+    ar & _opset;
+    ar & _cfu_set;
+  }
+
+  void insertSG(Subgraph* subgraph) {
+    _subgraphSet.insert(subgraph);
+    _subgraphVec.push_back(subgraph);
+  }
+
+  void reset() {
+    _subgraphSet.clear();
+    _subgraphVec.clear();
+  }
+
+  Subgraph* subgraphOfOp(Op* op) {
+    return _opSubgraphMap[op];
+  }
+
+  void setMapping(Op* op, CFU_node* cfu_node, Subgraph* sg) {
+    sg->setCFUNode(op,cfu_node);
+    _opSubgraphMap[op]=sg;
+  }
+
+  void insertOp(Op* op) {assert(op); _opset.insert(op);}
+  bool opScheduled(Op* op) {return _opset.count(op);}
+  std::set<Op*>& opSet() {return _opset;}
+
+  void setCFUSet(CFU_set* cfu_set) {_cfu_set = cfu_set;}
+
+  SubgraphVec::iterator sg_begin() {return _subgraphVec.begin();}
+  SubgraphVec::iterator sg_end()   {return _subgraphVec.end();  }
+
+  SubgraphSet::iterator sg_set_begin() {return _subgraphSet.begin();}
+  SubgraphSet::iterator sg_set_end()   {return _subgraphSet.end();  }
+
+  int numSubgraphs() {return _subgraphSet.size();}
+  bool valid() {return _subgraphSet.size() > 0;}
+  
+  Subgraph* sgForOp(Op* op) {
+    return _opSubgraphMap[op];
+  } 
+};
 
 
 
@@ -93,9 +157,6 @@ public:
 
   typedef std::vector<int> LoopDep;
   typedef std::set<LoopDep> LoopDepSet;
-
-  typedef std::set<Subgraph*> SubgraphSet;
-  typedef std::vector<Subgraph*> SubgraphVec;
 
   typedef std::set<Op*> OpSet;
 
@@ -143,12 +204,17 @@ private:
   //Stuff for hot-path and beret
   OpSet _instsInPath;
   int _hotPathIndex=-1;
-  SubgraphSet _subgraphSet;
-  SubgraphVec _subgraphVec;
 
-  SubgraphSet _subgraphSetNLA;
-  SubgraphVec _subgraphVecNLA;
+  //SubgraphSet _subgraphSet;
+  //SubgraphVec _subgraphVec;
 
+  //SubgraphSet _subgraphSetNLA;
+  //SubgraphVec _subgraphVecNLA;
+  //std::map<Op*,Subgraph*> _opSubgraphMapNLA;
+  //CFU_set* _cfu_set_NLA;
+
+  SGSched _sgSchedBeret;
+  SGSched _sgSchedNLA;
 
   //which op did the call, how many times
   CallToMap _calledToMap;
@@ -181,10 +247,8 @@ template<class Archive>
     ar & _depth;
     ar & _instsInPath;
     ar & _hotPathIndex;
-    ar & _subgraphSet;
-    ar & _subgraphVec;
-    ar & _subgraphSetNLA;
-    ar & _subgraphVecNLA;
+    ar & _sgSchedBeret;
+    ar & _sgSchedNLA;
     ar & _calledToMap;
   }
 
@@ -289,9 +353,9 @@ public:
   void setFuncInfo(FunctionInfo* f) {_funcInfo=f;}
   bool hasSubgraphs(bool NLA=false) {
     if(NLA) {
-      return _subgraphSetNLA.size()>0;
+      return _sgSchedNLA.valid();
     } else {
-      return _subgraphSet.size()>0;
+      return _sgSchedBeret.valid();
     }
   }
 
@@ -302,14 +366,14 @@ public:
   PathMap::iterator     paths_end()   { return _pathMap.end(); }
   LoopDepSet::iterator  ld_begin()    { return _loopDepSet.begin(); }
   LoopDepSet::iterator  ld_end()      { return _loopDepSet.end(); }
-  SubgraphSet::iterator ss_begin()    { return _subgraphSet.begin(); }
-  SubgraphSet::iterator ss_end()      { return _subgraphSet.end(); }
-
   BBvec::iterator       rpo_begin()   { return _rpo.begin(); }
   BBvec::iterator       rpo_end()     { return _rpo.end(); }
 
   BBvec::reverse_iterator rpo_rbegin()   { return _rpo.rbegin(); }
   BBvec::reverse_iterator rpo_rend()     { return _rpo.rend(); }
+
+  SGSched& sgSchedNLA() {return _sgSchedNLA;}
+  SGSched& sgSchedBeret() {return _sgSchedBeret;}
 
   bool isOuterLoop() {
     return _immOuterLoop == NULL;
@@ -355,28 +419,25 @@ public:
                                  int max_beret_ops=6, int max_mem_ops=2);
 
   bool printGamsPartitionProgram(std::string filename, 
-    BBvec& bbVec,
-    SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
+    BBvec& bbVec, SGSched& sgSched,
     CFU_set* cfu_set=NULL, bool gams_details=false, bool no_gams=false,
     int max_beret_ops=6, int max_mem_ops=2);
 
   void printSubgraphDot(std::ostream& out, bool NLA=false) {
     if(NLA) {
-      printSubgraphDot(out,_subgraphSetNLA,true);
+      printSubgraphDot(out,_sgSchedNLA,true);
     } else {
-      printSubgraphDot(out,_subgraphSet,false);
+      printSubgraphDot(out,_sgSchedBeret,false);
     }
   }
 
 
   bool scheduleNLA(CFU_set* cfu_set, bool gams_details, bool no_gams); 
-  bool scheduleNLA(CFU_set* cfu_set,   
-                 SubgraphSet& subgraphSet, SubgraphVec& subgraphVec,
-                 bool gams_details, bool no_gams);
+  bool scheduleNLA(CFU_set* cfu_set, SGSched& sg, bool gams_details, bool no_gams);
 
 
   void printSubgraphDot(std::ostream& out, 
-                        SubgraphSet& subgraphSet, 
+                        SGSched& subgraphSet, 
                         bool NLA);
 
   void calledTo(Op* op, FunctionInfo* fi) {
@@ -484,6 +545,17 @@ public:
   bool isLatch(BB* bb) { return _loopLatches.count(bb)!=0;}
   bool inLoop(BB* bb) { return _loopBody.count(bb)!=0;}
 
+  bool useOutsideLoop(Op* op) {
+    for(auto di = op->u_begin(), de = op->u_end(); di!=de; ++di) {
+      Op* dop = *di;
+      BB* bb = dop->bb();
+      if(!inLoop(bb)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   int loopSize() {return _loopBody.size();}
 
   int weightOf(BB* bb1, BB* bb2);
@@ -495,7 +567,7 @@ public:
 
   void incInstr() {_numInsts++;}
   uint64_t numInsts() {return _numInsts;} 
- 
+
   int staticInsts() {
     int static_insts=0;
     for(auto i=_loopBody.begin(),e=_loopBody.end();i!=e;++i) {
@@ -528,6 +600,8 @@ public:
 
   void initializePathInfo(BB* bb, std::map<BB*,int>& numPaths);
   void initializePathInfo();
+  void build_rpo();
+  void build_rpo(BB* bb,std::set<BB*>& seen);
 
   //Compute precise nesting of loops, after loop subset analysis is determined
   int depthNest();
@@ -556,8 +630,8 @@ public:
   //Compute blind loop subset analysis
   static void checkNesting(LoopInfo* li1, LoopInfo* li2);
 
-  SubgraphVec::iterator sg_begin() {return _subgraphVec.begin();}
-  SubgraphVec::iterator sg_end() {return _subgraphVec.end();}
+  //SubgraphVec::iterator sg_begin() {return _subgraphVec.begin();}
+  //SubgraphVec::iterator sg_end() {return _subgraphVec.end();}
   bool canFlowOP(std::vector<Op*>& worklist, Op* dest_op, bool from);
 };
 

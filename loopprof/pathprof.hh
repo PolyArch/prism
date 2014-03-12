@@ -299,8 +299,8 @@ private:
     maxLoops = LoopInfo::_idcounter;
     maxFuncs = FunctionInfo::_idcounter;
     ar & sym_tab;
-    ar & _funcMap;
     ar & _beret_cfus;
+    ar & _funcMap;
     ar & maxOps;
     ar & maxBBs;
     ar & maxLoops;
@@ -325,8 +325,8 @@ private:
   CPC _origPrevCPC;
   std::vector<uint64_t> _origstack;
 
-  FuncMap _funcMap;
   CFU_set _beret_cfus;
+  FuncMap _funcMap;
 
   std::list<StackFrame> _callStack;
 

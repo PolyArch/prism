@@ -35,9 +35,9 @@ archive-test: archive-test.cpp libloopprof.so
 	@echo $($(quiet)cmd_ccld_out_o_driver)
 	@$(cmd_ccld_out_o_driver)
 
-loopprof: loopprof.cpp libloopprof.so
-	@echo $($(quiet)cmd_ccld_out_o_driver)
-	@$(cmd_ccld_out_o_driver)
+loopprof: loopprof.cpp libloopprof.so ../critpath/exec_profile.cpp
+	@echo $($(quiet)cmd_ccld_out_o_driver) ../critpath/exec_profile.cpp
+	@$(cmd_ccld_out_o_driver)  ../critpath/exec_profile.cpp
 
 libloopprof.so: $(OBJ)  *.hh
 	@echo $($(quiet)cmd_ccld_out_o)
