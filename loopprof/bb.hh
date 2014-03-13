@@ -72,6 +72,19 @@ public:
   int len() {return _ops.size();} 
   Op* firstOp() {return _ops.front();}
   Op* lastOp() {return _ops.back();}
+  Op* firstNonIgnoredOp() {
+    for(auto& op : _ops) {
+      if(!op->shouldIgnoreInAccel() && !op->plainMove()) {
+        return op;
+      }
+    }
+    assert(0 && "there wasn't any non-ignored ops!");
+    return NULL;
+  }
+
+
+
+
 
   bool freq() {return _freq;}
   void incFreq() {++_freq;}

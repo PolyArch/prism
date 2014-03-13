@@ -529,13 +529,18 @@ public:
   Deps::iterator d_end() {return _deps.end();}
 
   void uSet(Deps& uses,Deps& skipped) {
+    //std::cout << "touch" << _id << "\n";
     for(auto& uop : _uses) {
+      //std::cout << "use" << _id << " ";
       if(skipped.count(uop) || uses.count(uop)) {
-        return;
+        std::cout << skipped.count(uop) << "," << uses.count(uop) << _id << "\n";
+        continue;
       }
       if(!uop->plainMove()) {
         uses.insert(uop);
+        //std::cout << "inserted\n";
       } else {
+        //std::cout << "skipped\n";
         skipped.insert(uop);
         uop->uSet(uses,skipped);
       }
@@ -545,6 +550,7 @@ public:
   Deps::iterator adj_u_begin() {
     if(_adjUses.empty()) {
       Deps skipped;
+      //std::cout << "uset" << _id << "\n";
       uSet(_adjUses,skipped);
     }
     return _adjUses.begin();

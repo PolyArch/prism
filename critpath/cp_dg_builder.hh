@@ -11,6 +11,7 @@
 #include "edge_table.hh"
 #include "prof.hh"
 #include "pugixml/pugixml.hpp"
+#include <unordered_set>
 
 template<typename T, typename E>
 class CP_DG_Builder : public CriticalPath {
@@ -41,9 +42,6 @@ public:
   virtual ~CP_DG_Builder() {
     
   }
-
-
-
 
   virtual void setWidth(int i) {
     FETCH_WIDTH = i;
@@ -359,7 +357,7 @@ protected:
 
     //for funcUnitUsage
     for(auto &pair : fuUsage) {
-      auto fuUseMap = pair.second;
+      auto& fuUseMap = pair.second;
       for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
         uint64_t cycle = i->first;
         assert(cycle!=0);
@@ -405,8 +403,8 @@ protected:
     }
 
 
-    for(auto &pair : nodeResp) {
-      auto respMap = pair.second;
+    for(typename NodeResp::iterator i=nodeResp.begin(),e=nodeResp.end();i!=e;++i) {
+      NodeRespMap& respMap = i->second;
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
 
@@ -1357,11 +1355,23 @@ protected:
   }
 
   // Register Data Dependence
+  std::unordered_set<Op*> ops_with_missing_deps;
+
   virtual Inst_t &checkRegisterDependence(Inst_t &n) {
     const int NumProducer = 7; // FIXME: X86 specific
     for (int i = 0; i < NumProducer; ++i) {
       unsigned prod = n._prod[i];
       if (prod <= 0 || prod >= n.index()) {
+        continue;
+      }
+
+      if(!getCPDG()->hasIdx(n.index()-prod)) {
+        if(ops_with_missing_deps.count(n._op)==0) {
+          ops_with_missing_deps.insert(n._op);
+          std::cerr << "WARNING: OP:" << n._op->id() 
+                         << ", func:" << n._op->func()->nice_name()
+                         << " is missing an op";
+        }
         continue;
       }
       BaseInst_t& depInst =

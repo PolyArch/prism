@@ -253,6 +253,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (!getTraceOutputs())
       return;
+    if(!getCPDG()->hasIdx(index))
+      return;
 
     outs() << index + Prof::get().skipInsts << ": ";
 
@@ -373,7 +375,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
         assert(b_inst);
 
-        for(auto di = op->adj_d_begin(),de =op->d_end();di!=de;++di) {
+        for(auto di = op->adj_d_begin(),de =op->adj_d_end();di!=de;++di) {
           Op* dop = *di;
            
           if(binstMap.count(dop) && li->forwardDep(dop,op)) {
@@ -418,7 +420,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           _beret_int_ops++;
         }
        
-        for(auto di = op->adj_d_begin(),de = op->d_end();di!=de;++di) {
+        for(auto di = op->adj_d_begin(),de = op->adj_d_end();di!=de;++di) {
           Op* dop = *di;
           if(binstMap.count(dop) /*&& li->forwardDep(dop,op)*/) {
             //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
@@ -569,7 +571,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
               finalBeretEvent=beretEndEv.get();
             } else {
                assert( bbvec[_whichBB] != op->bb() );
-               std::shared_ptr<BeretInst> binst = binstMap[li->getHotPath()[_whichBB-1]->firstOp()];
+               std::shared_ptr<BeretInst> binst = binstMap[li->getHotPath()[_whichBB-1]->firstNonIgnoredOp()];
                reCalcBeretLoop(false); //get correct beret wrong-path timing
                finalBeretEvent=&((*binst)[BeretInst::Complete]);
                replay=true;
@@ -725,6 +727,10 @@ private:
       if (prod <= 0 || prod >= inst._index) {
         continue;
       }
+      if(!getCPDG()->hasIdx(inst.index()-prod)) {
+        continue;
+      }
+
       dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(inst.index()-prod);
 
       if(!depInst.isPipelineInst()) {
@@ -785,6 +791,10 @@ private:
       if (prod <= 0 || prod >= inst._index) {
         continue;
       }
+      if(!getCPDG()->hasIdx(inst.index()-prod)) {
+        continue;
+      }
+
       dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(inst.index()-prod);
       getCPDG()->insert_edge(depInst, depInst.eventComplete(),
                              inst, BeretInst::Execute, 0,E_RDep);

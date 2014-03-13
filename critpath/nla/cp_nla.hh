@@ -222,16 +222,20 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
 
   T* nlaStartEv=NULL;
+  
+  //Use these variables to tell if I should check if we entered a new loop
+  BB* prev_bb=NULL;
+  int prev_bb_pos=-1;
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
-
+    
     switch(nla_state) {
       case CPU:
         //Started NLA Loop
-        if(op->bb_pos()==0) {
+        if(prev_bb!=op->bb() || op->bb_pos() != prev_bb_pos+1) {
           li = op->func()->getLoop(op->bb());
          
-          //if(li && li2sgmap.count(li)!=0 && li2sgmap[li].size()!=0) {
           if(li &&  li->hasSubgraphs(true)) {
             //std::cout << " .. and it's nla-able!\n";
             //curLoopHead=op;
@@ -337,6 +341,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         assert(0); //never reaches here
         break;
     }
+
+    prev_bb=op->bb();
+    prev_bb_pos=op->bb_pos();
   }
 
 private:
@@ -465,7 +472,7 @@ private:
 
         if(_wb_networks != 0) {
           bool needs_forwarding=false;
-          for(auto i=nla_inst->_op->d_begin(), e=nla_inst->_op->d_end();i!=e;++i) {
+          for(auto i=nla_inst->_op->adj_d_begin(), e=nla_inst->_op->adj_d_end();i!=e;++i) {
             Op* dop = *i;
             if(!li->sgSchedNLA().opScheduled(dop)) {
               continue;
