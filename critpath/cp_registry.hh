@@ -236,8 +236,8 @@ public:
                            I->first + std::string(".out");
         execMcPAT(inf,outf);
 
-        float tot_dyn_p = stof(grepF(outf,"Processor:",9,5));
-        float tot_leak_p = stof(grepF(outf,"Processor:",4,5));
+        float tot_dyn_p = stof(grepF(outf,"Processor:",9,4));
+        float tot_leak_p = stof(grepF(outf,"Processor:",4,4));
   
         std::cout << tot_dyn_p << " " << tot_leak_p << "\n";
 

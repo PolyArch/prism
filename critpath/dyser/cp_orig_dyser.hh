@@ -27,10 +27,10 @@ public:
     std::cout.flush();
 
     execMcPAT(fname, outf);
-    float ialu  = std::stof(grepF(outf,"Integer ALUs",7,5));
-    float fpalu = std::stof(grepF(outf,"Floating Point Units",7,5));
-    float calu  = std::stof(grepF(outf,"Complex ALUs",7,5));
-    float reg   = std::stof(grepF(outf,"Register Files",7,5)) * 4;
+    float ialu  = std::stof(grepF(outf,"Integer ALUs",7,4));
+    float fpalu = std::stof(grepF(outf,"Floating Point Units",7,4));
+    float calu  = std::stof(grepF(outf,"Complex ALUs",7,4));
+    float reg   = std::stof(grepF(outf,"Register Files",7,4));
     float total = ialu + fpalu + calu + reg;
     std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
   }

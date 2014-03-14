@@ -93,7 +93,7 @@ namespace DySER {
     uint64_t _dyser_regfile_reads;
 
     InstPtr createDyComputeInst(Op *op, uint64_t index, SliceInfo *SI) {
-      InstPtr dy_compute = InstPtr(new dyser_compute_inst(op->img,
+      InstPtr dy_compute = InstPtr(new dyser_compute_inst(op, op->img,
                                                           index));
       dy_compute->isAccelerated = true;
       if (op) {
@@ -129,7 +129,7 @@ namespace DySER {
     }
 
     InstPtr createDySinCosInst(Op *op) {
-      InstPtr dy_compute = InstPtr(new dyser_sincos_inst());
+      InstPtr dy_compute = InstPtr(new dyser_sincos_inst(op));
       dy_compute->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_compute, op);
@@ -138,7 +138,7 @@ namespace DySER {
     }
 
     InstPtr createDySendInst(Op *op) {
-      InstPtr dy_send = InstPtr(new dyser_send());
+      InstPtr dy_send = InstPtr(new dyser_send(op));
       dy_send->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_send, op);
@@ -147,7 +147,7 @@ namespace DySER {
     }
 
     InstPtr createDyRecvInst(Op *op) {
-      InstPtr dy_recv = InstPtr(new dyser_recv());
+      InstPtr dy_recv = InstPtr(new dyser_recv(op));
       dy_recv->isAccelerated = true;
       if (op) {
         keepTrackOfInstOpMap(dy_recv, op);
@@ -894,10 +894,10 @@ namespace DySER {
       std::cout.flush();
 
       execMcPAT(fname, outf);
-      float ialu  = std::stof(grepF(outf,"Integer ALUs",7,5));
-      float fpalu = std::stof(grepF(outf,"Floating Point Units",7,5));
-      float calu  = std::stof(grepF(outf,"Complex ALUs",7,5));
-      float reg   = std::stof(grepF(outf,"Register Files",7,5)) * 4;
+      float ialu  = std::stof(grepF(outf,"Integer ALUs",7,4));
+      float fpalu = std::stof(grepF(outf,"Floating Point Units",7,4));
+      float calu  = std::stof(grepF(outf,"Complex ALUs",7,4));
+      float reg   = std::stof(grepF(outf,"Register Files",7,4));
       float total = ialu + fpalu + calu + reg;
       std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
     }

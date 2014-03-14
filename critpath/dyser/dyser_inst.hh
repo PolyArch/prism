@@ -5,6 +5,8 @@
 #include "cp_dg_builder.hh"
 
 
+//TODO: Fix Venkat's impelementation of DySER instructions to use the proper class hierarchy of inheriting from dg_inst_base for non-pipeline instructions
+
 namespace DySER {
 
   class dyser_inst : public dg_inst<dg_event,
@@ -35,10 +37,12 @@ namespace DySER {
   class dyser_compute_inst: public dyser_inst {
 
   public:
-    dyser_compute_inst(const CP_NodeDiskImage &img, uint64_t index):
-      dyser_inst(img, index) { }
+    dyser_compute_inst(Op* op, const CP_NodeDiskImage &img, uint64_t index):
+      dyser_inst(img, index) { 
+        _op=op;
+      }
 
-    dyser_compute_inst(): dyser_inst() {}
+    dyser_compute_inst(Op* op): dyser_inst() {_op=op;}
 
     enum EventTy {
       DyReady = 0,
@@ -89,7 +93,7 @@ namespace DySER {
 
   class dyser_sincos_inst : public dyser_compute_inst {
   public:
-    dyser_sincos_inst() : dyser_compute_inst() {}
+    dyser_sincos_inst(Op* op) : dyser_compute_inst(op) {}
 
     std::string getDisasm() const {
       return "dyser_sincos";
@@ -99,7 +103,7 @@ namespace DySER {
   class dyser_pipe_inst : public dyser_inst {
   public:
     dyser_pipe_inst(): dyser_inst() {
-      _opclass = 1; // IntALU ??
+      _opclass = 0; // No_Opclass ??
       // not a memory or ctrl
       _isload = _isstore = _isctrl = _ctrl_miss = false;
 
@@ -144,11 +148,12 @@ namespace DySER {
   class dyser_send : public dyser_pipe_inst {
 
   public:
-    dyser_send(): dyser_pipe_inst() {
+    dyser_send(Op* op): dyser_pipe_inst() {
       // Its operand is just the node added before
       _prod[0] = 1;
       // one source reg
       _numSrcRegs = 1;
+      _op=op;
     }
 
     std::string getDisasm() const {
@@ -163,9 +168,10 @@ namespace DySER {
   class dyser_recv : public dyser_pipe_inst {
 
   public:
-    dyser_recv(): dyser_pipe_inst() {
+    dyser_recv(Op* op): dyser_pipe_inst() {
       // It producer is in dyser??
       _numIntDestRegs = 1;
+      _op=op;
     }
 
     std::string getDisasm() const {

@@ -599,7 +599,8 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     }
 
     //NLA Scheduling
-    if(!loopInfo->cantFullyInline()) {
+//    if(!loopInfo->cantFullyInline()) {
+    if(!loopInfo->containsCallReturn()) {
        if(size_based_cfus) {
          worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams);
        } else {

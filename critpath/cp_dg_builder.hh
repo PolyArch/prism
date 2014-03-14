@@ -2205,6 +2205,52 @@ protected:
 
 
   }
+
+
+  virtual void countAccelSGRegEnergy(Op* op, Subgraph* sg, std::set<Op*>& opset,
+      uint64_t& fp_ops, uint64_t& mult_ops, uint64_t& int_ops,
+      uint64_t& regfile_reads, uint64_t& regfile_freads,
+      uint64_t& regfile_writes, uint64_t& regfile_fwrites) {
+
+    if(op->isFloating()) {
+      fp_ops++;
+    } else if (op->opclass()==2) {
+      mult_ops++;
+    } else {
+      int_ops++;
+    }
+
+    for(auto di = op->adj_d_begin(),de = op->adj_d_end();di!=de;++di) {
+      Op* dop = *di;
+      if(opset.count(dop) /*&& li->forwardDep(dop,op)*/) {
+        //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
+        if(!sg->hasOp(dop)) {
+          if(dop->isFloating()) {
+            regfile_freads+=1;
+           } else {
+            regfile_reads+=1;
+          }
+        }
+      }
+    }
+  
+    for(auto ui = op->u_begin(),ue = op->u_end();ui!=ue;++ui) {
+      Op* uop = *ui;
+      if(opset.count(uop) /*&& li->forwardDep(op,uop)*/) {
+        //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
+        if(!sg->hasOp(uop)) {
+          if(uop->isFloating()) {
+            regfile_fwrites+=1;
+           } else {
+            regfile_writes+=1;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+
 };
 
 

@@ -676,9 +676,9 @@ private:
     std::cout.flush();
 
     execMcPAT(fname,outf);
-    float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
-    float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
-    float calu  = stof(grepF(outf,"Complex ALUs",7,5));
+    float ialu  = stof(grepF(outf,"Integer ALUs",7,4));
+    float fpalu = stof(grepF(outf,"Floating Point Units",7,4));
+    float calu  = stof(grepF(outf,"Complex ALUs",7,4));
     float total = ialu + fpalu + calu;
     std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ")\n";
 

@@ -320,16 +320,16 @@ void LoopInfo::checkCompatible(std::set<Op*>& ops,
   }
   if(orig_op!=cur_op) {
     closeSet.insert(std::make_pair(orig_op,cur_op));
-    cout << orig_op->id() << ") ";
-    cout << cur_op->id() << "." << cur_fu->ind() << ": ";
-    for(auto const& elem : doneOps) {
-      cout << " " << elem->id();
-    }
-    cout << ":";
-    for(auto const& elem : doneFUs) {
-      cout << " " << elem->ind();
-    }
-    cout << "\n";
+//    cout << orig_op->id() << ") ";
+//    cout << cur_op->id() << "." << cur_fu->ind() << ": ";
+//    for(auto const& elem : doneOps) {
+//      cout << " " << elem->id();
+//    }
+//    cout << ":";
+//    for(auto const& elem : doneFUs) {
+//      cout << " " << elem->ind();
+//    }
+//    cout << "\n";
   }
   doneOps.insert(cur_op);
   doneFUs.insert(cur_fu);

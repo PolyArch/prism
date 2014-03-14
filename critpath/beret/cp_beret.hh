@@ -412,42 +412,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         }
         b_inst->reCalculate();  //TODO: check this! : 
 
-        if(b_inst->_floating) {
-          _beret_fp_ops++;
-        } else if (b_inst->_opclass==2) {
-          _beret_mult_ops++;
-        } else {
-          _beret_int_ops++;
-        }
-       
-        for(auto di = op->adj_d_begin(),de = op->adj_d_end();di!=de;++di) {
-          Op* dop = *di;
-          if(binstMap.count(dop) /*&& li->forwardDep(dop,op)*/) {
-            //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
-            if(!sg->hasOp(dop)) {
-              if(b_inst->_floating) {
-                _beret_regfile_freads+=1;
-               } else {
-                _beret_regfile_reads+=1;
-              }
-            }
-          }
-        }
-
-        for(auto ui = op->u_begin(),ue = op->u_end();ui!=ue;++ui) {
-          Op* uop = *ui;
-          if(binstMap.count(uop) /*&& li->forwardDep(op,uop)*/) {
-            //std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
-            if(!sg->hasOp(uop)) {
-              if(b_inst->_floating) {
-                _beret_regfile_fwrites+=1;
-               } else {
-                _beret_regfile_writes+=1;
-              }
-              break;
-            }
-          }
-        }
+        countAccelSGRegEnergy(op,sg,li2sgmap[li]._opset,
+                              _beret_fp_ops,_beret_mult_ops,_beret_int_ops,
+                              _beret_regfile_reads,_beret_regfile_freads,
+                              _beret_regfile_writes,_beret_regfile_fwrites);
        
         //regfile_fwrites+=inst._numFPDestRegs;
         //regfile_writes+=inst._numIntDestRegs;
@@ -899,10 +867,10 @@ private:
     std::cout.flush();
 
     execMcPAT(fname,outf);
-    float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
-    float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
-    float calu  = stof(grepF(outf,"Complex ALUs",7,5));
-    float reg   = stof(grepF(outf,"Register Files",7,5)) * 3;
+    float ialu  = stof(grepF(outf,"Integer ALUs",7,4));
+    float fpalu = stof(grepF(outf,"Floating Point Units",7,4));
+    float calu  = stof(grepF(outf,"Complex ALUs",7,4));
+    float reg   = stof(grepF(outf,"Register Files",7,4));
     float total = ialu + fpalu + calu + reg;
     std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
   }

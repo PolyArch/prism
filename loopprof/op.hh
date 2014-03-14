@@ -151,6 +151,7 @@ public:
 
   uint32_t id() {return _id;}
   CPC cpc() {return _cpc;}
+  bool isFloating() {return img._floating;}
   bool isLoad() {return _flags[ISLOAD];}
   bool isStore() {return _flags[ISSTORE];}
   bool isCtrl() {return _flags[ISCTRL];}

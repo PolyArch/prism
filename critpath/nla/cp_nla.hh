@@ -62,7 +62,7 @@ public:
   bool _no_exec_speculation=true;   //no execution speculation
   bool _exclusive_cfus=false;       //impose exclusive constraints on CFU use
   bool _pipelined_cfus=true;        //impose pipeline constraints on CFU use
-  int  _wb_networks=1;              //impose pipeline constraints on CFU use
+  int  _wb_networks=2;              //impose pipeline constraints on CFU use
 
   void handle_argument(const char *name, const char *arg) {
     ArgumentHandler::parse("nla_serialize_sg",        name,arg,_serialize_sgs       );
@@ -265,7 +265,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op->bb_pos()==0) {
           BB* bb = op->bb();
           //if(bb->pred_size() != 1 || (*bb->pred_begin())->succ_size()!=1 ) {
-          if((*bb->pred_begin())->succ_size()!=1 ) {
+          if(bb->pred_size()==0 || (*bb->pred_begin())->succ_size()!=1 ) {
             schedule_cfus();  
           }
          
@@ -382,9 +382,9 @@ private:
   void schedule_cfus() {
     top_sort_subgraphs();
 
-    if(ctrl_event) {
-      std::cout << "Schedule CFUS (last ctrl cycle = " << ctrl_event->cycle() << ")\n";
-    }
+//    if(ctrl_event) {
+//      std::cout << "Schedule CFUS (last ctrl cycle = " << ctrl_event->cycle() << ")\n";
+//    }
 
     for(auto &sg : _vecSubgraphs) {
       if(_serialize_sgs) {
@@ -409,10 +409,10 @@ private:
         }
       }
 
-      std::cout << "begin cfu" << sg->static_sg->cfu()->ind() 
-        <<  " ind" << sg->ind
-        <<  " at cycle: " << sg->startCFU->cycle()
-        <<  "\n";
+//      std::cout << "begin cfu" << sg->static_sg->cfu()->ind() 
+//        <<  " ind" << sg->ind
+//        <<  " at cycle: " << sg->startCFU->cycle()
+//        <<  "\n";
 
       
       auto max_inst = sg->calcCritCycles(); //must come before startCFU->reCalc
@@ -502,20 +502,28 @@ private:
         }
         (*nla_inst)[NLAInst::Forward].reCalculate();
         (*nla_inst)[NLAInst::Writeback].reCalculate();
-        std::cout << nla_inst->_index 
-                 << ": "  << nla_inst->cycleOfStage(NLAInst::Execute)
-                 << ","   << nla_inst->cycleOfStage(NLAInst::Complete)
-                 << " (op:" << nla_inst->_op->id() << ")"
-                 << "\n";
+
+
+        countAccelSGRegEnergy(nla_inst->_op,sg->static_sg,li->sgSchedNLA()._opset,
+                              _nla_fp_ops,_nla_mult_ops,_nla_int_ops,
+                              _nla_regfile_reads,_nla_regfile_freads,
+                              _nla_regfile_writes,_nla_regfile_fwrites);
+
+
+//        std::cout << nla_inst->_index 
+//                 << ": "  << nla_inst->cycleOfStage(NLAInst::Execute)
+//                 << ","   << nla_inst->cycleOfStage(NLAInst::Complete)
+//                 << " (op:" << nla_inst->_op->id() << ")"
+//                 << "\n";
       }
       prev_begin_cfu=sg->startCFU;
       prev_end_cfu=sg->endCFU;
 
       sg->endCFU->reCalculate();
 
-      std::cout << "end cfu: "
-        <<  sg->endCFU->cycle()
-        <<  "\n";
+//      std::cout << "end cfu: "
+//        <<  sg->endCFU->cycle()
+//        <<  "\n";
     }
 
     ctrl_event=prev_end_cfu; //TODO: make this more robust
@@ -643,7 +651,7 @@ private:
       for(auto mdi = op->m_begin(), mde = op->m_end(); mdi!=mde; ++mdi) {
         Op* md_op = *mdi;
         std::shared_ptr<BaseInst_t> sh_inst = getInstForOp(md_op);
-        if(!sh_inst->isPipelineInst()) {
+        if(sh_inst && !sh_inst->isPipelineInst()) {
           NLAInst* mem_dep_inst = dynamic_cast<NLAInst*>(sh_inst.get());
           DynSubgraph::addDep(mem_dep_inst->dynSubgraph,n->dynSubgraph);
           getCPDG()->insert_edge(*mem_dep_inst,NLAInst::Execute,
@@ -830,10 +838,10 @@ private:
     std::cout.flush();
 
     execMcPAT(fname,outf);
-    float ialu  = stof(grepF(outf,"Integer ALUs",7,5));
-    float fpalu = stof(grepF(outf,"Floating Point Units",7,5));
-    float calu  = stof(grepF(outf,"Complex ALUs",7,5));
-    float reg   = stof(grepF(outf,"Register Files",7,5)) * 3;
+    float ialu  = stof(grepF(outf,"Integer ALUs",7,4));
+    float fpalu = stof(grepF(outf,"Floating Point Units",7,4));
+    float calu  = stof(grepF(outf,"Complex ALUs",7,4));
+    float reg   = stof(grepF(outf,"Register Files",7,4));
     float total = ialu + fpalu + calu + reg;
     std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
   }
