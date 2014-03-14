@@ -285,8 +285,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             nla_state=CPU;
             nlaEndEv=&((*prevNLAInst)[NLAInst::Writeback]);
             assert(curNLAInsts.size()==0);
-            _totalNLACycles+=(nlaEndEv->cycle()-_curNLAStartCycle);
-            accelLogHisto[mylog2(nlaEndEv->cycle()-_curNLAStartCycle)]++;
+            doneNLA(nlaEndEv->cycle());
           }
         } 
         break;
@@ -358,6 +357,33 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     prev_bb=op->bb();
     prev_bb_pos=op->bb_pos();
   }
+
+  void doneNLA(uint64_t curCycle) {
+    _totalNLACycles+=curCycle-_curNLAStartCycle;
+    accelLogHisto[mylog2(curCycle-_curNLAStartCycle)]++;
+  }
+
+  virtual uint64_t finish() {
+    uint64_t curCycle = numCycles();
+    if(nla_state==NLA){
+      doneNLA(curCycle);
+    }
+    return curCycle;
+  }
+
+    /*
+  virtual uint64_t numCycles() {
+    uint64_t curCycle = CP_DG_Builder::numCycles();
+
+     if(nla_state==NLA) {
+       _totalNLACycles+= curCycle-_curNLAStartCycle;
+       _curNLAStartCycle=curCycle;
+     }
+
+    return curCycle;
+  }*/
+
+
 
 private:
 
