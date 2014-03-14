@@ -90,8 +90,7 @@ static void execMcPAT(std::string& inf, std::string& outf) {
 
 
 
-  
-static unsigned int mylog2 (uint64_t val) {
+inline static unsigned int mylog2 (uint64_t val) {
   unsigned int ret = -1;
   while (val != 0) {
       val >>= 1;

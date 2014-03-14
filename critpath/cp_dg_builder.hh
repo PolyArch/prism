@@ -12,7 +12,7 @@
 #include "prof.hh"
 #include "pugixml/pugixml.hpp"
 #include <unordered_set>
-
+#include "cp_utils.hh"
 template<typename T, typename E>
 class CP_DG_Builder : public CriticalPath {
 
@@ -35,6 +35,7 @@ public:
      lq_head_at_dispatch=0;
      sq_head_at_dispatch=0;
 
+     rob_growth_rate=mylog2(0);
      rob_growth_rate=0;
      avg_rob_head=20;
   }

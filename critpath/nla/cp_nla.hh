@@ -9,7 +9,7 @@
 
 #include "loopinfo.hh"
 #include "nla_inst.hh"
-
+#include "cp_utils.hh"
 // CP_NLA
 class cp_nla : public ArgumentHandler,
       public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
@@ -46,6 +46,9 @@ public:
   uint64_t _nla_int_ops=0, _nla_fp_ops=0, _nla_mult_ops=0;
   uint64_t _nla_regfile_fwrites=0, _nla_regfile_writes=0;
   uint64_t _nla_regfile_freads=0,  _nla_regfile_reads=0;
+  uint64_t _timesStarted=0;
+  std::map<int,int> accelLogHisto;
+
 
   unsigned _nla_max_cfu=6,_nla_max_mem=2, _nla_max_ops=80;
   unsigned _nla_config_time=1,_nla_iops=2;
@@ -202,9 +205,16 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 //out << "NLA Cycles = " << _totalNLACycles << "\n";
     out << " (nla-only " << _totalNLACycles 
         << " nla-insts " << _totalNLAInsts
+        << " times " << _timesStarted;
+
+    out << " hist ";
+    for(auto const& p : accelLogHisto) {
+      out << p.first << ":" << p.second << " ";
+    }
+
 //        << " idle-cycles " << idleCycles
 //        << " non-pipeline-cycles" << nonPipelineCycles
-       << ")";
+    out   << ")";
   }
 
 
@@ -248,6 +258,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             Inst_t* prevInst = getCPDG()->peekPipe(-1); 
  
             if(prevInst) {
+              _timesStarted+=1;
               _curNLAStartCycle=prevInst->cycleOfStage(prevInst->eventComplete());
               nlaStartEv=&(*prevInst)[Inst_t::Commit];
             }
@@ -274,6 +285,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             nla_state=CPU;
             nlaEndEv=&((*prevNLAInst)[NLAInst::Writeback]);
             assert(curNLAInsts.size()==0);
+            _totalNLACycles+=(nlaEndEv->cycle()-_curNLAStartCycle);
+            accelLogHisto[mylog2(nlaEndEv->cycle()-_curNLAStartCycle)]++;
           }
         } 
         break;
@@ -503,7 +516,7 @@ private:
         (*nla_inst)[NLAInst::Forward].reCalculate();
         (*nla_inst)[NLAInst::Writeback].reCalculate();
 
-
+        _totalNLAInsts+=1;
         countAccelSGRegEnergy(nla_inst->_op,sg->static_sg,li->sgSchedNLA()._opset,
                               _nla_fp_ops,_nla_mult_ops,_nla_int_ops,
                               _nla_regfile_reads,_nla_regfile_freads,
