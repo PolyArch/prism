@@ -968,7 +968,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
   CFU* curCFU = NULL;
 
-  if(!no_gams && countOps<=MAX_GAMS_SIZE) {
+  bool gams_attempted=false;
+
+  //if it's size based, the size can only go so high
+  if(!cfu_set && countOps > MAX_GAMS_SIZE) {
+    std::cerr << "(size too big for size based)";
+  } else if (!no_gams) {
+    gams_attempted=true;
     //run gams
     system((std::string("gams ") + filename + std::string(" mip=gurobi wdir=gams")
       + (gams_details?string(" lo=2"):string(""))).c_str());
@@ -1020,9 +1026,6 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       }
       subgraph=NULL; //reset subgraph for next group
     }
-  } 
-  if(countOps > MAX_GAMS_SIZE) {
-    std::cerr << "(size too big)";
   }
 
   if(ops_in_a_subgraph!=countOps) {
@@ -1031,8 +1034,9 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //std::cerr << "ops_in_a_subgraph:" << ops_in_a_subgraph << "\n";
     //std::cerr << "countElements:" << countOps << "\n";
     //std::cerr << "GAMS COULD NOT SCHEDULE FOR BERET --- So I'm going to do it manually\n";
-    if(!no_gams) {
-      std::cerr << "GAMS-FAILED falling back to heuristic model.";
+    if(gams_attempted) {
+      std::cerr << "GAMS-FAILED falling back to heuristic\n";
+      std::cerr << "ops scheduled: " << ops_in_a_subgraph << " / " << countOps << "\n";
     }
 
     if(cfu_set) {
