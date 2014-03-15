@@ -68,17 +68,17 @@ public:
   int  _wb_networks=2;              //impose pipeline constraints on CFU use
 
   void handle_argument(const char *name, const char *arg) {
-    ArgumentHandler::parse("nla_serialize_sg",        name,arg,_serialize_sgs       );
-    ArgumentHandler::parse("nla_issue_inorder",       name,arg,_issue_inorder       );
-    ArgumentHandler::parse("nla_cfus_delay_writes",   name,arg,_cfus_delay_writes   );
-    ArgumentHandler::parse("nla_cfus_delay_reads",   name,arg,_cfus_delay_reads     );
-    ArgumentHandler::parse("nla_inorder_address_calc",name,arg,_inorder_address_calc);
-    ArgumentHandler::parse("nla_mem_dep_predictor",   name,arg,_mem_dep_predictor   );
-    ArgumentHandler::parse("nla_software_mem_alias",   name,arg,_mem_dep_predictor  );
-    ArgumentHandler::parse("nla_no_exec_speculation", name,arg,_no_exec_speculation );
-    ArgumentHandler::parse("nla_exclusive_cfus",      name,arg,_exclusive_cfus      );
-    ArgumentHandler::parse("nla_pipelined_cfus",      name,arg,_pipelined_cfus      );
-    ArgumentHandler::parse("nla_wb_networks",         name,arg,_wb_networks         );
+    ArgumentHandler::parse("nla-serialize-sg",        name,arg,_serialize_sgs       );
+    ArgumentHandler::parse("nla-issue-inorder",       name,arg,_issue_inorder       );
+    ArgumentHandler::parse("nla-cfus-delay-writes",   name,arg,_cfus_delay_writes   );
+    ArgumentHandler::parse("nla-cfus-delay-reads",   name,arg,_cfus_delay_reads     );
+    ArgumentHandler::parse("nla-inorder-address-calc",name,arg,_inorder_address_calc);
+    ArgumentHandler::parse("nla-mem-dep-predictor",   name,arg,_mem_dep_predictor   );
+    ArgumentHandler::parse("nla-software-mem-alias",   name,arg,_mem_dep_predictor  );
+    ArgumentHandler::parse("nla-no-exec-speculation", name,arg,_no_exec_speculation );
+    ArgumentHandler::parse("nla-exclusive-cfus",      name,arg,_exclusive_cfus      );
+    ArgumentHandler::parse("nla-pipelined-cfus",      name,arg,_pipelined_cfus      );
+    ArgumentHandler::parse("nla-wb-networks",         name,arg,_wb_networks         );
 
     if (strcmp(name, "no-gams") == 0) {
       _no_gams=true;
@@ -270,16 +270,25 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         }
         break;
       case NLA:
-          //reCalcNLALoop(true); //get correct nla timing
-          //std::shared_ptr<T> event = addLoopIteration(nlaEndEv.get(),0);
-          //cleanLSQEntries(nlaEndEv->cycle());
+        //reCalcNLALoop(true); //get correct nla timing
+        //std::shared_ptr<T> event = addLoopIteration(nlaEndEv.get(),0);
+
+
         if(op->bb_pos()==0) {
           BB* bb = op->bb();
           //if(bb->pred_size() != 1 || (*bb->pred_begin())->succ_size()!=1 ) {
           if(bb->pred_size()==0 || (*bb->pred_begin())->succ_size()!=1 ) {
             schedule_cfus();  
+
+            T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
+            if(clean_event) {
+              uint64_t clean_cycle=clean_event->cycle();
+              cleanLSQEntries(clean_cycle);
+              cleanUp(clean_cycle);
+            }
+
           }
-         
+
           if(!li->inLoop(bb)) {
             //need to connect bb up
             nla_state=CPU;
@@ -421,6 +430,9 @@ private:
   void schedule_cfus() {
     top_sort_subgraphs();
 
+    T* horizon_event = getCPDG()->getHorizon(); //clean at last possible moment
+    uint64_t horizon_cycle = horizon_event->cycle();
+
 //    if(ctrl_event) {
 //      std::cout << "Schedule CFUS (last ctrl cycle = " << ctrl_event->cycle() << ")\n";
 //    }
@@ -447,6 +459,12 @@ private:
            //std::cout << "ctrl " << ctrl_event->cycle() << "\n";
         }
       }
+
+      if(horizon_event && sg->startCFU->cycle() < horizon_cycle) { 
+        getCPDG()->insert_edge(*horizon_event,
+                               *sg->startCFU, 0, E_HORZ);   
+      }
+
 
 //      std::cout << "begin cfu" << sg->static_sg->cfu()->ind() 
 //        <<  " ind" << sg->ind

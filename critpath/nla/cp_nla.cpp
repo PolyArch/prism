@@ -10,18 +10,19 @@ static void init()
   std::vector<RegisterCP<cp_nla>*> models = {&OOO,&In};
 
   for(auto &model : models) {
-    CPRegistry::get()->register_argument("nla_serialize_sg",    true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_issue_inorder",   true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_cfus_delay_writes",   true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_cfus_delay_reads",   true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_inorder_address_calc",true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_mem_dep_predictor",   true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_software_mem_alias",  true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_no_exec_speculation", true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_exclusive_cfus",      true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_pipelined_cfus",      true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla_wb_networks",         true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-serialize-sg",        true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-issue-inorder",       true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-cfus-delay-writes",   true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-cfus-delay-reads",    true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-inorder-address-calc",true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-mem-dep-predictor",   true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-software-mem-alias",  true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-no-exec-speculation", true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-exclusive-cfus",      true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-pipelined-cfus",      true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-wb-networks",         true,&model->cp_obj);
 
+    CPRegistry::get()->register_argument("no-gams",                false,&model->cp_obj);
   }
 
 /*  CPRegistry::get()->register_argument("beret-max-seb", true, &OOO.cp_obj);

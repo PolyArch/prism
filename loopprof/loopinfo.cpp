@@ -1032,7 +1032,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //std::cerr << "countElements:" << countOps << "\n";
     //std::cerr << "GAMS COULD NOT SCHEDULE FOR BERET --- So I'm going to do it manually\n";
     if(!no_gams) {
-      std::cerr << "GAMS-FAILED falling back to size-based model";
+      std::cerr << "GAMS-FAILED falling back to heuristic model.";
     }
 
     if(cfu_set) {

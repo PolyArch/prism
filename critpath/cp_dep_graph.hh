@@ -80,7 +80,9 @@
   X(DyPP,  "DyPP", "DySER Complete To Complete")                \
   X(DyCR,  "DyCR", "DySER Commit to ready")                     \
   X(NPUPR, "NPUCR", "NPU Complete to ready")                    \
-  X(NPUFE, "NPUFE", "NPU Fake Edges")
+  X(NPUFE, "NPUFE", "NPU Fake Edges")                    \
+  X(HORZ,  "HORZ",  "The HORIZON")                    \
+
 
 
 #define X(a, b, c) E_ ## a,
@@ -186,6 +188,8 @@ public:
   virtual unsigned numStages() =0;
   virtual uint64_t index() {return _index;}
   virtual bool isPipelineInst() {return false;}
+
+  virtual unsigned eventInception() {return 0;} //return the index of when the node's data is ready
 
   virtual unsigned eventComplete() {return (unsigned)-1;} //return the index of when the node's data is ready
   virtual unsigned memComplete() {return (unsigned)-1;} //return the index of when the memory operation is ready
@@ -655,6 +659,8 @@ public:
   virtual ~dep_graph_t() {};
   virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,uint64_t index) = 0;
 
+  virtual T* getHorizon() = 0;
+
   virtual E* insert_edge(T& event1, T& event2,
                          int len, unsigned etype=E_NONE) = 0;
 
@@ -712,8 +718,9 @@ class dep_graph_impl_t : public dep_graph_t<Inst_t,T,E> {
 public:
   dep_graph_impl_t(): _latestIdx(0), numCycles(0) {
     //_vec.resize(BSIZE);
-    for (unsigned i = 0; i != BSIZE; ++i)
-      _vec[BSIZE] = 0;
+    for (unsigned i = 0; i != BSIZE; ++i) {
+      _vec[i] = 0;
+    }
   }
   ~dep_graph_impl_t() { cleanup(); }
   //typedef dg_inst<T, E> Inst_t;
@@ -725,6 +732,13 @@ protected:
   typedef  std::shared_ptr<dg_inst_base<T, E> > dg_inst_base_ptr;
   dg_inst_base_ptr  _vec[BSIZE];
   uint64_t _latestIdx;
+
+  // The "horizon" is the point beyond which no event may occur before, because
+  // it is in the definite past.  This corresponds to a cycle number, and also
+  // a node with which to attach dependencies to ensure that the horizon is not
+  // crossed.
+  uint64_t _horizonCycle=0;
+  uint64_t _horizonIndex=((uint64_t)-1);
 
   typename std::shared_ptr<Inst_t> _pipe[PSIZE];
   uint64_t _pipeLoc;
@@ -775,19 +789,61 @@ public:
     return 0;
   }
 
-  virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,
-                       uint64_t index)
-  {
+  //update horizon takes the inst to be deleted
+  virtual void updateHorizon(uint64_t del_index) {
+    //first check if we are warming up, and don't need to delete anything
+    int del_ind=del_index%BSIZE;
+    if(_vec[del_ind]==NULL) {
+      return;
+    }
+    auto& del_inst = _vec[del_ind];
+    if(_horizonIndex==(uint64_t)-1){ //initialize the existing horizon with del item
+      _horizonIndex=del_index;
+    }
+    auto& horizon_inst = _vec[_horizonIndex%BSIZE];
 
+    //If we are deleting the horizon, or past the horizon, that's bad
+    if(del_inst->index() >= horizon_inst->index()) {
+      _horizonIndex=del_index;//horizon has to be at least as big as del
+
+      //iterate until we find a new horizon with appropriate inception time
+      while(true) {
+         _horizonIndex++;
+         auto& new_hor_inst = _vec[_horizonIndex%BSIZE];
+         uint64_t new_hor_cycle = new_hor_inst->cycleOfStage(new_hor_inst->eventInception());
+         if(new_hor_cycle > _horizonCycle) {
+           _horizonCycle=new_hor_cycle;
+           return;
+         }
+      }
+      assert(0); //this won't ever happen
+    }
+    return;
+  }
+
+   virtual T* getHorizon() {
+     if(_horizonIndex==((uint64_t)-1)) {
+       return NULL; 
+     } 
+     auto& hor_inst = _vec[_horizonIndex%BSIZE];
+     return &(*hor_inst)[hor_inst->eventInception()];
+   }
+
+
+  virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,
+                       uint64_t index) {
     //Not forcing this anymore
     //assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
     assert(index + BSIZE >= _latestIdx);
-    _latestIdx=index;
 
     int vec_ind = index%BSIZE;
-    if (_vec[vec_ind].get() != 0) {
-      remove_instr(_vec[vec_ind].get());
-    }
+    //if (_vec[vec_ind].get() != 0) {
+    //  remove_instr(_vec[vec_ind].get());
+    //}
+    updateHorizon(index-BSIZE);
+    //std::cout << "horizon = " << _horizonCycle << "\n";
+
+    _latestIdx=index;
     _vec[vec_ind]=dg;
   }
 
