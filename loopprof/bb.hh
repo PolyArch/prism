@@ -82,7 +82,11 @@ public:
     return NULL;
   }
 
-
+  void print() {
+    for(auto const& op : _ops) {
+      op->print();
+    }
+  }
 
 
 

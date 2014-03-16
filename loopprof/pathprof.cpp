@@ -1,7 +1,7 @@
 #include "pathprof.hh"
 #include <iostream>
 #include <map>
-
+#include <unordered_set>
 using namespace std;
 
 // -------------------------------- StackFrame ---------------------------------
@@ -31,6 +31,8 @@ Op* StackFrame::getOp(CPC cpc) {
   }
 }
 
+
+std::unordered_set<std::pair<BB*,BB*>> error_pairs;
 
 //Process op, determine if it is a bb or not
 Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc, 
@@ -77,18 +79,31 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
           predfound=true;
         }
       }
+
       if(!succfound || !predfound) {
-        cout << "HUGE PROBLEM -- EDGE NOT FOUND   (";
-        if(!succfound) {
-          cout << "no succ, ";
+        auto pair = make_pair(_prevBB,newBB);
+
+        if(error_pairs.count(pair)==0) {
+          error_pairs.insert(pair);
+          cout << "HUGE PROBLEM -- EDGE NOT FOUND   (";
+          if(!succfound) {
+            cout << "no succ, ";
+          }
+          if(!predfound) {
+            cout << "no pred, ";
+          }
+
+          cout << _prevBB->rpoNum() << "->" << newBB->rpoNum() 
+               << ") dId=" << dId <<" \n";
+
+          cout << "*****BB1:\n";
+          _prevBB->print();
+          cout << "*****BB2:\n";
+          newBB->print();
         }
-        if(!predfound) {
-          cout << "no pred, ";
-        }
-        cout << _prevBB->rpoNum() << "->" << newBB->rpoNum() 
-             << ") dId=" << dId <<" \n";
         //assert(0);
       }
+
       _prevBB->succCount[newBB]+=1;
     }
 

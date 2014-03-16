@@ -41,7 +41,7 @@ void Subgraph::checkVec() {
 
 uint32_t LoopInfo::_idcounter=0;
 
-#define MAX_GAMS_SIZE 200
+#define MAX_GAMS_SIZE 150
 
 void LoopInfo::build_rpo() {
   BB* bb=_head;
@@ -810,7 +810,42 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
      CFU_set* cfu_set, bool gams_details,bool no_gams,
      int max_beret_size, int max_mem_ops) {
 
-  //BBvec& bbVec = getHotPath();
+
+  if(cfu_set && !no_gams && bbVec.size()>1) { //cfu scheduling has no heuristic -- split up into many pgms
+    int size=0;
+    for(auto const& bb : bbVec) {
+      size+=bb->len();
+    }
+  
+    int num_times = size / MAX_GAMS_SIZE + 1;
+  
+    if(num_times!=1) {
+      //refactor to do many calls
+      int cursize=0;
+      BBvec newBBVec;
+      bool worked=true;
+  
+      for(auto const& bb : bbVec) {
+        if(bb->len() + cursize > MAX_GAMS_SIZE) {
+          std::cout << "aux scheduling, len:" << cursize << "\n";
+          worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
+                             gams_details, no_gams, max_beret_size, max_mem_ops);
+          cursize=0;
+          newBBVec.clear();
+        }
+  
+        cursize+=bb->len();
+        newBBVec.push_back(bb);
+      }
+      //last one
+      std::cout << "aux scheduling, len:" << cursize << "\n";
+      worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
+                                          gams_details, no_gams, max_beret_size, max_mem_ops);
+
+      return worked; //recursively done!  (cheap hack, but w/e)
+    }
+  }
+
 
   std::map<uint32_t, Op*> intOpMap;
   std::stringstream ss;

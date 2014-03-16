@@ -620,31 +620,31 @@ public:
     out <<  ExecProfile::getDisasm(cpc().first, cpc().second);
       //iterate through 
 
-      out << "                                         ";
+      out << "       ";
       out << "defs:";
       for(auto di=d_begin(),de=d_end();di!=de;++di) {
         Op* dep_op = *di;
         out << dep_op->id() << ",";
       }
-      out << "   uses:";
+      out << " uses:";
       for(auto ui=u_begin(),ue=u_end();ui!=ue;++ui) {
         Op* use_op = *ui;
         out << use_op->id() << ",";
       }
 
-      out << "                                         ";
+      out << "    ";
       out << "adj defs:";
       for(auto di=adj_d_begin(),de=adj_d_end();di!=de;++di) {
         Op* dep_op = *di;
         out << dep_op->id() << ",";
       }
-      out << "adj uses:";
+      out << " adj uses:";
       for(auto ui=adj_u_begin(),ue=adj_u_end();ui!=ue;++ui) {
         Op* use_op = *ui;
         out << use_op->id() << ",";
       }
 
-      out << "   avg_lat: " << avg_lat(); 
+      out << " avg_lat: " << avg_lat(); 
       return out.str();
   }
 
@@ -654,6 +654,10 @@ public:
     out << "\", ";
     out << "tooltip=\"" << dotty_tooltip() << "\"";
     return out.str();
+  }
+
+  void print() {
+    std::cout << dotty_name() << dotty_tooltip() << "\n";
   }
 
 };
