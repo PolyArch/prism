@@ -589,7 +589,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     // BERET Scheduling
     if(loopInfo->isInnerLoop()
        && hpi != -2 //no hot path
-       && loopInfo->getLoopBackRatio(hpi) >= 0.5
+       && loopInfo->getLoopBackRatio(hpi) >= 0.7
        && loopInfo->getTotalIters() >= 10
        ) {
       stringstream part_gams_str;

@@ -10,7 +10,7 @@ static void init()
   std::vector<RegisterCP<cp_nla>*> models = {&OOO,&In};
 
   for(auto &model : models) {
-    CPRegistry::get()->register_argument("nla-serialize-sg",        true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-serialize-sgs",        true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-issue-inorder",       true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-cfus-delay-writes",   true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-cfus-delay-reads",    true,&model->cp_obj);

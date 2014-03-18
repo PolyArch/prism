@@ -46,7 +46,7 @@ uint32_t LoopInfo::_idcounter=0;
 void LoopInfo::build_rpo() {
   BB* bb=_head;
   std::set<BB*> seen;
-  build_rpo(bb,seen);
+  build_rpo(bb,seen);  std::reverse(_rpo.begin(),_rpo.end());
 }
 void LoopInfo::build_rpo(BB* bb, std::set<BB*>& seen) {
   for(auto ip=bb->succ_begin(),ep=bb->succ_end(); ip!=ep;++ip) {
@@ -794,6 +794,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
                      curVec,sgSched,
                      cfu_set, gams_details, no_gams,100,100); 
       if(!ret) {
+        sgSched.reset();
         return false; //fail if any piece fails
       }
 
@@ -810,6 +811,16 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
      CFU_set* cfu_set, bool gams_details,bool no_gams,
      int max_beret_size, int max_mem_ops) {
 
+
+  if(cfu_set && !no_gams) {
+    //check max size of bb()
+    for(auto const& bb : bbVec) {
+      if(bb->len() > 500) {
+        std::cerr << "bb too big for cfu scheduling!\n";
+        return false;
+      }
+    }
+  }
 
   if(cfu_set && !no_gams && bbVec.size()>1) { //cfu scheduling has no heuristic -- split up into many pgms
     int size=0;
@@ -845,6 +856,8 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       return worked; //recursively done!  (cheap hack, but w/e)
     }
   }
+
+
 
 
   std::map<uint32_t, Op*> intOpMap;

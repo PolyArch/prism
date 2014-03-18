@@ -825,6 +825,11 @@ protected:
 
     if(_isInOrder) {
       //nothing
+      // TODO: This is here because with out it, fetch and dispatch get
+      // decoupled from the rest of the nodes, causing memory explosion
+      // b/c clean dosen't get called
+      // ideally, we should 
+      checkIOInFlight(inst); //Finite Rob Size
     } else {
       checkROBSize(inst); //Finite Rob Size
       checkIQStalls(inst);
@@ -1345,6 +1350,18 @@ protected:
     return n;
   }
 */
+
+
+  //Finite ROB (commit to dispatch)
+  virtual Inst_t &checkIOInFlight(Inst_t &n) {
+    Inst_t* depInst = getCPDG()->peekPipe(-36);  //TODO: parameterize
+    if(!depInst) {
+      return n;
+    }
+    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+                           n, Inst_t::Dispatch, 1,E_ROB);
+    return n;
+  }
 
 
   //Finite ROB (commit to dispatch)

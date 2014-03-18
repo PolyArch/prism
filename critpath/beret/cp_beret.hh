@@ -217,7 +217,8 @@ public:
         if(worked) {
           std::cerr << " -- Beretized\n";
         } else {
-          std::cerr << " -- NOT Beretized (Probably had Func Calls)\n";
+          li2sgmap[loopInfo].reset();
+          std::cerr << " -- NOT Beretized (Probably had Func Calls, or was too big)\n";
         }
       } else {
         std::cerr << " -- NOT Beretized -- did not satisfy criteria\n";
