@@ -52,6 +52,7 @@ clean:
 	+make -C critpath/disasm clean
 	+make -C critpath/verbose clean
 	+make -C critpath/npu clean
+	+make -C critpath/nla clean
 	+make -C critpath -f Makefile.static clean
 
 static: cp

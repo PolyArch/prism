@@ -515,7 +515,7 @@ timing1(v1,v2)$(A(v1,v2))..
                               Tv(v2) =g= Bvv(v1,v2) + Tv(v1);
 
 timing2(v1,v2)$(A(v1,v2))..
-                              Tv(v2) =l= 20*Bvv(v1,v2) + Tv(v1);
+                              Tv(v2) =l= CARD(v)*Bvv(v1,v2) + Tv(v1);
 
 c_writes.. WRITES =e= sum(v, Mvn(v,'nreg'));
 c_reads..  READS  =e= sum((v1,v2)$(A(v1,v2)), Bvv(v1,v2));
@@ -874,6 +874,9 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       if(countElements++ != 0) { 
         ss << ",";
       }
+      if(countElements%1024==1023) {
+        ss << "\r\n";
+      }
       ss << op->id();
     }
   }
@@ -914,6 +917,9 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         }
         if(countElements++ != 0) {
           out <<",";
+        }
+        if(countElements%1024==1023) {
+          out << "\r\n";
         }
         out << op->id() << "." << uop->id();
       }
@@ -967,12 +973,18 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     calcPossibleMappings(opSet, cfu_set,closeSet);
 
     out << "set possDep(v,v)/";
+    int countElements=0;
     for(auto i = closeSet.begin(), e = closeSet.end(); i!=e; ++i) {
       Op* op1 = i->first;
       Op* op2 = i->second;
       if(i!=closeSet.begin()) {
         out << ",";
       }
+
+      if(countElements++%1024==1023) {
+        out << "\r\n";
+      }
+
       out << op1->id() << "." << op2->id();
     }
     out << "/;\n"; 

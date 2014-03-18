@@ -330,15 +330,16 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         }
 
         //make nla instruction
-        NLAInst* inst = new NLAInst(img,index,op);
-        std::shared_ptr<NLAInst> nla_inst = std::shared_ptr<NLAInst>(inst);
+        //NLAInst* inst = new NLAInst(img,index,op);
+        //std::shared_ptr<NLAInst> nla_inst = std::shared_ptr<NLAInst>(inst);
+        auto nla_inst = std::make_shared<NLAInst>(img,index,op); 
         keepTrackOfInstOpMap(nla_inst,op);
 
         getCPDG()->addInst(nla_inst,index);
         curNLAInsts.push_back(nla_inst);               
         addNLADeps(nla_inst,op,li);
 
-        if(inst->_isload || inst->_isstore) {
+        if(nla_inst->_isload || nla_inst->_isstore) {
           prevMemNode=nla_inst;
           prevMemSubgraph=nla_inst->dynSubgraph;
         }
@@ -402,7 +403,7 @@ private:
 
   void visit_subgraph(std::shared_ptr<DynSubgraph> d) {
     d->done=true;
-    for(auto &sg : d->use_subgraphs) {
+    for(const auto &sg : d->use_subgraphs) {
       if(!sg->done) {
         visit_subgraph(sg);
       }
@@ -411,9 +412,9 @@ private:
   }
 
   void top_sort_subgraphs() {
-    for(auto &sg1 : _curSubgraphs) {
+    for(const auto &sg1 : _curSubgraphs) {
       //don't schedule any graph which as deps inside the sched range
-      for(auto &sg2 : _curSubgraphs) {
+      for(const auto &sg2 : _curSubgraphs) {
         if(sg1->use_subgraphs.count(sg2)) {
           break;
         } 
@@ -423,6 +424,7 @@ private:
     std::reverse(_vecSubgraphs.begin(),_vecSubgraphs.end());
   }
 
+  std::shared_ptr<NLAInst> ctrl_inst;
   std::shared_ptr<T> ctrl_event;
   std::shared_ptr<T> prev_begin_cfu;
   std::shared_ptr<T> prev_end_cfu;
@@ -430,14 +432,17 @@ private:
   void schedule_cfus() {
     top_sort_subgraphs();
 
-    T* horizon_event = getCPDG()->getHorizon(); //clean at last possible moment
-    uint64_t horizon_cycle = horizon_event->cycle();
+    T* horizon_event = getCPDG()->getHorizon(); 
+    uint64_t horizon_cycle = 0;
+    if(horizon_event) {
+      horizon_cycle=horizon_event->cycle();
+    }
 
 //    if(ctrl_event) {
 //      std::cout << "Schedule CFUS (last ctrl cycle = " << ctrl_event->cycle() << ")\n";
 //    }
 
-    for(auto &sg : _vecSubgraphs) {
+    for(const auto &sg : _vecSubgraphs) {
       if(_serialize_sgs) {
         if(prev_end_cfu) { // completely serial subgraphs
           getCPDG()->insert_edge(*prev_end_cfu,
@@ -458,13 +463,19 @@ private:
                                   *sg->startCFU, 0, E_SEBD);
            //std::cout << "ctrl " << ctrl_event->cycle() << "\n";
         }
-      }
+      } else {
+        if(ctrl_event && ctrl_inst && ctrl_inst->_ctrl_miss) {
+          getCPDG()->insert_edge(*ctrl_event,
+                                 *sg->startCFU, 10,  E_SEBD); //some arbitrary latency :)
+        }
+
+
+      } 
 
       if(horizon_event && sg->startCFU->cycle() < horizon_cycle) { 
         getCPDG()->insert_edge(*horizon_event,
                                *sg->startCFU, 0, E_HORZ);   
       }
-
 
 //      std::cout << "begin cfu" << sg->static_sg->cfu()->ind() 
 //        <<  " ind" << sg->ind
@@ -581,9 +592,13 @@ private:
 //      std::cout << "end cfu: "
 //        <<  sg->endCFU->cycle()
 //        <<  "\n";
+      //now lets clean up the dep/use subgraphs, otherwise we would leak
+      sg->dep_subgraphs.clear();
+      sg->use_subgraphs.clear();
     }
 
     ctrl_event=prev_end_cfu; //TODO: make this more robust
+
     curNLAInsts.clear();
     _curSubgraphs.clear();
     _vecSubgraphs.clear();
@@ -634,6 +649,10 @@ private:
   void addNLADeps(std::shared_ptr<NLAInst>& n, Op* op, LoopInfo* li) {
     Subgraph* sg = li->sgSchedNLA().sgForOp(op);
     assert(sg);
+
+    if(op->isCtrl()) {
+      ctrl_inst=n;
+    }
 
     std::shared_ptr<DynSubgraph> dynSubgraph = _sgMap[sg];
 
@@ -726,7 +745,7 @@ private:
         }
         insert_mem_predicted_edges(*n); 
       }
-    } 
+    }
 
     //memory dependence
     if (n->_mem_prod > 0 && n->_mem_prod < n->_index) {
@@ -735,6 +754,7 @@ private:
 
       insert_mem_dep_edge(prev_node,*n);
     }
+
   }
 
 #if 0

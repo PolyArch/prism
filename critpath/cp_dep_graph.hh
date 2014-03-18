@@ -789,44 +789,72 @@ public:
     return 0;
   }
 
+  bool horizon_failed=false;
   //update horizon takes the inst to be deleted
   virtual void updateHorizon(uint64_t del_index) {
+    if(horizon_failed) {
+      return;
+    }
+
     //first check if we are warming up, and don't need to delete anything
     int del_ind=del_index%BSIZE;
     if(_vec[del_ind]==NULL) {
       return;
     }
-    auto& del_inst = _vec[del_ind];
+    dg_inst_base_ptr del_inst = _vec[del_ind];
     if(_horizonIndex==(uint64_t)-1){ //initialize the existing horizon with del item
       _horizonIndex=del_index;
     }
-    auto& horizon_inst = _vec[_horizonIndex%BSIZE];
+    dg_inst_base_ptr horizon_inst = _vec[_horizonIndex%BSIZE];
 
     //If we are deleting the horizon, or past the horizon, that's bad
     if(del_inst->index() >= horizon_inst->index()) {
       _horizonIndex=del_index;//horizon has to be at least as big as del
 
-      //iterate until we find a new horizon with appropriate inception time
-      while(true) {
-         _horizonIndex++;
-         auto& new_hor_inst = _vec[_horizonIndex%BSIZE];
-         uint64_t new_hor_cycle = new_hor_inst->cycleOfStage(new_hor_inst->eventInception());
-         if(new_hor_cycle > _horizonCycle) {
-           _horizonCycle=new_hor_cycle;
-           return;
-         }
-      }
-      assert(0); //this won't ever happen
+      adjustHorizon(del_index);
+
     }
     return;
   }
+
+   void adjustHorizon(uint64_t del_index) {
+      //iterate until we find a new horizon with appropriate inception time
+      for(;_horizonIndex < del_index + BSIZE;++_horizonIndex) {
+         dg_inst_base_ptr new_hor_inst = _vec[_horizonIndex%BSIZE];
+         if(!new_hor_inst) {
+           continue;
+         }
+         uint64_t new_hor_cycle = new_hor_inst->cycleOfStage(new_hor_inst->eventInception());
+         if(new_hor_cycle >= _horizonCycle) {
+           _horizonCycle=new_hor_cycle;
+           //std::cout << _horizonCycle << "\n";
+           return;
+         }
+      }
+      //Horizon Failed! -- Investigate!
+      if(horizon_failed==false) {
+        std::cerr << "ERROR, no horizon instruction available!\n";
+        horizon_failed=true;
+      }
+      _horizonIndex=((uint64_t)-1);
+      _horizonCycle=0;
+
+   }
 
    virtual T* getHorizon() {
      if(_horizonIndex==((uint64_t)-1)) {
        return NULL; 
      } 
-     auto& hor_inst = _vec[_horizonIndex%BSIZE];
-     return &(*hor_inst)[hor_inst->eventInception()];
+
+     dg_inst_base_ptr hor_inst = _vec[_horizonIndex%BSIZE];
+     T* event = &(*hor_inst)[hor_inst->eventInception()];
+
+     if(_horizonIndex!=0 and event->cycle() != _horizonCycle) {
+       adjustHorizon(--_horizonIndex);
+       hor_inst = _vec[_horizonIndex%BSIZE];
+       event = &(*hor_inst)[hor_inst->eventInception()];
+     }
+     return event;
    }
 
 

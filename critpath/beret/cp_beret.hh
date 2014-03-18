@@ -334,8 +334,20 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
            getCPDG()->insert_edge(*prevEndSEB,
                *startSEB,0,E_SEBS); 
         }
-
       }
+
+      T* horizon_event = getCPDG()->getHorizon();
+      uint64_t horizon_cycle = 0;
+      if(horizon_event) {
+        horizon_cycle=horizon_event->cycle();
+      }
+
+      if(horizon_event && startSEB->cycle() < horizon_cycle) { 
+        getCPDG()->insert_edge(*horizon_event,
+                               *startSEB, 0, E_HORZ);   
+      }
+
+
 
       for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
@@ -357,8 +369,6 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
         b_inst->st_edge = getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
                                *b_inst, BeretInst::Writeback, 0, E_SEBW);
-
-
 
       }
       prevEndSEB=endSEB;
@@ -516,11 +526,19 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
           std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
-          cleanLSQEntries(beretEndEv->cycle());
+          cleanLSQEntries(beretEndEv->cycle()); // TODO: i think this doesn't work with the relaxations turned on?
+
           //TODO, why do I need this to be so high?
-          uint64_t clean_cycle=beretEndEv->cycle()-std::min((uint64_t)100000,beretEndEv->cycle());
-          cleanUp(clean_cycle);
-          last_iter_switch_cycle=clean_cycle;
+          //uint64_t clean_cycle=beretEndEv->cycle()-std::min((uint64_t)100000,beretEndEv->cycle());
+          //cleanUp(clean_cycle);
+          T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
+          uint64_t clean_cycle=0;
+          if(clean_event) {
+            clean_cycle=clean_event->cycle();
+            cleanUp(clean_cycle);
+          }
+
+          last_iter_switch_cycle=clean_cycle; //for debugging
 
           beretEndEv=event;
           assert(beretEndEv);

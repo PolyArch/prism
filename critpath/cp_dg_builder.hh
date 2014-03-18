@@ -13,6 +13,9 @@
 #include "pugixml/pugixml.hpp"
 #include <unordered_set>
 #include "cp_utils.hh"
+
+#define MAX_RES_DURATION 64
+
 template<typename T, typename E>
 class CP_DG_Builder : public CriticalPath {
 
@@ -297,6 +300,7 @@ protected:
   typedef typename std::map<uint64_t,std::shared_ptr<BaseInst_t>> NodeRespMap;
   typedef typename std::map<uint64_t,NodeRespMap> NodeResp;
 
+  std::map<uint64_t,uint64_t> minAvail; //res->min avail time
   FuUsage fuUsage;
   NodeResp nodeResp; 
 
@@ -356,19 +360,34 @@ protected:
       }
     }
 
+
     //for funcUnitUsage
     for(auto &pair : fuUsage) {
       auto& fuUseMap = pair.second;
+      /*
       for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
         uint64_t cycle = i->first;
         assert(cycle!=0);
-        if (cycle + 50  < curCycle) {
+        if (cycle + MAX_RES_DURATION  < curCycle) {
           i = fuUseMap.erase(i);
         } else {
           break;
         }
+      }*/
+
+      //delete irrelevent
+      if(fuUseMap.begin()->first < curCycle) {
+        //debug MSHRUse Deletion
+        //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
+        auto upperUse = --fuUseMap.upper_bound(curCycle);
+        auto firstUse = fuUseMap.begin();
+        if(upperUse->first > firstUse->first) {
+          fuUseMap.erase(firstUse,upperUse); 
+        }
       }
     }
+
+
 
 
     //DEBUG MSHR Usage
@@ -387,8 +406,7 @@ protected:
     //delete irrelevent
     if(MSHRUseMap.begin()->first < curCycle) {
       //debug MSHRUse Deletion
-      //std::cout << "MSHRUse " << MSHRUseMap.begin()->first << " < " << curCycle << "\n";
-
+      //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
       auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
       auto firstMSHRUse = MSHRUseMap.begin();
       if(upperMSHRUse->first > firstMSHRUse->first) {
@@ -406,15 +424,29 @@ protected:
 
     for(typename NodeResp::iterator i=nodeResp.begin(),e=nodeResp.end();i!=e;++i) {
       NodeRespMap& respMap = i->second;
+
+      /*
       for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
         uint64_t cycle = i->first;
 
-        if (cycle  < curCycle) {
+        if (cycle + MAX_RES_DURATION  < curCycle) {
           i = respMap.erase(i);
         } else {
           break;
         }
+      }*/
+
+      //delete irrelevent
+      if(respMap.begin()->first < curCycle) {
+        //debug MSHRUse Deletion
+        //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
+        auto upperUse = --respMap.upper_bound(curCycle);
+        auto firstUse = respMap.begin();
+        if(upperUse->first > firstUse->first) {
+          respMap.erase(firstUse,upperUse); 
+        }
       }
+
     }
 
   }
@@ -606,12 +638,18 @@ protected:
   }
 
   //Adds a resource to the resource utilization map.
-  BaseInst_t* addResource(uint64_t resource_id, uint64_t min_cycle, uint32_t duration, 
-                     int maxUnits, std::shared_ptr<BaseInst_t> cpnode) {
+  BaseInst_t* addResource(uint64_t resource_id, uint64_t min_cycle_in, 
+                     uint32_t duration, int maxUnits, 
+                     std::shared_ptr<BaseInst_t> cpnode) {
     FuUsageMap& fuUseMap = fuUsage[resource_id];
+    uint64_t minAvailRes = minAvail[resource_id]; //todo: not implemented yet
     NodeRespMap& nodeRespMap = nodeResp[resource_id];
 
     checkResourceEmpty(fuUseMap);
+   
+    uint64_t min_cycle = std::max(min_cycle_in,minAvailRes); //TODO: is this every useful?
+    assert(fuUseMap.begin()->first <= min_cycle);
+
 
     uint64_t cur_cycle=min_cycle;
     FuUsageMap::iterator cur_cycle_iter,next_cycle_iter,last_cycle_iter;
@@ -656,8 +694,28 @@ protected:
           //create new entry for this cycle
           fuUseMap[cur_cycle]=cur_cycle_iter->second+1; 
           cur_cycle_iter = fuUseMap.find(cur_cycle); 
+        }        
+
+        
+        FuUsageMap::iterator delete_cycle_iter;
+        bool delete_me=false;
+
+        //now do something cool!
+        if(cur_cycle_iter->second == maxUnits) {
+          //first, we can delete nodeResp, cause noone will use this for sure!
+          nodeRespMap.erase(cur_cycle);
+
+          if(cur_cycle_iter != fuUseMap.begin()) {
+            auto prev_cycle_iter = std::prev(cur_cycle_iter);
+            if(prev_cycle_iter->second == maxUnits) {
+               //prev_cycle_iter!=fuUseMap.begin()) {
+               //auto two_prev_cycle_iter = std::prev(prev_cycle_iter);
+               delete_cycle_iter=cur_cycle_iter;
+               delete_me=true;
+            }
+          }
         }
- 
+
         //iterate through the others
         ++cur_cycle_iter;
         while(cur_cycle_iter->first < cur_cycle + duration) {
@@ -676,6 +734,10 @@ protected:
           assert(fuUseMap[cur_cycle+duration]>=0);
         }
         
+        if(delete_me) {
+          fuUseMap.erase(delete_cycle_iter);
+        }
+
         auto respIter = nodeRespMap.find(cur_cycle);
         nodeRespMap[cur_cycle+duration]=cpnode;
 
