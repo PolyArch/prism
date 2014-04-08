@@ -29,6 +29,12 @@ public:
   virtual ~cp_ccores() {
   }
 
+  virtual bool is_accel_on() {
+    return _fi_ccore || _li_ccore;
+  };
+
+
+
   virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
     return &cpdg;
   };

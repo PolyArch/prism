@@ -717,14 +717,14 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   op->executed(img._cc-img._ec);
   op->setOpclass(img._opclass);
   //We must add in all the dependencies
-  for(int i = 0; i < 7; ++i) {
+  for(unsigned i = 0; i < 7; ++i) {
     int dep_ind = img._prod[i];
     if(dep_ind==0) {
-      break;
+      continue;
     }
     uint64_t full_ind = _dId -dep_ind;
     if(dep_ind<=_dId) {
-      op->addDep(_op_buf[(full_ind+MAX_OPS)%MAX_OPS]);
+      op->addDep(_op_buf[(full_ind+MAX_OPS)%MAX_OPS],i);
       sf.dyn_dep(op,full_ind,false);
     }
   }

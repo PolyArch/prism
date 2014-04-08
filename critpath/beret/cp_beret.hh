@@ -160,6 +160,13 @@ public:
 
   }
 
+
+  virtual bool is_accel_on() {
+    return beret_state==CPU;
+  };
+
+
+
   virtual void setDefaultsFromProf() {
     CP_DG_Builder::setDefaultsFromProf();
     //set up the subgraphs

@@ -59,7 +59,6 @@ namespace std {
 class Op {
 public:
   typedef std::set<Op*> Deps;
-  typedef std::map<Op*,std::set<Op*>> alt_deps;
   static uint32_t _idcounter;
   CP_NodeDiskImage img;
 
@@ -72,6 +71,10 @@ private:
   Deps _deps, _uses;
   Deps _memDeps,_cacheDeps,_ctrlDeps;
   Deps _adjDeps, _adjUses;
+
+  std::map<Op*, unsigned> _indOfDep;
+  std::map<unsigned, Deps> _depsOfInd;
+
   unsigned _opclass=0;
   std::bitset<8> _flags;
   BB* _bb; //saved in parent
@@ -121,6 +124,7 @@ private:
 
     ar & _acc_size;
     ar & _first_effAddr;
+    ar & _indOfDep;
 
     _flags = std::bitset<8>(temp_flags);
 
@@ -128,8 +132,12 @@ private:
       Op* dep_op = *i;
       dep_op->addUse(this);
     }
-/*
-    for(auto i=_uses.begin(),e=_uses.end();i!=e;++i) {
+
+    for(const auto& i : _indOfDep) {
+      _depsOfInd[i.second].insert(i.first); //restore the _depOfInd, if loading
+    }
+
+/*  for(auto i=_uses.begin(),e=_uses.end();i!=e;++i) {
       Op* use_op = *i;
       use_op->addJustDep(this);
     }*/
@@ -379,10 +387,12 @@ public:
     _opclass=opclass;
   }
 
-  void addDep(Op* op) {
-    //assert(op!=this);
+  void addDep(Op* op, unsigned i) {
     assert(op);
     _deps.insert(op);
+    _depsOfInd[i].insert(op);
+    _indOfDep[op]=i;
+
     op->addUse(this);
     updated();
   }
@@ -660,6 +670,53 @@ public:
     std::cout << dotty_name() << dotty_tooltip() << "\n";
   }
 
+  bool memHasDataOperand() {
+    assert(0); //implement this
+    return false; 
+  } 
+
+
+  /*
+  enum OperandType {None, Index, Base, Data, SegBase};
+  static OperandType const test[2][4] = {
+    {Index, Base, Data, SegBase}, 
+    {Index, Base, Data, None}
+  };*/
 };
+
+
+#if 0
+
+Heres some notes! -- Ideally this would come from gem5s instruction generator, but
+Im a bit too lazy for that.  If gem5 changes, this needs to change too.  Good luck
+finding that bug if it ever happens! : )
+
+
+Operand   0      1     2        3 
+
+Loads:
+Ldst      Index  Base  Data     SegBase  
+LdstBig   Index  Base  SegBase
+Ldstl     Index  Base  Data     SegBase
+LdstlBig  Index  Base  SegBase
+LdstlBig  Index  Base  SegBase  
+Ldfp      Index  Base  SegBase  
+Ld        Index  Base  Data     SegBase 
+LdBig     Index  Base  SegBase
+
+Stores: 
+St        Index  Base  Data     Segbase 
+Stul      Index  Base  Data     Segbase
+Stfp      Index  Base  FpData   Segbase
+Cda       Index  Base  SegBase
+
+#endif
+
+
+
+
+
+
+
 
 #endif

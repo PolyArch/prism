@@ -94,6 +94,10 @@ protected:
   uint64_t  cur_cycles=0;
   //Update cycles spent in this config
 public:
+  virtual bool is_accel_on() {
+    return false; 
+  }
+
   virtual void update_cycles(Op* op) {
     if(op->bb_pos()!=0) {
       return;

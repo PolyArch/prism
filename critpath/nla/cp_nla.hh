@@ -36,7 +36,9 @@ public:
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
 
-  
+  virtual bool is_accel_on() {
+    return nla_state==CPU;
+  }; 
 
   //std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
   //std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;

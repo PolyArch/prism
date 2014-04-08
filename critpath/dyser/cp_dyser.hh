@@ -273,6 +273,12 @@ namespace DySER {
     }
     dep_graph_impl_t<Inst_t, T, E> cpdg;
 
+    
+  virtual bool is_accel_on() {
+    return StackLoop || canDySERize(li)
+  }
+
+
   protected:
     LoopInfo *StackLoop = 0;
     unsigned StackLoopIter = 0;
