@@ -822,15 +822,14 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     }
   }
 
+  //Recursive resched if too big -- kind of dumb, but it works for now
   if(cfu_set && !no_gams && bbVec.size()>1) { //cfu scheduling has no heuristic -- split up into many pgms
     int size=0;
     for(auto const& bb : bbVec) {
       size+=bb->len();
     }
   
-    int num_times = size / MAX_GAMS_SIZE + 1;
-  
-    if(num_times!=1) {
+    if(size > MAX_GAMS_SIZE) {
       //refactor to do many calls
       int cursize=0;
       BBvec newBBVec;
@@ -857,9 +856,6 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     }
   }
 
-
-
-
   std::map<uint32_t, Op*> intOpMap;
   std::stringstream ss;
 
@@ -876,7 +872,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
       Op* op = *oi;
-      if(op->shouldIgnoreInAccel() && !useOutsideLoop(op)) {
+      if((op->shouldIgnoreInAccel() || op->plainMove()) && !useOutsideLoop(op)) {
         continue;
       }
 
@@ -895,6 +891,9 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   }
   ss << "/;\n"; 
 
+  if(countElements==0) {
+    return true; //nothing to schedule
+  }
 
   if(setContainsCallReturn(opSet)) {
     //if loop contains call, don't perform subgraph matching...

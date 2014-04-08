@@ -231,6 +231,37 @@ protected:
     _inst2Op.erase(ptr);
   }*/
 
+  void createDummy(const CP_NodeDiskImage &img,uint64_t index, Op *op) {
+    std::shared_ptr<dg_inst_dummy<T,E>> dummy_inst
+                = std::make_shared<dg_inst_dummy<T,E>>(img,index,op); 
+    keepTrackOfInstOpMap(dummy_inst,op);
+    getCPDG()->addInst(dummy_inst,index);
+  }
+
+
+
+  //puts the correct instruction here
+  //returns true if there is an error
+  dg_inst_base<T,E>* fixDummyInstruction(dg_inst_base<T,E>* depInst, 
+                                         bool& out_of_bounds, bool& error) {
+    if(depInst->isDummy()) {
+      auto dummy_inst = dynamic_cast<dg_inst_dummy<T,E>*>(depInst);
+      unsigned dummy_prod=0;
+      error |= dummy_inst->getProd(dummy_prod);
+      if (dummy_prod ==0 ||
+          dummy_prod >= dummy_inst->index() || 
+          !getCPDG()->hasIdx(dummy_inst->index()-dummy_prod)) {
+        out_of_bounds|=true;
+        return NULL;
+      }
+
+      dg_inst_base<T,E>* retInst = &(getCPDG()->queryNodes(dummy_inst->index()-dummy_prod));
+      return fixDummyInstruction(retInst,out_of_bounds,error);
+    }
+    return depInst;
+  }
+
+
   virtual void keepTrackOfInstOpMap(BaseInstPtr ret, Op *op) {
     _op2InstPtr[op] = ret;
     //_inst2Op[ret.get()] = op;
@@ -2182,7 +2213,6 @@ protected:
     sa(system_node,"idle_cycles", idleCycles);
     sa(system_node,"busy_cycles",busyCycles);
 
-
     //std::cout << "squash: " << squashed_insts
     //          << "commit: " << committed_insts << "\n";
 
@@ -2200,7 +2230,6 @@ protected:
     double fourthSpecFactor = 1.00+0.25*squashRatio;
     //double eigthSpecFactor = 1.00+0.125*squashRatio;
     double sixteenthSpecFactor = 1.00+0.0625*squashRatio;
-
 
     //uint64_t intOps=committed_int_insts-committed_load_insts-committed_store_insts;
     //uint64_t intOps=committed_int_insts;
@@ -2221,11 +2250,6 @@ protected:
     sa(core_node,"idle_cycles", idleCycles); //TODO: how to get this?
     sa(core_node,"busy_cycles",busyCycles);
 
-    /*
-    if(true_idle_cycles<0) {
-      true_idle_cycles=0;
-    }*/
-
     uint64_t calc_rob_reads=rob_reads;
     Inst_t* prevInst = getCPDG()->peekPipe(-1); 
     if(!prevInst) {
@@ -2233,7 +2257,6 @@ protected:
     } else {
       calc_rob_reads+=totalCycles-prevInst->cycleOfStage(Inst_t::Commit);
     }
-    
 
     if(!_isInOrder) {
       if(idleCycles < calc_rob_reads) {
@@ -2281,11 +2304,7 @@ protected:
     sa(icache_node,"read_accesses",icache_read_accesses);
     sa(icache_node,"read_misses",icache_read_misses);
     //sa(icache_node,"conflicts",Prof::get().icacheReplacements);
-
-
-
   }
-
 
   virtual void countAccelSGRegEnergy(Op* op, Subgraph* sg, std::set<Op*>& opset,
       uint64_t& fp_ops, uint64_t& mult_ops, uint64_t& int_ops,
@@ -2336,41 +2355,3 @@ protected:
 
 #endif
 
-
-
-
-
-
-
-
-
-
-#if 0
-  virtual unsigned getFUIssueLatency(int opclass) {
-    switch(opclass) {
-    case 0: //No_OpClass
-      return 1;
-    case 1: //IntALU
-      return 1;
-
-    case 2: //IntMult
-      return 1;
-    case 3: //IntDiv
-      return 19;
-
-    case 4: //FloatAdd
-    case 5: //FloatCmp
-    case 6: //FloatCvt
-      return 1;
-    case 7: //FloatMult
-      return 1;
-    case 8: //FloatDiv
-      return 12;
-    case 9: //FloatSqrt
-      return 24;
-    default:
-      return 1;
-    }
-    return 1;
-  }
-#endif

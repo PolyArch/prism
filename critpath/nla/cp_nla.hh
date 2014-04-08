@@ -328,6 +328,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         break;
       } case NLA: {
         if(!li->sgSchedNLA().opScheduled(op)) {
+          if(op->plainMove()) {
+            createDummy(img,index,op);
+          }
           break;
         }
 
@@ -403,27 +406,51 @@ private:
   std::set<std::shared_ptr<DynSubgraph>> _curSubgraphs;
   std::vector<std::shared_ptr<DynSubgraph>> _vecSubgraphs;
 
+  //standard depth first search implementation
+  //1 -> seen, will finish
+  //2 -> done, done
   void visit_subgraph(std::shared_ptr<DynSubgraph> d) {
-    d->done=true;
-    for(const auto &sg : d->use_subgraphs) {
-      if(!sg->done) {
+    if(d->mark==1) {
+      assert(0 && "set of subgraphs has cycle!\n");
+    }
+    if(d->mark==2) {
+      return; 
+    }
+    d->mark = 1;
+    for(const auto &sgw : d->use_subgraphs) {
+      const auto sg = sgw.lock();
+      if(!sg->mark) {
         visit_subgraph(sg);
       }
     }
+    d->mark=2; //now I'm done with it
     _vecSubgraphs.push_back(d);
   }
 
   void top_sort_subgraphs() {
     for(const auto &sg1 : _curSubgraphs) {
       //don't schedule any graph which as deps inside the sched range
-      for(const auto &sg2 : _curSubgraphs) {
+      /*for(const auto &sg2 : _curSubgraphs) {
         if(sg1->use_subgraphs.count(sg2)) {
           break;
         } 
-      }
-      visit_subgraph(sg1);
+      }*/
+//      bool dag_head=true;
+//      for(const auto& def_sgw : sg1->dep_subgraphs) {
+//        const auto def_sg = def_sgw.lock();
+//        if(_curSubgraphs.count(def_sg)) {
+//          dag_head=false;
+//          break;
+//        }
+//      }
+
+//      if(dag_head) {
+        visit_subgraph(sg1);
+//      }
     }
+
     std::reverse(_vecSubgraphs.begin(),_vecSubgraphs.end());
+    assert(_vecSubgraphs.size() == _curSubgraphs.size());
   }
 
   std::shared_ptr<NLAInst> ctrl_inst;
@@ -542,7 +569,7 @@ private:
 
         if(_wb_networks != 0) {
           bool needs_forwarding=false;
-          for(auto i=nla_inst->_op->adj_d_begin(), e=nla_inst->_op->adj_d_end();i!=e;++i) {
+          for(auto i=nla_inst->_op->adj_d_begin(),e=nla_inst->_op->adj_d_end();i!=e;++i){
             Op* dop = *i;
             if(!li->sgSchedNLA().opScheduled(dop)) {
               continue;
@@ -647,6 +674,7 @@ private:
     }
   }
 
+  bool error_with_dummy_inst=false;
   int dynSGindex=0;
   void addNLADeps(std::shared_ptr<NLAInst>& n, Op* op, LoopInfo* li) {
     Subgraph* sg = li->sgSchedNLA().sgForOp(op);
@@ -690,27 +718,35 @@ private:
       if (prod <= 0 || prod >= n->_index) {
         continue;
       }
-
       if(!getCPDG()->hasIdx(n->index()-prod)) {
         continue;
       }
-      dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(n->index()-prod);
-      
+      dg_inst_base<T,E>* depInst=&(getCPDG()->queryNodes(n->index()-prod));
 
-      if(!depInst.isPipelineInst()) {
-        NLAInst* prior_nla_inst = dynamic_cast<NLAInst*>(&depInst);
+      bool out_of_bounds=false, error=false;
+      depInst = fixDummyInstruction(depInst,out_of_bounds,error); //FTFY! : )
+      if(error && error_with_dummy_inst==false) {
+        error_with_dummy_inst=true;
+        std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << op->id() << "\n";
+      }
+      if(out_of_bounds) {
+        continue;
+      }
+
+      if(!depInst->isPipelineInst()) {
+        NLAInst* prior_nla_inst = dynamic_cast<NLAInst*>(depInst);
         if(prior_nla_inst->dynSubgraph != n->dynSubgraph) {
           if(_cfus_delay_writes) {
             getCPDG()->insert_edge(*prior_nla_inst->endCFU(),*n->startCFU(), 0, E_SEBX);
           } 
-         DynSubgraph::addDep(prior_nla_inst->dynSubgraph,n->dynSubgraph);
+          DynSubgraph::addDep(prior_nla_inst->dynSubgraph,n->dynSubgraph);
         }
       }
       if(_cfus_delay_reads) {
-        getCPDG()->insert_edge(depInst,depInst.eventComplete(),*n->startCFU(), 0, E_SEBX);
+        getCPDG()->insert_edge(*depInst,depInst->eventComplete(),*n->startCFU(), 0, E_SEBX);
       }
       //dataflow deps
-      getCPDG()->insert_edge(depInst,depInst.eventComplete(),
+      getCPDG()->insert_edge(*depInst,depInst->eventComplete(),
                              *n,NLAInst::Execute, 0, E_SEBD);
     }
 
@@ -719,7 +755,7 @@ private:
       if(n->_isload || n->_isstore) {
         getCPDG()->insert_edge(*prevMemNode,prevMemNode->eventReady(),
                                *n,NLAInst::Execute, 1, E_SEBD);
-        if(prevMemSubgraph) {
+        if(prevMemSubgraph && prevMemSubgraph != n->dynSubgraph) {
           DynSubgraph::addDep(prevMemSubgraph,n->dynSubgraph);
         }
       }
@@ -732,9 +768,11 @@ private:
         std::shared_ptr<BaseInst_t> sh_inst = getInstForOp(md_op);
         if(sh_inst && !sh_inst->isPipelineInst()) {
           NLAInst* mem_dep_inst = dynamic_cast<NLAInst*>(sh_inst.get());
-          DynSubgraph::addDep(mem_dep_inst->dynSubgraph,n->dynSubgraph);
           getCPDG()->insert_edge(*mem_dep_inst,NLAInst::Execute,
                                  *n,NLAInst::Execute, 1, E_SEBD);
+          if(mem_dep_inst->dynSubgraph!=n->dynSubgraph) {
+            DynSubgraph::addDep(mem_dep_inst->dynSubgraph,n->dynSubgraph);
+          }
         }
       }
     }

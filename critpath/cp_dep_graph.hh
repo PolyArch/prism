@@ -224,14 +224,84 @@ public:
     return !_mem_operands.empty();
   }
 
-
   op_iterator op_begin() { return _operands.begin(); }
   op_iterator op_end() { return _operands.end(); }
 
   op_iterator mem_op_begin() { return _mem_operands.begin(); }
   op_iterator mem_op_end()   { return _mem_operands.end();   }
 
+  virtual bool isDummy() {return false;}
 };
+
+
+
+template<typename T, typename E>
+// Dependence graph representation for instruction which flows through the pipeline
+class dg_inst_dummy : public dg_inst_base<T,E> {
+  typedef T* TPtr;
+  typedef E* EPtr;
+public:
+  enum NodeTy {
+    Dummy = 0,
+    NumStages = 1
+  };
+
+protected:
+  T events[NumStages];
+  uint16_t _prod[7] = {0,0,0,0,0,0,0};
+
+public:
+  virtual ~dg_inst_dummy() {}
+
+  virtual unsigned numStages() { return NumStages;}
+
+  virtual unsigned eventComplete() {return 0;} 
+  virtual unsigned eventReady()    {return 0;}
+  virtual unsigned memComplete()   {return 0;}
+  virtual unsigned eventCommit()   {return 0;}
+
+  dg_inst_dummy(const CP_NodeDiskImage &img,uint64_t index,Op* op=NULL):
+    dg_inst_base<T,E>(index) {
+    this->_opclass=img._opclass;
+    this->_isload=img._isload;
+    this->_isstore=img._isstore;
+    this->_op=op;
+    std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
+  }
+ 
+  dg_inst_dummy(): dg_inst_base<T,E>() {}
+  virtual uint64_t cycleOfStage(const unsigned i) {
+    assert(i < NumStages);
+    return events[i].cycle(); 
+  }
+
+  virtual T&operator[](const unsigned i) {
+    assert(i < NumStages);
+    return events[i];
+  }
+
+  void reset_inst() {
+    for (int i = 0; i < NumStages; ++i) {
+      events[i].remove_all_edges();
+    }
+  }
+
+  bool getProd(unsigned& out_prod) {
+    int count=0;
+    for (int i = 0; i < 7; ++i) {
+      if(_prod[i]!=0) {
+        out_prod = _prod[i];
+        count++;
+      }
+    }
+    return count > 1;
+  }
+
+  bool isMem() {return this->_isload || this->_isstore;}
+  virtual bool isDummy() {return true;}
+};
+
+
 
 template<typename T, typename E>
 // Dependence graph representation for instruction which flows through the pipeline

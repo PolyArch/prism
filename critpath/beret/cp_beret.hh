@@ -636,6 +636,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         addBeretDeps(*inst);*/
 
         if(!li2sgmap[li].opScheduled(op)) {
+          if(op->plainMove()) {
+            createDummy(img,index,op);
+          }
           break;
         }
 
@@ -712,6 +715,7 @@ private:
     }
   }
 
+  bool error_with_dummy_inst=true;
 
   //Ensure that the data dependencies are enforced --
   //this is only necessary under _dataflow_seb and _dataflow_pure models
@@ -725,10 +729,22 @@ private:
         continue;
       }
 
-      dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(inst.index()-prod);
+      dg_inst_base<T,E>* depInst= &getCPDG()->queryNodes(inst.index()-prod);
 
-      if(!depInst.isPipelineInst()) {
-        BeretInst* dep_binst = dynamic_cast<BeretInst*>(&depInst);
+      //code which
+      bool out_of_bounds=false, error=false;
+      depInst = fixDummyInstruction(depInst,out_of_bounds,error); //FTFY! : )
+      if(error && error_with_dummy_inst==false) {
+        error_with_dummy_inst=true;
+        std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << inst._op->id() << "\n";
+      }
+      if(out_of_bounds) {
+        continue;
+      }
+
+
+      if(!depInst->isPipelineInst()) {
+        BeretInst* dep_binst = dynamic_cast<BeretInst*>(depInst);
         assert(dep_binst);
         if(dep_binst->startSEB != inst.startSEB) {
           if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SEBS)) {
@@ -788,9 +804,20 @@ private:
       if(!getCPDG()->hasIdx(inst.index()-prod)) {
         continue;
       }
+      dg_inst_base<T,E>* depInst= &getCPDG()->queryNodes(inst.index()-prod);
 
-      dg_inst_base<T,E>& depInst=getCPDG()->queryNodes(inst.index()-prod);
-      getCPDG()->insert_edge(depInst, depInst.eventComplete(),
+      //code which converts dummy/move insts
+      bool out_of_bounds=false, error=false;
+      depInst = fixDummyInstruction(depInst,out_of_bounds,error); //FTFY! : )
+      if(error && error_with_dummy_inst==false) {
+        error_with_dummy_inst=true;
+        std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << inst._op->id() << "\n";
+      }
+      if(out_of_bounds) {
+        continue;
+      }
+
+      getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
                              inst, BeretInst::Execute, 0,E_RDep);
     }
     

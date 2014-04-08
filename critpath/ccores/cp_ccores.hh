@@ -368,6 +368,15 @@ public:
     }
 
     if(inCCore()) {
+       if(op->shouldIgnoreInAccel()) {
+         return;
+       }
+       if(op->plainMove()) {
+         createDummy(img,index,op);
+         return;
+       }
+
+
       CCoresInst* cc_inst = new CCoresInst(img,index,op);
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
       getCPDG()->addInst(sh_inst,index);
@@ -486,6 +495,8 @@ private:
     cleanLSQEntries(inst.cycleOfStage(CCoresInst::BBReady));
   }
 
+  bool error_with_dummy_inst=false;
+
   //"Execute" represents when current BB is about to execute 
   //(no need for ready, b/c it has dedicated resources)
   virtual void setExecuteCycle_cc(std::shared_ptr<CCoresInst>& inst, const CP_NodeDiskImage &img) {
@@ -497,8 +508,22 @@ private:
       if (prod <= 0 || prod >= inst->index()) {
         continue;
       }
-      dg_inst_base<T,E>& dep_inst = getCPDG()->queryNodes(inst->index()-prod);
-      getCPDG()->insert_edge(dep_inst, dep_inst.eventComplete(),
+      if(!getCPDG()->hasIdx(inst->index()-prod)) {
+        continue;
+      }
+      dg_inst_base<T,E>* dep_inst = &getCPDG()->queryNodes(inst->index()-prod);
+
+      bool out_of_bounds=false, error=false;
+      dep_inst = fixDummyInstruction(dep_inst,out_of_bounds,error); //FTFY! : )
+      if(error && error_with_dummy_inst==false) {
+        error_with_dummy_inst=true;
+        std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << inst->_op->id() << "\n";
+      }
+      if(out_of_bounds) {
+        continue;
+      }
+
+      getCPDG()->insert_edge(*dep_inst, dep_inst->eventComplete(),
                              *inst, CCoresInst::Execute, 0, E_RDep);
     }
 

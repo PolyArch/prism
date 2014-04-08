@@ -10,7 +10,7 @@ public:
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
 
-  bool done = false;
+  int mark = 0;
   Subgraph* static_sg;
 
   std::shared_ptr<T> startCFU;
@@ -19,8 +19,8 @@ public:
   std::vector<std::weak_ptr<NLAInst>> insts;
   std::set<Op*> ops_in_subgraph;
 
-  std::set<std::shared_ptr<DynSubgraph>> dep_subgraphs;
-  std::set<std::shared_ptr<DynSubgraph>> use_subgraphs;
+  std::vector<std::weak_ptr<DynSubgraph>> dep_subgraphs;
+  std::vector<std::weak_ptr<DynSubgraph>> use_subgraphs;
 
   int ind;
   DynSubgraph(Subgraph *sg, int index) {
@@ -32,8 +32,9 @@ public:
 
   static void addDep(std::shared_ptr<DynSubgraph> use, 
                      std::shared_ptr<DynSubgraph> dep) {
-    use->use_subgraphs.insert(dep);
-    dep->dep_subgraphs.insert(use);
+    assert(dep!=use);
+    use->use_subgraphs.push_back(dep);
+    dep->dep_subgraphs.push_back(use);
   }
 
   int critCycles; 

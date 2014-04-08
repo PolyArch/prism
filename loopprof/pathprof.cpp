@@ -605,12 +605,17 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
                    gams_details,no_gams);
       }
       if(worked) {
-        cerr << " -- Beretized\n";
+        cerr << " -- Beretized";
       } else {
-        cerr << " -- NOT Beretized (Func Calls?)\n";
+        cerr << " -- NOT Beretized (Func Calls?)";
       }
     } else {
-      cerr << " -- NOT Beretized\n";
+      cerr << " -- NOT Beretized";
+    }
+
+    //update stats
+    if(worked) {
+      insts_in_beret += loopInfo->dynamicInstsOnPath(hpi); 
     }
 
     //NLA Scheduling
@@ -627,12 +632,10 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
       } else {
         cerr << " -- NOT NLA'd\n";
       }    
+    } else {
+      cerr << "\n";
     }
 
-    //update stats
-    if(worked) {
-      insts_in_beret += loopInfo->dynamicInstsOnPath(hpi); 
-    }
     if(loopInfo->isInnerLoop() && !loopInfo->containsCallReturn()) {
       insts_in_simple_inner_loop += loopInfo->numInsts();
     }

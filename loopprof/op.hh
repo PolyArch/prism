@@ -471,9 +471,6 @@ private:
     //if(numUses()==0) {  //This is a bad idea, because some deps won't show
     //  return true;
     //}
-    if(plainMove()) {
-      return true;
-    }
     if(checkDisasmHas(this, "lfpimm") ||
        checkDisasmHas(this, "limm") ||
        checkDisasmHas(this, "rdip")
@@ -547,6 +544,10 @@ public:
         std::cout << skipped.count(uop) << "," << uses.count(uop) << _id << "\n";
         continue;
       }
+      if(uop->shouldIgnoreInAccel()) {
+        skipped.insert(uop);
+        return;
+      }
       if(!uop->plainMove()) {
         uses.insert(uop);
         //std::cout << "inserted\n";
@@ -571,6 +572,10 @@ public:
   void dSet(Deps& deps,Deps& skipped) {
     for(auto& dop : _deps) {
       if(skipped.count(dop) || deps.count(dop)) {
+        return;
+      }
+      if(dop->shouldIgnoreInAccel()) {
+        skipped.insert(dop);
         return;
       }
       if(!dop->plainMove()) {
