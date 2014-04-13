@@ -275,7 +275,14 @@ namespace DySER {
 
     
   virtual bool is_accel_on() {
-    return StackLoop || canDySERize(li)
+
+    if(!PrevOp) {
+      return false;
+    }
+    LoopInfo *li = getLoop(PrevOp,
+                           PrevOp && PrevOp->isReturn(),
+                           StackLoop);
+    return StackLoop || canDySERize(li);
   }
 
 
