@@ -104,7 +104,7 @@ public:
       return CP_DG_Builder<T, E>::checkRegisterDependence(n);
 
     if (usePipeDependence()) {
-      const int NumProducer = 7; // X86 dep
+      const int NumProducer = MAX_SRC_REGS; // X86 dep
       for (int i = 0; i < NumProducer; ++i) {
         unsigned prod = n._prod[i];
         Inst_t *inst = getCPDG()->peekPipe(-prod);
@@ -243,7 +243,7 @@ protected:
 
     // cache the op in the insts
     {
-      const int NumProducer = 7;
+      const int NumProducer = MAX_SRC_REGS;
       for (int i = 0; i < NumProducer; ++i) {
         unsigned prod = inst->_prod[i];
         if (prod <= 0 || prod >= inst->index())

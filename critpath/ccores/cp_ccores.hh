@@ -503,7 +503,7 @@ private:
     getCPDG()->insert_edge(*inst, CCoresInst::BBReady,
                            *inst, CCoresInst::Execute, 0, E_BBA);
 
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = inst->_prod[i];
       if (prod <= 0 || prod >= inst->index()) {
         continue;

@@ -82,6 +82,9 @@ private:
   uint64_t _totLat; //total latency accross all executions
   uint64_t _times;  //total number of times this instruction was executed
   //Subgraph* _subgraph;
+
+  bool _is_stack = false;
+
   uint64_t _effAddr = 0;
   int stride = 0;
   FunctionInfo *_calledFunc = 0;
@@ -125,6 +128,7 @@ private:
     ar & _acc_size;
     ar & _first_effAddr;
     ar & _indOfDep;
+    ar & _is_stack;
 
     _flags = std::bitset<8>(temp_flags);
 
@@ -171,6 +175,13 @@ public:
   int           bb_pos() {return _bb_pos;}
   //Subgraph*     subgraph() {return _subgraph;}
   //void          setSubgraph(Subgraph* sg) {_subgraph=sg;}
+
+  void setIsStack() {
+    _is_stack=true;
+  }
+  bool isStack() {
+    return _is_stack;
+  }
 
   struct eainfo {
     uint64_t addr;
@@ -622,7 +633,12 @@ public:
     }
 
     if(isMem()) {
-      out << "(x" << stride << ")";
+      out << "(x" << stride;
+      
+      if(isStack()) {
+        out << ",stack";
+      }
+      out << ")";
     } 
 
     out << ":" << opname(opclass());
@@ -675,11 +691,45 @@ public:
     std::cout << dotty_name() << dotty_tooltip() << "\n";
   }
 
-  bool memHasDataOperand() {
-    assert(0); //implement this
-    return false; 
-  } 
 
+  
+  bool memHasData=false;
+  bool memHasData_cached=false;
+
+  bool isDataOperandOfMem(int i) {
+    if(memHasDataOperand()) {
+      return i==2;
+    } else {
+      return false;
+    }
+  }
+
+  bool isAddrOperandOfMem(int i) {
+    if(memHasDataOperand()) {
+      return (i==0) || (i==1) || (i==3);
+    } else {
+      return (i==0) || (i==1) || (i==2);
+    }
+  }
+
+  bool memHasDataOperand() {
+    assert(isMem()); // don't look at this if not memory
+    if(!memHasData_cached) {
+      memHasData_cached=true;
+      std::string name = getUOPName();
+      if(name == std::string("ldstbig") ||
+         name == std::string("ldstlbig") ||
+         name == std::string("ldfp") ||
+         name == std::string("ldbig") ||
+         name == std::string("cda") ){
+        memHasData=false;
+        std::cout << "WOOOOOOOOO:" <<  ExecProfile::getDisasm(_cpc.first, _cpc.second) <<"\n";
+
+      }
+      memHasData=true;
+    }
+    return memHasData;
+  } 
 
   /*
   enum OperandType {None, Index, Base, Data, SegBase};
@@ -687,6 +737,8 @@ public:
     {Index, Base, Data, SegBase}, 
     {Index, Base, Data, None}
   };*/
+
+
 };
 
 
@@ -704,7 +756,6 @@ Ldst      Index  Base  Data     SegBase
 LdstBig   Index  Base  SegBase
 Ldstl     Index  Base  Data     SegBase
 LdstlBig  Index  Base  SegBase
-LdstlBig  Index  Base  SegBase  
 Ldfp      Index  Base  SegBase  
 Ld        Index  Base  Data     SegBase 
 LdBig     Index  Base  SegBase

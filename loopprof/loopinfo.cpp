@@ -247,12 +247,15 @@ void LoopInfo::checkNesting(LoopInfo* li1, LoopInfo* li2) {
   }
 }
 
+
 //Keep track of address Paterns
 void LoopInfo::opAddr(Op* op, uint64_t addr, uint8_t acc_size) { 
-   static int nullAccess=0;
-   if(addr==0 && nullAccess<100) {
-     nullAccess++;
+   static std::set<Op*> null_op;
+   if(addr==0 && !null_op.count(op)) {
+     null_op.insert(op);
      std::cerr << "!!!!!!!!!!!!!!!!!!!!!! Warning: Null Memory Access at:" << op->id() << "!!!!!!!!!!!!!!!!!!!!!!\n";
+     std::string disasm =  ExecProfile::getDisasm(op->cpc().first, op->cpc().second);
+     std::cerr << disasm;
    }
 
    if(_opStriding.count(op)!=0 && _opStriding[op]==false) {
@@ -816,7 +819,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //check max size of bb()
     for(auto const& bb : bbVec) {
       if(bb->len() > 500) {
-        std::cerr << "bb too big for cfu scheduling!\n";
+        //std::cerr << "bb too big for cfu scheduling!\n";
         return false;
       }
     }

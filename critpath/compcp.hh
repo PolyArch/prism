@@ -313,7 +313,7 @@ public:
   //Data dependence
   virtual CP_Node &checkPR(CP_Node &n) {
     //register dependence
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       int prod = n._img._prod[i];
       if (prod <= 0)
         continue;

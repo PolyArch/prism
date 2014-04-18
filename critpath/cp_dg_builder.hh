@@ -1469,7 +1469,7 @@ protected:
   std::unordered_set<Op*> ops_with_missing_deps;
 
   virtual Inst_t &checkRegisterDependence(Inst_t &n) {
-    const int NumProducer = 7; // FIXME: X86 specific
+    const int NumProducer = MAX_SRC_REGS; // FIXME: X86 specific
     for (int i = 0; i < NumProducer; ++i) {
       unsigned prod = n._prod[i];
       if (prod <= 0 || prod >= n.index()) {

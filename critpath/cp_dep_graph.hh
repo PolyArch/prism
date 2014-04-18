@@ -248,7 +248,7 @@ public:
 
 protected:
   T events[NumStages];
-  uint16_t _prod[7] = {0,0,0,0,0,0,0};
+  uint16_t _prod[MAX_SRC_REGS] = {0,0,0,0,0,0,0,0};
 
 public:
   virtual ~dg_inst_dummy() {}
@@ -288,7 +288,7 @@ public:
 
   bool getProd(unsigned& out_prod) {
     int count=0;
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       if(_prod[i]!=0) {
         out_prod = _prod[i];
         count++;
@@ -381,7 +381,7 @@ public:
   bool _isctrl = false;
   bool _ctrl_miss = false;
   uint16_t _icache_lat = 0;
-  uint16_t _prod[7] = {0,0,0,0,0,0,0};
+  uint16_t _prod[MAX_SRC_REGS] = {0,0,0,0,0,0,0};
   uint16_t _mem_prod = 0;
   uint16_t _cache_prod = 0;
   uint64_t _true_cache_prod=false;

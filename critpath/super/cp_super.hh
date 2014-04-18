@@ -37,7 +37,7 @@ public:
   bool _isctrl=0;
   bool _ctrl_miss=0;
   uint16_t _icache_lat=0;
-  uint16_t _prod[7]={0,0,0,0,0,0,0};
+  uint16_t _prod[MAX_SRC_REGS]={0,0,0,0,0,0,0,0};
   uint16_t _mem_prod=0;
   uint16_t _cache_prod=0;
   uint64_t _true_cache_prod=false;
@@ -184,7 +184,7 @@ private:
     //getCPDG()->insert_edge(*n, SuperInst::BBReady,
     //                       *n, SuperInst::Execute, 0, true);
     //regular dependence
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = n->_prod[i];
       if (prod <= 0 || prod >= n->index()) {
         continue;

@@ -720,7 +720,7 @@ private:
   //Ensure that the data dependencies are enforced --
   //this is only necessary under _dataflow_seb and _dataflow_pure models
   virtual void add_dataflow_seb_dep(BeretInst &inst) {
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = inst._prod[i];
       if (prod <= 0 || prod >= inst._index) {
         continue;
@@ -796,7 +796,7 @@ private:
   //Ensure that the data dependencies are enforced --
   //this is only necessary under _dataflow_seb and _dataflow_pure models
   virtual void add_dataflow_pure_dep(BeretInst &inst) {
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = inst._prod[i];
       if (prod <= 0 || prod >= inst._index) {
         continue;

@@ -142,10 +142,19 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
 
   if(op->isStore()) {
     giganticMemDepTable[addr].dId=dId;
+    giganticMemDepTable[addr].st_op=op;
   }
   if(op->isLoad()) {
-    uint32_t dep_dId = giganticMemDepTable[addr].dId;
-    dyn_dep(op,dep_dId,true);
+    if(giganticMemDepTable.count(addr)) {
+      uint32_t dep_dId = giganticMemDepTable[addr].dId;
+      dyn_dep(op,dep_dId,true);
+
+      checkIfStackSpill(giganticMemDepTable[addr].st_op,op,addr);
+    } else {
+      //This op is not a candidate b/c it is reading value before writing
+      //TODO: don't do this if this is the first_function we are running
+      _funcInfo->not_stack_candidate(op);
+    }
   }
 
 
@@ -543,10 +552,13 @@ void PathProf::runAnalysis() {
 
 void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus) {
 
+  for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
+    FunctionInfo& fi = *i->second;
+    fi.setStackOps();
+  }
+
   std::multimap<uint64_t,LoopInfo*> loops;
- 
-  FuncMap::iterator i,e;
-  for(i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
+  for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
     FunctionInfo::LoopList::iterator li,le;
 
@@ -559,8 +571,10 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     }
   } 
 
-  std::multimap<uint64_t,LoopInfo*>::reverse_iterator I;
-  for(I=loops.rbegin();I!=loops.rend();++I) {
+  std::ofstream sched_stats;
+  sched_stats.open("stats/sched-stats.out", std::ofstream::out | std::ofstream::trunc);
+
+  for(auto I=loops.rbegin();I!=loops.rend();++I) {
     LoopInfo* loopInfo = I->second;
     /*
     cout << "loopinfo: " << loopInfo->id() << " ";
@@ -573,7 +587,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     //3. Executed >= 10 Times
 
     int hpi = loopInfo->getHotPathIndex();
-    cerr << "func: " << loopInfo->func()->nice_name() 
+    sched_stats << "func: " << loopInfo->func()->nice_name() 
          << "(" << loopInfo->func()->id() << ")"
          << " loop: " << loopInfo->id()
          << "(depth:" << loopInfo->depth() << " hpi:" << hpi
@@ -605,12 +619,12 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
                    gams_details,no_gams);
       }
       if(worked) {
-        cerr << " -- Beretized";
+        sched_stats << " -- Beretized";
       } else {
-        cerr << " -- NOT Beretized (Func Calls?)";
+        sched_stats << " -- NOT Beretized (Func Calls?)";
       }
     } else {
-      cerr << " -- NOT Beretized";
+      sched_stats << " -- NOT Beretized";
     }
 
     //update stats
@@ -628,12 +642,12 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
        }
 
       if(worked) {
-        cerr << " -- NLA'D\n";
+        sched_stats << " -- NLA'D\n";
       } else {
-        cerr << " -- NOT NLA'd\n";
+        sched_stats << " -- NOT NLA'd\n";
       }    
     } else {
-      cerr << "\n";
+      sched_stats << "\n";
     }
 
     if(loopInfo->isInnerLoop() && !loopInfo->containsCallReturn()) {
@@ -647,7 +661,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
   }
 
   std::multimap<uint64_t,FunctionInfo*> funcs;
-  for(i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
+  for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
     funcs.insert(std::make_pair(fi.nonLoopInsts(),&fi));
     
@@ -655,15 +669,13 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     non_loop_insts_any_recursion += fi.nonLoopAnyRecInsts();
   }
   
-  cerr << "Funcs by non-loop insts:\n";
+
+  std::ofstream func_stats;
+  func_stats.open("stats/func-stats.out", std::ofstream::out | std::ofstream::trunc);
+  func_stats << "Funcs by non-loop insts:\n";
   for(auto I = funcs.rbegin(), E = funcs.rend(); I!=E; ++I) {
     FunctionInfo* fi = I->second;
-    cerr << fi->nice_name() << " (" << fi->id() << "): " << fi->nonLoopInsts() << "\n";
-    
-    //don't bother printing the small functions 
-    if(fi->nonLoopInsts() < 10000) {
-      break;    
-    }
+    func_stats << fi->nice_name() << " (" << fi->id() << "): " << fi->nonLoopInsts() << "\n";
   }
 
 }
@@ -720,7 +732,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   op->executed(img._cc-img._ec);
   op->setOpclass(img._opclass);
   //We must add in all the dependencies
-  for(unsigned i = 0; i < 7; ++i) {
+  for(unsigned i = 0; i < MAX_SRC_REGS; ++i) {
     int dep_ind = img._prod[i];
     if(dep_ind==0) {
       continue;

@@ -713,7 +713,7 @@ private:
 
 
     //serialize on dependent CFUs
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = n->_prod[i];
       if (prod <= 0 || prod >= n->_index) {
         continue;
@@ -802,7 +802,7 @@ private:
   //Ensure that the data dependencies are enforced --
   //this is only necessary under _dataflow_cfu and _dataflow_pure models
   virtual void add_dataflow_cfu_dep(NLAInst &inst) {
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = inst._prod[i];
       if (prod <= 0 || prod >= inst._index) {
         continue;
@@ -846,7 +846,7 @@ private:
   //Ensure that the data dependencies are enforced --
   //this is only necessary under _dataflow_cfu and _dataflow_pure models
   virtual void add_dataflow_pure_dep(NLAInst &inst) {
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = inst._prod[i];
       if (prod <= 0 || prod >= inst._index) {
         continue;

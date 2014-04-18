@@ -37,21 +37,14 @@
 #include "elfparse.hh"
 
 /*
-class TransInfo {
-private:
-  Op* _op;
-  BB* _bb;
-  FunctionInfo* _func;
-
-  bool 
-public:
-  Trans
-
-  ol funcCalled() {return _funcCalled == NULL;}
-};*/
+class stackDep {
+  Op* st_inst;
+  std::vector<Op*> ld_inst;
+}*/
 
 struct MemDep {
   uint32_t dId;
+  Op* st_op;
 };
 
 class StackFrame {
@@ -67,14 +60,34 @@ private:
   LoopIter::LoopStack _loopStack;
   std::vector<std::shared_ptr<LoopIter>> _iterStack;
   std::map<uint32_t,std::shared_ptr<LoopIter>> _iterMap; //maps dId to LoopIteration
-  
+
   LoopInfo::BBvec _loopPath;
   int _pathIndex=0;
 
   bool _isRecursing=false;
   bool _isDirectRecursing=false;
 
+  std::unordered_map<Op*,uint64_t> stack_op_addr;
   std::unordered_map<uint64_t,MemDep> giganticMemDepTable;
+
+  void checkIfStackSpill(Op* st_op, Op* ld_op, uint64_t addr) {
+    assert(st_op && ld_op);
+    //looks like stack -- robustify later?
+    if(addr < 0xFF00000000000000) { 
+      return;
+    }
+
+    if((stack_op_addr.count(st_op) && stack_op_addr[st_op]!=addr) ||
+       (stack_op_addr.count(ld_op) && stack_op_addr[ld_op]!=addr) ) {
+      _funcInfo->not_stack_candidate(st_op);
+      _funcInfo->not_stack_candidate(ld_op);
+    } else {
+      _funcInfo->add_stack_candidate(st_op);
+      _funcInfo->add_stack_candidate(ld_op); 
+    }
+    stack_op_addr[st_op]=addr;
+    stack_op_addr[ld_op]=addr;
+  }
 
 public:
   StackFrame(FunctionInfo* fi, uint32_t dId) : _funcInfo(fi), _prevBB(NULL), _pathIndex(0) {

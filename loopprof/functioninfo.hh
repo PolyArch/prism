@@ -488,6 +488,24 @@ public:
     return 0; 
   }
 
+  std::set<Op*> not_stack_op, stack_op;
+  void not_stack_candidate(Op* op) {
+    //remove op from being a candidate
+    not_stack_op.insert(op);
+  }
+
+  void add_stack_candidate(Op* op) {
+    stack_op.insert(op);
+  }
+
+  void setStackOps() {
+    for(auto op : stack_op) {
+      if(not_stack_op.count(op)==0) {
+        op->setIsStack();
+      }
+    }
+  }
+
   arg_op_iterator arg_op_begin() { return _argsMap.begin(); }
   arg_op_iterator arg_op_end()   { return _argsMap.end(); }
 

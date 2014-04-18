@@ -20,6 +20,9 @@ bool doLoopProfAnalysis(const char *trace_fname,
                         PathProf &pathProf)
 {
 
+  //We'll put some files here for looking at later
+  system("mkdir -p stats/");
+
   CP_NodeDiskImage* cp_array = new CP_NodeDiskImage[winsize];
 
   //Two Passes
