@@ -502,6 +502,14 @@ public:
     for(auto op : stack_op) {
       if(not_stack_op.count(op)==0) {
         op->setIsStack();
+        //std::cout << "is stack:";
+        //if(op->isLoad()) {
+        //  std::cout << "load ";
+        //}
+        //if(op->isStore()) {
+        //  std::cout << "store ";
+        //}
+        //std::cout << op->id() << "\n";
       }
     }
   }

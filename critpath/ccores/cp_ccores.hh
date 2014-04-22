@@ -269,8 +269,16 @@ public:
     if (!getTraceOutputs())
       return;
 
+
+    if(!getCPDG()->hasIdx(index)) {
+      outs() << "elided\n";
+      return;
+    }
+
     dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);
-    if (inst.isPipelineInst()) {
+    if(inst.isDummy()) {
+      outs() << "dummy\n";
+    } else if (inst.isPipelineInst()) {
       CP_DG_Builder::traceOut(index, img, op);
     } else {
       outs() << index + Prof::get().skipInsts << ": ";
@@ -368,14 +376,20 @@ public:
     }
 
     if(inCCore()) {
-       if(op->shouldIgnoreInAccel()) {
-         return;
-       }
-       if(op->plainMove()) {
-         createDummy(img,index,op);
-         return;
-       }
-
+      if(op->shouldIgnoreInAccel()) {
+        return;
+      }
+      if(op->plainMove()) {
+        createDummy(img,index,op);
+        return;
+      }
+      if(op->isConstLoad()) {
+        return;
+      }
+      if(op->isStack()) {
+        createDummy(img,index,op,dg_inst_dummy<T,E>::DUMMY_STACK_SLOT);
+        return;
+      }
 
       CCoresInst* cc_inst = new CCoresInst(img,index,op);
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
@@ -515,6 +529,7 @@ private:
 
       bool out_of_bounds=false, error=false;
       dep_inst = fixDummyInstruction(dep_inst,out_of_bounds,error); //FTFY! : )
+
       if(error && error_with_dummy_inst==false) {
         error_with_dummy_inst=true;
         std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << inst->_op->id() << "\n";

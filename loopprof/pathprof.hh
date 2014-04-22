@@ -73,7 +73,7 @@ private:
   void checkIfStackSpill(Op* st_op, Op* ld_op, uint64_t addr) {
     assert(st_op && ld_op);
     //looks like stack -- robustify later?
-    if(addr < 0xFF00000000000000) { 
+    if(!onStack(addr)) {
       return;
     }
 
@@ -84,12 +84,20 @@ private:
     } else {
       _funcInfo->add_stack_candidate(st_op);
       _funcInfo->add_stack_candidate(ld_op); 
+     // std::cout << "load added: " << ld_op->id() << " " << addr << "\n";
     }
+
     stack_op_addr[st_op]=addr;
     stack_op_addr[ld_op]=addr;
   }
 
 public:
+  static bool onStack(uint64_t addr) {
+    return addr >= 0x7f0000000000;
+  }
+
+  void check_for_stack(Op* op, uint64_t dId, uint64_t addr, uint8_t acc_size);
+
   StackFrame(FunctionInfo* fi, uint32_t dId) : _funcInfo(fi), _prevBB(NULL), _pathIndex(0) {
     //create dummy _iterStack for non-loops
     _iterStack.emplace_back(new LoopIter(_loopStack));
@@ -169,6 +177,7 @@ public:
   uint64_t skipInsts=0;
  
   typedef std::map<CPC,FunctionInfo*>  FuncMap;
+
   SYM_TAB sym_tab;
 
   //some stats for loops/recursion
@@ -345,6 +354,9 @@ private:
 
   //Phase 1 Processing
   CPC _prevHead;
+  std::unordered_map<CPC,uint64_t> const_loads; // 0 value means not constant
+  std::unordered_map<CPC,Op*> const_load_ops; // keep cpc->op mapping for these
+  std::unordered_map<uint64_t,CPC> const_loads_backwards; // 0 value means not constant
 
   void checkRecursion();
   bool adjustStack(CPC newCPC, bool isCall, bool isRet);
@@ -352,6 +364,7 @@ private:
   //Phase 2 Processing
   int _dId;
   Op* _op_buf[MAX_OPS];
+
 
   //get a token from a stream
   static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
@@ -458,6 +471,8 @@ public:
   void setSkipInsts(uint64_t count) {skipInsts=count;}
 
   void processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet);
+  void processAddr(CPC cpc, uint64_t addr, bool is_load, bool is_store);
+
   void runAnalysis();
   void runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus);
 

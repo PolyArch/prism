@@ -64,7 +64,7 @@ public:
 
 private:
 
-  enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN };
+  enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN, ISFLOATING };
   uint32_t _id;
 
   CPC _cpc;
@@ -72,7 +72,7 @@ private:
   Deps _memDeps,_cacheDeps,_ctrlDeps;
   Deps _adjDeps, _adjUses;
 
-  std::map<Op*, unsigned> _indOfDep;
+  std::map<Op*, std::set<unsigned> > _indOfDep;
   std::map<unsigned, Deps> _depsOfInd;
 
   unsigned _opclass=0;
@@ -84,6 +84,7 @@ private:
   //Subgraph* _subgraph;
 
   bool _is_stack = false;
+  bool _is_const_load = false;
 
   uint64_t _effAddr = 0;
   int stride = 0;
@@ -129,6 +130,7 @@ private:
     ar & _first_effAddr;
     ar & _indOfDep;
     ar & _is_stack;
+    ar & _is_const_load;
 
     _flags = std::bitset<8>(temp_flags);
 
@@ -138,7 +140,9 @@ private:
     }
 
     for(const auto& i : _indOfDep) {
-      _depsOfInd[i.second].insert(i.first); //restore the _depOfInd, if loading
+      for(int j : i.second) {
+        _depsOfInd[j].insert(i.first); //restore the _depOfInd, if loading
+      }
     }
 
 /*  for(auto i=_uses.begin(),e=_uses.end();i!=e;++i) {
@@ -163,25 +167,26 @@ public:
 
   uint32_t id() {return _id;}
   CPC cpc() {return _cpc;}
-  bool isFloating() {return img._floating;}
+  bool isFloating() {return _flags[ISFLOATING];}
   bool isLoad() {return _flags[ISLOAD];}
   bool isStore() {return _flags[ISSTORE];}
   bool isCtrl() {return _flags[ISCTRL];}
   bool isCall() {return _flags[ISCALL];}
   bool isReturn() {return _flags[ISRETURN];}
   bool isMem() {return _flags[ISLOAD] || _flags[ISSTORE];}
+
+
   bool isBBHead() {return _bb_pos==0; }
   BB*           bb()     {return _bb;}
   int           bb_pos() {return _bb_pos;}
   //Subgraph*     subgraph() {return _subgraph;}
   //void          setSubgraph(Subgraph* sg) {_subgraph=sg;}
 
-  void setIsStack() {
-    _is_stack=true;
-  }
-  bool isStack() {
-    return _is_stack;
-  }
+  void setIsStack() { _is_stack=true; }
+  bool isStack() { return _is_stack; }
+
+  void setIsConstLoad() { _is_const_load=true; }
+  bool isConstLoad() { return _is_const_load; }
 
   struct eainfo {
     uint64_t addr;
@@ -376,6 +381,7 @@ public:
   void setIsCtrl(bool isctrl)    {_flags.set(ISCTRL,isctrl);}
   void setIsCall(bool iscall)    {_flags.set(ISCALL,iscall);}
   void setIsReturn(bool isreturn){_flags.set(ISRETURN,isreturn);}
+  void setIsFloating(bool isflt) {_flags.set(ISFLOATING,isflt);}
 
   void setBB(BB* bb) {assert(bb); _bb=bb;}
   void setBB_pos(int i) {_bb_pos=i;}
@@ -402,7 +408,7 @@ public:
     assert(op);
     _deps.insert(op);
     _depsOfInd[i].insert(op);
-    _indOfDep[op]=i;
+    _indOfDep[op].insert(i);
 
     op->addUse(this);
     updated();
@@ -614,7 +620,6 @@ public:
   unsigned numUses() {return _uses.size();}
   uint32_t avg_lat() {return _totLat / _times;}
 
-
   std::string dotty_name() {
     std::stringstream out;
     out << id() << ":" << getUOPName();
@@ -638,6 +643,10 @@ public:
       if(isStack()) {
         out << ",stack";
       }
+      if(isConstLoad()) {
+        out << ",const";
+      }
+
       out << ")";
     } 
 
@@ -692,13 +701,34 @@ public:
   }
 
 
+  //TODO:FIXME:WARNING:
+  //All of the below needs to change if gem5 uops change...
   
+  static const int mem_data_operand_index = 2;
+
   bool memHasData=false;
   bool memHasData_cached=false;
 
+  int memDataOperandIndex() {
+    assert(isMem());
+    assert(memHasDataOperand());
+    return mem_data_operand_index;
+  }
+
+  //tell if this is a mem addr op
+  bool isMemAddrOp(Op* op) {
+    assert(_indOfDep.count(op)); //make sure i know it!
+    for(int j : _indOfDep[op]) {
+      if(isAddrOperandOfMem(j)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool isDataOperandOfMem(int i) {
     if(memHasDataOperand()) {
-      return i==2;
+      return i==mem_data_operand_index;
     } else {
       return false;
     }

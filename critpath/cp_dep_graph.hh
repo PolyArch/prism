@@ -245,10 +245,17 @@ public:
     Dummy = 0,
     NumStages = 1
   };
+  enum DummyType {
+    DUMMY_MOVE=0,
+    DUMMY_STACK_SLOT=1,
+    DUMMY_CONST_LOAD=2
+  };
+  int _dtype;
 
 protected:
   T events[NumStages];
-  uint16_t _prod[MAX_SRC_REGS] = {0,0,0,0,0,0,0,0};
+  uint16_t _prod[MAX_SRC_REGS] = {0}; //all zeroes please : )
+  uint16_t _mem_prod=0;
 
 public:
   virtual ~dg_inst_dummy() {}
@@ -260,12 +267,14 @@ public:
   virtual unsigned memComplete()   {return 0;}
   virtual unsigned eventCommit()   {return 0;}
 
-  dg_inst_dummy(const CP_NodeDiskImage &img,uint64_t index,Op* op=NULL):
+  dg_inst_dummy(const CP_NodeDiskImage &img,uint64_t index,Op* op, int dtype):
     dg_inst_base<T,E>(index) {
     this->_opclass=img._opclass;
     this->_isload=img._isload;
     this->_isstore=img._isstore;
     this->_op=op;
+    _mem_prod=img._mem_prod;
+    _dtype=dtype;
     std::copy(std::begin(img._prod), std::end(img._prod), std::begin(_prod));
   }
  
@@ -296,6 +305,20 @@ public:
     }
     return count > 1;
   }
+
+  bool getMemProd(unsigned& out_prod) {
+    out_prod=_mem_prod;
+    return false;
+  }
+
+  bool getDataProdOfStore(unsigned& out_prod) {
+    assert(this->_isstore);
+    assert(this->_op->memHasDataOperand());
+    int prod_index = this->_op->memDataOperandIndex();
+    out_prod = _prod[prod_index];
+    return false;
+  }
+
 
   bool isMem() {return this->_isload || this->_isstore;}
   virtual bool isDummy() {return true;}

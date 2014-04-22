@@ -183,7 +183,7 @@ protected:
   bool getTraceOutputs() const { return TraceOutputs; }
 
   std::ofstream &outs() {
-    if (out.good() || triedToOpenOutOnce)
+    if (out.good() && triedToOpenOutOnce)
       return out;
 
     triedToOpenOutOnce = true;

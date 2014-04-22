@@ -140,24 +140,6 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
     _loopStack.back()->incInstr();
   }
 
-  if(op->isStore()) {
-    giganticMemDepTable[addr].dId=dId;
-    giganticMemDepTable[addr].st_op=op;
-  }
-  if(op->isLoad()) {
-    if(giganticMemDepTable.count(addr)) {
-      uint32_t dep_dId = giganticMemDepTable[addr].dId;
-      dyn_dep(op,dep_dId,true);
-
-      checkIfStackSpill(giganticMemDepTable[addr].st_op,op,addr);
-    } else {
-      //This op is not a candidate b/c it is reading value before writing
-      //TODO: don't do this if this is the first_function we are running
-      _funcInfo->not_stack_candidate(op);
-    }
-  }
-
-
 /*
   if(_loopStack.size()>0) {
     //cout << _iterStack.back()->relevantLoopIter();
@@ -183,6 +165,38 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
 */
   //return or create Op in BB
   return op;
+}
+
+void StackFrame::check_for_stack(Op* op, uint64_t dId, uint64_t addr, uint8_t acc_size) {
+
+/*  if(op->isLoad()) {
+    cout << "load ";
+  }
+  if(op->isStore()) {
+    cout << "store ";
+  }
+
+  if(op->isMem()) {
+    cout << op->id() << " ";
+    cout << addr << "\n"; 
+  }*/
+
+  if(op->isStore()) {
+    giganticMemDepTable[addr].dId=dId;
+    giganticMemDepTable[addr].st_op=op;
+  }
+  if(op->isLoad()) {
+    if(giganticMemDepTable.count(addr)) {
+      uint32_t dep_dId = giganticMemDepTable[addr].dId;
+      dyn_dep(op,dep_dId,true);
+
+      checkIfStackSpill(giganticMemDepTable[addr].st_op,op,addr);
+    } else {
+      //This op is not a candidate b/c it is reading value before writing
+      //TODO: don't do this if this is the first_function we are running
+      _funcInfo->not_stack_candidate(op);
+    }
+  }
 }
 
 
@@ -482,6 +496,25 @@ bool PathProf::adjustStack(CPC newCPC, bool isCall, bool isRet ) {
   return false;
 }
 
+void PathProf::processAddr(CPC cpc, uint64_t addr, bool is_load, bool is_store) {
+  uint64_t word_addr = addr & 0xFFFFFFFFFFFFFFFC;
+
+  if(is_load && !StackFrame::onStack(word_addr) ) {
+    if(const_loads.count(cpc)) {
+      uint64_t recorded_addr = const_loads[cpc];
+      if(recorded_addr != 0 && word_addr != recorded_addr) {
+        //cout << "found bad cpc:" 
+        //     << cpc.first << "." << cpc.second << " " << word_addr <<"\n";
+        const_loads_backwards.erase(recorded_addr);
+        const_loads[cpc]=0;
+      }
+    } else if (word_addr != 0) {
+      const_loads[cpc]=word_addr;
+      const_loads_backwards[word_addr]=cpc;
+      //cout << "const load candidate:" << cpc.first << "." << cpc.second << "\n";
+    }
+  }
+}
 
 void PathProf::processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet)
 {
@@ -555,6 +588,11 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
   for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
     fi.setStackOps();
+  }
+
+  for(auto iter : const_load_ops) {
+    Op* op = iter.second;
+    op->setIsConstLoad();
   }
 
   std::multimap<uint64_t,LoopInfo*> loops;
@@ -723,6 +761,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     op->setIsCtrl(img._isctrl);
     op->setIsCall(img._iscall);
     op->setIsReturn(img._isreturn);
+    op->setIsFloating(img._floating);
   }
 
   //cout << "," << op->cpc().first << "." << op->cpc().second;
@@ -766,15 +805,28 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     }
   }
 
-/*
-  if(op->isLoad()) {
-    uint32_t store_dId = sf.getStoreFor(img._eff_addr);
+  sf.check_for_stack(op,_dId,img._eff_addr,img._acc_size);
 
-    if(store_dId != 0) {
-      sf.dyn_dep(op,_dId-img._mem_prod,true);
+  //check for const loads:
+  if(op->isLoad()) {
+    if(const_loads.count(op->cpc())) { // i'm a little unhappy with having to do 
+    //this, but oh well. I should have probably created the Ops in stage 1, 
+    //so that the const_load maps could have used ops directly.
+      if(const_loads[op->cpc()]!=0) {
+        const_load_ops[op->cpc()]=op;
+      }
     }
   }
-*/
+  if(op->isStore()) {
+    //check if we have written over something we thought was a constant
+    uint64_t word_addr = img._eff_addr & 0xFFFFFFFFFFFFFFFC;
+    if(const_loads_backwards.count(word_addr)) {
+      CPC cpc = const_loads_backwards[word_addr];
+      const_loads.erase(cpc);
+      const_load_ops.erase(cpc);
+      const_loads_backwards.erase(word_addr);
+    }
+  }
 
   _dId++;
 }

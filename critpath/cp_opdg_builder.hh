@@ -209,10 +209,10 @@ protected:
   };
 
   std::list< _InstInfo<Op*, InstPtr, CP_NodeDiskImage> > _loop_InstTrace;
-  std::map<Op*, uint16_t> _cacheLat;
+  std::unordered_map<Op*, uint16_t> _cacheLat;
   //std::map<Op*, int> _cacheProd;
-  std::map<Op*, bool> _trueCacheProd;
-  std::map<Op*, bool> _ctrlMiss;
+  std::unordered_map<Op*, bool> _trueCacheProd;
+  std::unordered_map<Op*, bool> _ctrlMiss;
 
   virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
                               const CP_NodeDiskImage &img) {

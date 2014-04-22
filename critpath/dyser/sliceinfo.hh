@@ -137,10 +137,8 @@ namespace DySER {
       }
 
       std::vector<Op*> workList;
-      for (auto BBI = li->rpo_rbegin(), BBE = li->rpo_rend();
-           BBI != BBE; ++BBI) {
-        for (auto I = (*BBI)->op_begin(), E = (*BBI)->op_end();
-             I != E; ++I) {
+      for (auto BBI = li->rpo_rbegin(), BBE = li->rpo_rend(); BBI != BBE; ++BBI) {
+        for (auto I = (*BBI)->op_begin(), E = (*BBI)->op_end(); I != E; ++I) {
           Op *op = *I;
           if (op->isLoad()) {
             workList.push_back(op);
@@ -185,17 +183,34 @@ namespace DySER {
         Op *op = workList.front();
         workList.erase(workList.begin());
 
+        // FIXME:: handle control instruction dependencies.
+
+        //don't slice backwards from store ops, except the 
         if (storeOps.count(op)) {
-          // FIXME:: handle stores/ control instruction dependencies.
-          continue;
+          //TODO: should I remove this conditional? (so that store addrs not sliced)
+          //(tony)
+          if(!op->isStore()) {
+            continue;
+          }
         }
 
         for (auto I = op->d_begin(), E = op->d_end(); I != E; ++I) {
           Op *DepOp = *I;
+
+          if (op->isStore()) { //Tony: slice store addresses
+            if(!op->isMemAddrOp(DepOp)) {
+              continue;
+            } else { 
+              //it is a memory op!
+              storeOps.erase(DepOp); //remove it from storeOp list so it's not ignored
+                                      //when it's processed next
+            }
+          }
+
           // not in the loop
           if (rpoIndex.find(DepOp) == rpoIndex.end())
             continue;
-          // loop dependent..
+          // loop dependent..  (Tony: does this sufficiently captpure loop dependency?)
           if (rpoIndex[DepOp] >= rpoIndex[op])
             continue;
           // already in LS

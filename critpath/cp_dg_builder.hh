@@ -210,7 +210,7 @@ protected:
 
 
   //Code to map instructions to ops, and back
-  std::map<Op *, BaseInstPtr> _op2InstPtr;
+  std::unordered_map<Op *, BaseInstPtr> _op2InstPtr;
   //std::map<Inst_t *, Op*> _inst2Op;
 
   virtual InstPtr createInst(const CP_NodeDiskImage &img, 
@@ -231,9 +231,10 @@ protected:
     _inst2Op.erase(ptr);
   }*/
 
-  void createDummy(const CP_NodeDiskImage &img,uint64_t index, Op *op) {
+  void createDummy(const CP_NodeDiskImage &img,uint64_t index, Op *op, 
+      int dtype = dg_inst_dummy<T,E>::DUMMY_MOVE) {
     std::shared_ptr<dg_inst_dummy<T,E>> dummy_inst
-                = std::make_shared<dg_inst_dummy<T,E>>(img,index,op); 
+                = std::make_shared<dg_inst_dummy<T,E>>(img,index,op,dtype); 
     keepTrackOfInstOpMap(dummy_inst,op);
     getCPDG()->addInst(dummy_inst,index);
   }
@@ -247,7 +248,19 @@ protected:
     if(depInst->isDummy()) {
       auto dummy_inst = dynamic_cast<dg_inst_dummy<T,E>*>(depInst);
       unsigned dummy_prod=0;
-      error |= dummy_inst->getProd(dummy_prod);
+
+      if(dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_STACK_SLOT) { 
+        //dummy through memory
+        if(dummy_inst->_isload) {
+          error |= dummy_inst->getMemProd(dummy_prod);
+        } else {
+          error |= dummy_inst->getDataProdOfStore(dummy_prod);
+        }
+      } else if (dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_MOVE) { 
+        //dummy through data
+        error |= dummy_inst->getProd(dummy_prod);
+      }
+
       if (dummy_prod ==0 ||
           dummy_prod >= dummy_inst->index() || 
           !getCPDG()->hasIdx(dummy_inst->index()-dummy_prod)) {

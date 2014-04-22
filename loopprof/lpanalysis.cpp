@@ -78,7 +78,6 @@ bool doLoopProfAnalysis(const char *trace_fname,
 
       if (pass == 1) {
         static int skipInsts = 0;
-        //TODO! EXPERIMENTAL!
         //This condition determines whether we start a new bb
         if(prevCtrl && cp_array[ind]._upc==0) { 
         //old way: if (prevCtrl) {
@@ -89,9 +88,12 @@ bool doLoopProfAnalysis(const char *trace_fname,
           }
           //Only pass control instructions to phase 1
           pathProf.processOpPhase1(prevCPC, cpc, prevCall, prevRet);
+
         } else if (skipInsts != -1) {
           skipInsts++;
         }
+        pathProf.processAddr(cpc, img._eff_addr, img._isload, img._isstore);
+
       } else if (pass == 2) {
         //Pass all instructions to phase 2
         pathProf.processOpPhase2(prevCPC, cpc, prevCall, prevRet, img);

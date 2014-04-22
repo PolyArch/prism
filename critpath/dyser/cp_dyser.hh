@@ -670,6 +670,8 @@ namespace DySER {
             if (!SI->isInLoadSlice(op)) {
               Op *firstOp = SI->getBundledNode(op);
 
+              //TODO: TONY -- put something here to eliminate doing 
+
               if (firstOp && tryBundleDySEROps) {
                 if (bundledOp2Inst.count(firstOp) == 0) {
                   insert_sliced_inst(SI, op, inst, loopDone);
@@ -918,8 +920,6 @@ namespace DySER {
 
     // Handle enrgy events for McPAT XML DOC
     virtual void printAccelMcPATxml(std::string fname_base, int nm) {
-
-
 
       #include "mcpat-defaults.hh"
       pugi::xml_document accel_doc;
