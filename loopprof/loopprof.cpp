@@ -154,7 +154,6 @@ int main(int argc, char *argv[])
 
   std::cout << "Num of records              :" << count << "\n";
   
-
   std::cout << "Loop/Rec Info: "
             << pathProf.insts_in_beret << " Beretized, "
             << pathProf.insts_in_simple_inner_loop << " Flat-Inner, "
@@ -165,7 +164,6 @@ int main(int argc, char *argv[])
             << pathProf.stopInst-pathProf.skipInsts << " All\n";
 
   //prepare output filename ... continued
-
   size_t lp_start_pos=start_pos;
   if(lp_start_pos == string::npos) {
     lp_start_pos=0;

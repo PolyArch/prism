@@ -91,7 +91,14 @@ public:
     //IBUF_SIZE=FETCH_TO_DISPATCH_STAGES * ISSUE_WIDTH;
   }
 
+  bool _supress_errors=false;
+  //Functions to surpress and enable errors
+  virtual void supress_errors(bool val) {
+    _supress_errors=val;
+  }
 
+
+  //Public function which inserts functions from the trace
   virtual void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
 
@@ -1490,11 +1497,13 @@ protected:
       }
 
       if(!getCPDG()->hasIdx(n.index()-prod)) {
-        if(ops_with_missing_deps.count(n._op)==0) {
-          ops_with_missing_deps.insert(n._op);
-          std::cerr << "WARNING: OP:" << n._op->id() 
-                         << ", func:" << n._op->func()->nice_name()
-                         << " is missing an op";
+        if(!_supress_errors) {
+          if(ops_with_missing_deps.count(n._op)==0) {
+            ops_with_missing_deps.insert(n._op);
+            std::cerr << "WARNING: OP:" << n._op->id() 
+                      << ", func:" << n._op->func()->nice_name()
+                      << " is missing an op (-" << prod << ")\n";
+          }
         }
         continue;
       }

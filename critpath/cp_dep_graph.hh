@@ -299,7 +299,9 @@ public:
     int count=0;
     for (int i = 0; i < MAX_SRC_REGS; ++i) {
       if(_prod[i]!=0) {
-        out_prod = _prod[i];
+        if(count==0) {
+          out_prod = _prod[i];
+        }
         count++;
       }
     }
@@ -830,8 +832,9 @@ protected:
   // it is in the definite past.  This corresponds to a cycle number, and also
   // a node with which to attach dependencies to ensure that the horizon is not
   // crossed.
-  uint64_t _horizonCycle=0;
-  uint64_t _horizonIndex=((uint64_t)-1);
+  //uint64_t _horizonCycle=0;
+  //uint64_t _horizonIndex=((uint64_t)-1);
+  dg_inst_base_ptr _horizonInst;
 
   typename std::shared_ptr<Inst_t> _pipe[PSIZE];
   uint64_t _pipeLoc;
@@ -889,64 +892,95 @@ public:
       return;
     }
 
+    /*
     //first check if we are warming up, and don't need to delete anything
     int del_ind=del_index%BSIZE;
     if(_vec[del_ind]==NULL) {
       return;
     }
     dg_inst_base_ptr del_inst = _vec[del_ind];
-    if(_horizonIndex==(uint64_t)-1){ //initialize the existing horizon with del item
-      _horizonIndex=del_index;
+    if(!_horizonInst){ //initialize the existing horizon with del item
+      _horizonInst=del_inst;
     }
-    dg_inst_base_ptr horizon_inst = _vec[_horizonIndex%BSIZE];
-
+*/
     //If we are deleting the horizon, or past the horizon, that's bad
-    if(del_inst->index() >= horizon_inst->index()) {
-      _horizonIndex=del_index;//horizon has to be at least as big as del
-
-      adjustHorizon(del_index);
-
+    if(del_index >= _horizonInst->index()) {
+      adjustHorizon(del_index+1);
     }
     return;
   }
 
-   void adjustHorizon(uint64_t del_index) {
+   void adjustHorizon(uint64_t min_index) {
+      uint64_t horizonCycle = _horizonInst->cycleOfStage(_horizonInst->eventInception());
+
+      assert(queryInst(_horizonInst->index()) == _horizonInst); 
+      //make sure we still have the instruction
+
+
+      uint64_t highest_hor_cand=0; //these two for debugging
+      int num_iters=0;
+
       //iterate until we find a new horizon with appropriate inception time
-      for(;_horizonIndex < del_index + BSIZE;++_horizonIndex) {
-         dg_inst_base_ptr new_hor_inst = _vec[_horizonIndex%BSIZE];
-         if(!new_hor_inst) {
+      for(uint64_t horizonIndex = min_index; 
+          horizonIndex < min_index + BSIZE;++horizonIndex) {
+         num_iters++; 
+         dg_inst_base_ptr new_hor_inst = _vec[horizonIndex%BSIZE];
+         if(!new_hor_inst || new_hor_inst->isDummy()) {
            continue;
          }
          uint64_t new_hor_cycle = new_hor_inst->cycleOfStage(new_hor_inst->eventInception());
-         if(new_hor_cycle >= _horizonCycle) {
-           _horizonCycle=new_hor_cycle;
-           //std::cout << _horizonCycle << "\n";
+         if(new_hor_cycle >= highest_hor_cand) {
+           highest_hor_cand=new_hor_cycle;
+         }
+
+         if(new_hor_cycle >= horizonCycle) {
+           if(0) { //debugging code
+           std::cerr << "orig: 0, min: "
+                     << (int64_t)min_index - (int64_t)_horizonInst->index();
+           std::cerr << ", latest:" << (int64_t)_latestIdx - (int64_t)_horizonInst->index()
+                     << ", new:" << new_hor_inst->index() - _horizonInst->index()
+                     << "(" << horizonCycle << "to " << new_hor_cycle
+                     << "; iters=" << num_iters << ")\n";
+           }
+
+           _horizonInst = new_hor_inst;
            return;
          }
       }
       //Horizon Failed! -- Investigate!
       if(horizon_failed==false) {
-        std::cerr << "ERROR, no horizon instruction available!\n";
+        std::cerr << "ERROR, no horizon instruction available! (cycle " 
+                  << horizonCycle << ", highest_found:" << highest_hor_cand << ")\n";
+        std::cerr << "orig horizon: " << _horizonInst->index() 
+                  << ", latest:" <<_latestIdx 
+                  << "(diff:" << _latestIdx - _horizonInst->index() << ")\n"
+                  << "num iters: " << num_iters << "\n"
+                  << "inst: " << _horizonInst->getDisasm() << "\n";
         horizon_failed=true;
+        _horizonInst=NULL;
       }
-      _horizonIndex=((uint64_t)-1);
-      _horizonCycle=0;
-
+      assert(0);
    }
 
    virtual T* getHorizon() {
-     if(_horizonIndex==((uint64_t)-1)) {
+     if(!_horizonInst) {
        return NULL; 
      } 
 
-     dg_inst_base_ptr hor_inst = _vec[_horizonIndex%BSIZE];
-     T* event = &(*hor_inst)[hor_inst->eventInception()];
+     uint64_t horizonIndex = _horizonInst->index();
+     assert(queryInst(horizonIndex) == _horizonInst); 
+     //make sure we still have the instruction
 
-     if(_horizonIndex!=0 and event->cycle() != _horizonCycle) {
-       adjustHorizon(--_horizonIndex);
-       hor_inst = _vec[_horizonIndex%BSIZE];
-       event = &(*hor_inst)[hor_inst->eventInception()];
-     }
+
+     T* event = &(*_horizonInst)[_horizonInst->eventInception()];
+
+     //if(_horizonIndex!=0 and event->cycle() != _horizonCycle) {
+     //  assert(0);
+
+     //  //adjustHorizon(--_horizonIndex);
+     //  //hor_inst = _vec[_horizonIndex%BSIZE];
+     //  //event = &(*hor_inst)[hor_inst->eventInception()];
+     //}
      return event;
    }
 
@@ -956,13 +990,19 @@ public:
     //Not forcing this anymore
     //assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
     assert(index + BSIZE >= _latestIdx);
+    if(_horizonInst==NULL) {
+      _horizonInst=dg;
+    }
 
     int vec_ind = index%BSIZE;
     //if (_vec[vec_ind].get() != 0) {
     //  remove_instr(_vec[vec_ind].get());
     //}
-    updateHorizon(index-BSIZE);
-    //std::cout << "horizon = " << _horizonCycle << "\n";
+    if((index>=BSIZE && index > _latestIdx) ) {
+      updateHorizon(index-BSIZE);
+      //std::cout << "horizon = " << _horizonCycle << "\n";
+      assert(_horizonInst->index() > (index-BSIZE));
+    }
 
     _latestIdx=index;
     _vec[vec_ind]=dg;

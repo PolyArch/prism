@@ -840,7 +840,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   
       for(auto const& bb : bbVec) {
         if(bb->len() + cursize > MAX_GAMS_SIZE) {
-          std::cout << "aux scheduling, len:" << cursize << "\n";
+          //std::cout << "aux scheduling, len:" << cursize << "\n";
           worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
                              gams_details, no_gams, max_beret_size, max_mem_ops);
           cursize=0;
@@ -851,7 +851,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         newBBVec.push_back(bb);
       }
       //last one
-      std::cout << "aux scheduling, len:" << cursize << "\n";
+      //std::cout << "aux scheduling, len:" << cursize << "\n";
       worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
                                           gams_details, no_gams, max_beret_size, max_mem_ops);
 
@@ -863,7 +863,12 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   std::stringstream ss;
 
   ss << "$ONEMPTY;\n";
-  CFU_node::print_kinds(ss);
+
+  if(cfu_set) {
+    CFU_node::print_kinds(ss);
+  }
+
+
   ss << "set v/";
 
   std::set<Op*> opSet;
@@ -977,9 +982,12 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   out << "set M(v)/";
   out << streamM.str();
   out << "/;\n"; 
-  out << "set kv(v,k)/";
-  out << streamK.str();
-  out << "/;\n"; 
+
+  if(cfu_set) {
+    out << "set kv(v,k)/";
+    out << streamK.str();
+    out << "/;\n"; 
+  }
 
 
   
@@ -1039,7 +1047,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     gams_attempted=true;
     //run gams
     system((std::string("gams ") + filename + std::string(" mip=gurobi wdir=gams")
-      + (gams_details?string(" lo=2"):string(""))).c_str());
+      + (!gams_details?string(" lo=2"):string(""))).c_str());
   
     std::ifstream ifs((string("gams/")+resultfile).c_str());
 
@@ -1097,8 +1105,9 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //std::cerr << "countElements:" << countOps << "\n";
     //std::cerr << "GAMS COULD NOT SCHEDULE FOR BERET --- So I'm going to do it manually\n";
     if(gams_attempted) {
-      std::cerr << "GAMS-FAILED falling back to heuristic\n";
-      std::cerr << "ops scheduled: " << ops_in_a_subgraph << " / " << countOps << "\n";
+      std::cerr << "GAMS-FAILED on file: \"" << filename 
+                << "\", falling back to heuristic.  ";
+      std::cerr << "(ops sched: " << ops_in_a_subgraph << " / " << countOps << ")\n";
     }
 
     if(cfu_set) {

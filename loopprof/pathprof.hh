@@ -78,7 +78,8 @@ private:
     }
 
     if((stack_op_addr.count(st_op) && stack_op_addr[st_op]!=addr) ||
-       (stack_op_addr.count(ld_op) && stack_op_addr[ld_op]!=addr) ) {
+       (stack_op_addr.count(ld_op) && stack_op_addr[ld_op]!=addr) ||
+       st_op->isSpcMem() || ld_op->isSpcMem()) {
       _funcInfo->not_stack_candidate(st_op);
       _funcInfo->not_stack_candidate(ld_op);
     } else {

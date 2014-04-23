@@ -612,6 +612,9 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
   std::ofstream sched_stats;
   sched_stats.open("stats/sched-stats.out", std::ofstream::out | std::ofstream::trunc);
 
+  cout << "CFU Scheduling";
+  cout.flush();
+
   for(auto I=loops.rbegin();I!=loops.rend();++I) {
     LoopInfo* loopInfo = I->second;
     /*
@@ -658,9 +661,12 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
       }
       if(worked) {
         sched_stats << " -- Beretized";
+        cout << ".";
       } else {
         sched_stats << " -- NOT Beretized (Func Calls?)";
+        cout << "x";
       }
+      cout.flush();
     } else {
       sched_stats << " -- NOT Beretized";
     }
@@ -681,9 +687,12 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
 
       if(worked) {
         sched_stats << " -- NLA'D\n";
+        cout << ",";
       } else {
         sched_stats << " -- NOT NLA'd\n";
-      }    
+        cout << "z";
+      }
+      cout.flush();
     } else {
       sched_stats << "\n";
     }
@@ -812,7 +821,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     if(const_loads.count(op->cpc())) { // i'm a little unhappy with having to do 
     //this, but oh well. I should have probably created the Ops in stage 1, 
     //so that the const_load maps could have used ops directly.
-      if(const_loads[op->cpc()]!=0) {
+      if(const_loads[op->cpc()]!=0 && !op->isSpcMem()) {
         const_load_ops[op->cpc()]=op;
       }
     }

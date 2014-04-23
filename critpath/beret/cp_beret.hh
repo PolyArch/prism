@@ -95,7 +95,8 @@ public:
   unsigned _beret_max_seb=6,_beret_max_mem=2,_beret_max_ops=80;
   unsigned _beret_config_time=1,_beret_iops=2;
   unsigned _beret_dataflow_seb=0,_beret_dataflow_pure=0;
-  unsigned _no_gams=false;
+  bool  _no_gams=false, _gams_details=false, _size_based_cfus=false;
+  
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "beret-max-seb") == 0) {
       unsigned temp = atoi(optarg);
@@ -155,8 +156,13 @@ public:
     }
     if (strcmp(name, "no-gams") == 0) {
       _no_gams=true;
-    }
-
+    } 
+    if (strcmp(name, "gams-details") == 0) {
+      _gams_details=true;
+    } 
+    if (strcmp(name, "size-based-cfus") == 0) {
+      _size_based_cfus=true;
+    } 
 
   }
 
@@ -164,7 +170,6 @@ public:
   virtual bool is_accel_on() {
     return beret_state==CPU;
   };
-
 
 
   virtual void setDefaultsFromProf() {
@@ -181,6 +186,14 @@ public:
       }
     } 
  
+    std::ofstream sched_stats;
+    std::string filename = std::string("stats/") + std::string(_run_name) + 
+                           _name + std::string(".sched-stats.out");
+
+    sched_stats.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
+
+    std::cout << "Scheduling Beret";
+    std::cout.flush();
 
     std::multimap<uint64_t,LoopInfo*>::reverse_iterator I;
     for(I=loops.rbegin();I!=loops.rend();++I) {
@@ -192,7 +205,7 @@ public:
       //3. Executed >= 10 Times
   
       int hpi = loopInfo->getHotPathIndex();
-      std::cerr << "func: " << loopInfo->func()->nice_name() 
+      sched_stats << "func: " << loopInfo->func()->nice_name() 
            << "(" << loopInfo->func()->id() << ")"
            << " loop: " << loopInfo->id()
            << "(depth:" << loopInfo->depth() << " hpi:" << hpi
@@ -214,21 +227,25 @@ public:
         std::stringstream part_gams_str;
         part_gams_str << _run_name << "partition." << loopInfo->id() << ".gams";
   
-        bool gams_details=false;
-        std::cerr << _beret_max_seb << " " << _beret_max_mem << "\n";
+        sched_stats << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
             loopInfo->getHotPath(),
             li2sgmap[loopInfo],
-            Prof::get().beret_cfus(),
-            gams_details,_no_gams,_beret_max_seb,_beret_max_mem);
+            _size_based_cfus ? NULL : Prof::get().beret_cfus(),
+            _gams_details,_no_gams,_beret_max_seb,_beret_max_mem);
+
         if(worked) {
-          std::cerr << " -- Beretized\n";
+          std::cout << ".";
+          std::cout.flush();
+          sched_stats << " -- Beretized\n";
         } else {
+          std::cout << "x";
+          std::cout.flush();
           li2sgmap[loopInfo].reset();
-          std::cerr << " -- NOT Beretized (Probably had Func Calls, or was too big)\n";
+          sched_stats << " -- NOT Beretized (Probably had Func Calls, or was too big)\n";
         }
       } else {
-        std::cerr << " -- NOT Beretized -- did not satisfy criteria\n";
+        sched_stats << " -- NOT Beretized -- did not satisfy criteria\n";
       }
     }
     
@@ -578,6 +595,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             _totalBeretInsts+=index-_curBeretStartInst;
 
             if(replay) {
+              supress_errors(true);
               //Replay BERET on CPU
               for(unsigned i=0; i < replay_queue.size();++i) {
                 CP_NodeDiskImage& img = std::get<0>(replay_queue[i]);
@@ -596,6 +614,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
                 last_replay_cycle=sh_inst->cycleOfStage(Inst_t::Fetch);
               }
               beretEndEv = NULL;
+              supress_errors(false);
             }
             //Done Replaying up to the instruction before the bad instruction!
             //The CPU execution is now caught up.

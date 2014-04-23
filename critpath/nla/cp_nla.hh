@@ -70,7 +70,7 @@ public:
   int  _wb_networks=2;              //impose pipeline constraints on CFU use
 
   void handle_argument(const char *name, const char *arg) {
-    ArgumentHandler::parse("nla-serialize-sgs",        name,arg,_serialize_sgs       );
+    ArgumentHandler::parse("nla-serialize-sgs",        name,arg,_serialize_sgs      );
     ArgumentHandler::parse("nla-issue-inorder",       name,arg,_issue_inorder       );
     ArgumentHandler::parse("nla-cfus-delay-writes",   name,arg,_cfus_delay_writes   );
     ArgumentHandler::parse("nla-cfus-delay-reads",   name,arg,_cfus_delay_reads     );

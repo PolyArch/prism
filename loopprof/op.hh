@@ -185,7 +185,30 @@ public:
   void setIsStack() { _is_stack=true; }
   bool isStack() { return _is_stack; }
 
-  void setIsConstLoad() { _is_const_load=true; }
+  void setIsConstLoad() { 
+    assert(!isSpcMem()); 
+
+    //do this
+    /*if(memHasDataOperand()) {
+      _is_const_load=false;
+      return;
+    }*/
+
+    //also check to make sure that the mem addr is "rdip" insruction
+    for(auto addr_deps : _depsOfInd) {
+      if(!isAddrOperandOfMem(addr_deps.first)) {
+        continue;
+      }
+
+      for(Op* op : addr_deps.second) {
+        if(!op->shouldIgnoreInAccel()) { //checks for rdip
+          _is_const_load=false;
+          return;
+        }
+      }
+    }
+    _is_const_load=true; 
+  }
   bool isConstLoad() { return _is_const_load; }
 
   struct eainfo {
@@ -558,7 +581,7 @@ public:
     for(auto& uop : _uses) {
       //std::cout << "use" << _id << " ";
       if(skipped.count(uop) || uses.count(uop)) {
-        std::cout << skipped.count(uop) << "," << uses.count(uop) << _id << "\n";
+        //std::cout << skipped.count(uop) << "," << uses.count(uop) << _id << "\n";
         continue;
       }
       if(uop->shouldIgnoreInAccel()) {
@@ -753,13 +776,27 @@ public:
          name == std::string("ldbig") ||
          name == std::string("cda") ){
         memHasData=false;
-        std::cout << "WOOOOOOOOO:" <<  ExecProfile::getDisasm(_cpc.first, _cpc.second) <<"\n";
-
       }
       memHasData=true;
     }
     return memHasData;
   } 
+
+  bool _is_spc_mem_cached=false;
+  bool _is_spc_mem=false;
+
+  bool isSpcMem() {
+    static const std::string ldst("ldst");
+
+    if(!_is_spc_mem_cached) {
+      std::string name = getUOPName();
+      _is_spc_mem_cached=true;    
+      if(name.substr(0, ldst.size()) == ldst) {
+        _is_spc_mem=true;
+      }
+    }
+    return _is_spc_mem;
+  }
 
   /*
   enum OperandType {None, Index, Base, Data, SegBase};

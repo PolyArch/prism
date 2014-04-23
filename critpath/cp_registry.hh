@@ -258,6 +258,10 @@ public:
     }
   }
 
+  std::string run_name() {
+    return _run_name;
+  }
+
   void setupOptions(std::vector<struct option>& long_options,
                     struct option *static_long_options) {
     unsigned i = 0;
