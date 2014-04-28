@@ -648,7 +648,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
        && loopInfo->getTotalIters() >= 10
        ) {
       stringstream part_gams_str;
-      part_gams_str << "partition." << loopInfo->id() << ".gams";
+      part_gams_str << "partition." << loopInfo->id();
 
       if(size_based_cfus) {
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),

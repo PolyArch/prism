@@ -323,6 +323,7 @@ namespace DySER {
                   InstPtr tmpInst = createInst(op->img, 0, op);
                   insert_sliced_inst(SI, op, tmpInst, loopdone);
                   updateInstWithTraceInfo(op, inst, false);
+                  //getCPDG()->addInst(inst, inst->_index); //Tony aded this
                 }
                 insert_sliced_inst(SI, op, inst, loopdone);
                 this->keepTrackOfInstOpMap(inst, op);

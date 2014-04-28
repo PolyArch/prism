@@ -32,32 +32,42 @@ static std::string exec(const char* cmd)
 }
 */
 
+//Note: called grepF for historical purposes only
 static std::string grepF(std::string fname, const char* sval,
                          int lineoff, int field) {
   using namespace boost;
-  std::ifstream infile(fname);
-  std::string line;
-  while (std::getline(infile, line)) {
-    if(line.find(sval) != std::string::npos) {
-      for(int i = 0; i < lineoff-1; ++i) { //increment line offset times
-        std::getline(infile, line);
-      }
 
-      std::istringstream iss(line);
-      char_separator<char> sep(" ");
-      tokenizer<char_separator<char>> tokens(line, sep);
-  
-      int i = 0;
-      for (const auto& t : tokens) {
-        ++i;
-        if(i==field) {
-          return t;
+  //Sometimes, AFS is a total peice of crap.  So, when you open a file, it will just
+  //not work.  Lets try this at least 100 times before we give up.
+
+  for(int i = 0; i < 100; ++i) {
+    std::ifstream infile(fname);
+    std::string line;
+    while (std::getline(infile, line)) {
+      if(line.find(sval) != std::string::npos) {
+        for(int i = 0; i < lineoff-1; ++i) { //increment line offset times
+          std::getline(infile, line);
         }
+  
+        std::istringstream iss(line);
+        char_separator<char> sep(" ");
+        tokenizer<char_separator<char>> tokens(line, sep);
+    
+        int i = 0;
+        for (const auto& t : tokens) {
+          ++i;
+          if(i==field) {
+            return t;
+          }
+        }
+        return std::string("");
       }
-      return std::string("");
     }
+    msleep(200);
   }
-  assert(0);
+  std::cerr << fname << " had issues finding string \"" 
+            << sval << "\"\n";
+  assert(0 && "ERROR OPENING FILE");
   return std::string("ERROR STRING NOT FOUND!");
 }
 /*
@@ -74,16 +84,29 @@ static std::string grepF(std::string &fname, const char* sval,
   return exec(rs.c_str());
 }
 */
+
+static bool is_empty(std::string fname) {
+  std::ifstream infile(fname);
+  return infile.peek() == std::ifstream::traits_type::eof();
+}
+
 static void execMcPAT(std::string& inf, std::string& outf) {
   const char *mcpat = getenv("MCPAT");
   if (!mcpat) {
     mcpat = "mcpat";
     std::string ms = std::string(mcpat) + std::string(" -opt_for_clk 0 -print_level 5 -infile ")
-                   + inf + std::string(" > ") + outf;
+                   + inf + std::string(" > ") + outf + " 2> " + outf + ".err";
     //std::cout << ms << "\n";
-    msleep(200);
-    system(ms.c_str());
-    msleep(200);
+    for(int i = 0; i < 10; i++) {
+      int ret = system(ms.c_str());
+      if(ret==0 && !is_empty(outf)) {
+        return;
+      }
+      if(i%5==0) {
+        std::cerr<<"retrying to make file: " << outf << "\n";
+      }
+      msleep(500);
+    }
 
   }
 }

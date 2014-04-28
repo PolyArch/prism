@@ -1,4 +1,3 @@
-
 #ifndef CP_SIMD_HH
 #define CP_SIMD_HH
 
@@ -59,6 +58,7 @@ namespace simd {
     double  simd_inst_incr_factor = 0.5;
   public:
     cp_simd() : CP_OPDG_Builder<T, E> () {
+      getCPDG()->no_horizon();
     }
 
     virtual ~cp_simd() {}
@@ -444,14 +444,14 @@ namespace simd {
       int nextIterationToPushPipe = 0;
       //std::cout << "\n====== completeSIMDLoopWithIT ======>>>\n";
       // Add trace to the pipe
-      for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();
-           I != E; ++I) {
+      for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();I!=E;++I) {
         Op *op = I->first;
 
         if ((CurLoopIter == (int)vec_len) && emitted.count(op))
           continue;
 
         bool isAccelerated = false;
+        
         if (_simd_full_dataflow && (CurLoopIter >= 4)) {
           isAccelerated = true;
           if (op->bb_pos() == 0 && li->loop_head() == op->bb()) {
@@ -466,6 +466,7 @@ namespace simd {
               }
             }
           }
+          //Tony: I'm really not sure what this does!
           if (curIter != nextIterationToPushPipe)
             continue;
         }

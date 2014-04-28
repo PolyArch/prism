@@ -1,4 +1,3 @@
-
 #ifndef CP_OPDG_BUILDER_HH
 #define CP_OPDG_BUILDER_HH
 
@@ -103,7 +102,7 @@ public:
           || n.hasOperandInsts()))
       return CP_DG_Builder<T, E>::checkRegisterDependence(n);
 
-    if (usePipeDependence()) {
+    if (usePipeDependence()) { //Tony:  HIGHLY QUESTIONABLE!
       const int NumProducer = MAX_SRC_REGS; // X86 dep
       for (int i = 0; i < NumProducer; ++i) {
         unsigned prod = n._prod[i];
@@ -129,6 +128,8 @@ public:
       return n;
     }
 
+    //instructions for operand are stored directly
+    //these are used generally with the loop inst trace
     if (n.hasOperandInsts()) {
       for (auto I = n.op_begin(), IE = n.op_end(); I != IE; ++I) {
         auto inst = *I;
@@ -138,6 +139,7 @@ public:
       return n;
     }
 
+    //This is generally used for LoopInfo based insts
     Op *op = this->getOpForInst(n);
     if (!op) {
       assert(n.hasDisasm() && n.getDisasm() == "dyser_config");
@@ -213,12 +215,15 @@ protected:
   //std::map<Op*, int> _cacheProd;
   std::unordered_map<Op*, bool> _trueCacheProd;
   std::unordered_map<Op*, bool> _ctrlMiss;
+  std::unordered_map<Op*, uint64_t> _latestLoopIdx; //Todo: make this more robust
+
 
   virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
                               const CP_NodeDiskImage &img) {
     _loop_InstTrace.push_back(_InstInfo<Op*, InstPtr, CP_NodeDiskImage>(op,
                                                                         inst,
                                                                         img));
+    _latestLoopIdx[op]=inst->_index;
     aggrLoopInstsStat(op, inst);
   }
 
@@ -233,8 +238,11 @@ protected:
 
       // TODO: do something for _cache_prod
     }
+
     if (op->isCtrl()) {
       // if one missed, simd misses.
+      // Tony: why shouldn't there be no control misses for simd, b/c it
+      // hyperblocks everything?
       if (_ctrlMiss.count(op))
         _ctrlMiss[op] |= inst->_ctrl_miss;
       else
@@ -255,6 +263,7 @@ protected:
                                                      - inst->_mem_prod));
       }
     }
+
   }
 
   virtual void updateInstWithTraceInfo(Op *op, InstPtr inst,
@@ -285,6 +294,10 @@ protected:
         inst->_ctrl_miss = _ctrlMiss[op];
     }
 
+    if(inst->_index==0) {
+      inst->_index=_latestLoopIdx[op];
+    }
+
   }
 
   virtual void cleanupLoopInstTracking() {
@@ -297,6 +310,7 @@ protected:
     _cacheLat.clear();
     _trueCacheProd.clear();
     _ctrlMiss.clear();
+    _latestLoopIdx.clear();
   }
 
   virtual void cleanupLoopInstTracking(LoopInfo *li, unsigned iter) {

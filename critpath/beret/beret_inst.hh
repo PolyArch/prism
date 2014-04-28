@@ -90,7 +90,12 @@ public:
   }
 
   void updateLat(uint16_t lat) {
-    ex_edge->_len=lat;
+    //HACK: see cp_beret.hh
+    if(ex_edge->_len==1) {
+      ex_edge->_len=lat;
+    } else {
+      ex_edge->_len+=lat;
+    }
   }
 
   void updateStLat(uint16_t lat) {

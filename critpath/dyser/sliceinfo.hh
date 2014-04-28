@@ -408,18 +408,28 @@ namespace DySER {
         if (!((*I)->isLoad() || (*I)->isStore()))
           continue;
         if ((*I)->getCoalescedOp() != 0) {
-          std::cout << "mem:" << *I  << "--" << "mem:" << (*I)->getCoalescedOp() << "\n";
+
+          if (dumpIOInfo) { //tony put this here
+            std::cout << "mem:" << *I <<"--"<< "mem:" << (*I)->getCoalescedOp() << "\n";
+          }
+
           if ( (*I) == (*I)->getCoalescedOp() ) {
+
             std::cout << "ACC_SIZE = 0 : ";
             printDasm(*I);
+
           }
           coalescedMemNodes[(*I)->getCoalescedOp()] = *I;
         } else {
           coalescedMemFirstNodes.insert(*I);
         }
       }
-      std::cout << "Number of FirstNodes: " << coalescedMemFirstNodes.size()
-                << "\n";
+
+      if (dumpIOInfo) {
+        //Tony put this here to hide this
+        std::cout << "Number of FirstNodes: " << coalescedMemFirstNodes.size()
+                  << "\n";
+      }
 
     }
 

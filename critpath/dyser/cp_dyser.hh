@@ -261,6 +261,7 @@ namespace DySER {
 
   public:
     cp_dyser(): CP_OPDG_Builder<T, E> () {
+      getCPDG()->no_horizon();
     }
     virtual ~cp_dyser() {}
 
@@ -366,7 +367,7 @@ namespace DySER {
       } else {
         // Create the instruction, but add it to the loop trace.
         // but do not map op <-> inst.
-        InstPtr inst = createInst(img, index, 0);
+        InstPtr inst = createInst(img, index, 0); //Tony: why not add op?
         getCPDG()->addInst(inst, index);
 
         trackLoopInsts(CurLoop, op, inst, img);
@@ -655,6 +656,9 @@ namespace DySER {
             InstPtr inst = createInst(op->img, 0, op);
             // update cache execution delay if necessary
             updateInstWithTraceInfo(op, inst, false);
+            //getCPDG()->addInst(inst, inst->_index); //Tony: added this
+
+
             if (!SI->isInLoadSlice(op)) {
               ++ numInDySER;
             }
@@ -786,6 +790,7 @@ namespace DySER {
         return inst;
       }
 
+      // Computation Slice!
       if (emitDySendForCS && SI->isAInputToDySER(op)) {
         // We are here, if op is an accumulate type instruction.
         // We should insert this op in the loop head itself...

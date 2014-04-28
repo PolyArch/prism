@@ -376,7 +376,21 @@ public:
     }
 
     if(inCCore()) {
+      if(transitioned) {
+        Inst_t* prevInst = getCPDG()->peekPipe(-1);
+        assert(prevInst);
+        T* event_ptr = new T();
+        cur_bb_end.reset(event_ptr);
+        prev_bb_end=cur_bb_end;
+        getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
+                               *cur_bb_end, 8/_ccores_iops, E_CXFR);
+        
+        // _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
+         _startCCoresCycle=cur_bb_end->cycle();
+      }
+
       if(op->shouldIgnoreInAccel()) {
+        createDummy(img,index,op);
         return;
       }
       if(op->plainMove()) {
@@ -384,6 +398,7 @@ public:
         return;
       }
       if(op->isConstLoad()) {
+        createDummy(img,index,op);
         return;
       }
       if(op->isStack()) {
@@ -396,19 +411,6 @@ public:
       getCPDG()->addInst(sh_inst,index);
 
       _totalCCoresInsts++;
-
-      if(transitioned) {
-        Inst_t* prevInst = getCPDG()->peekPipe(-1);
-        assert(prevInst);
-        T* event_ptr = new T();
-        cur_bb_end.reset(event_ptr);
-        getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
-                               *cur_bb_end, 8/_ccores_iops, E_CXFR);
-        
-        // _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
-         _startCCoresCycle=cur_bb_end->cycle();
-
-      }
   
       if(endOfBB(op,img)) {
         //only one memory instruction per basic block
@@ -418,14 +420,23 @@ public:
         
         if(prev_bb_end) {
           getCPDG()->insert_edge(*prev_bb_end,
-                                 *cur_bb_end, 1, E_CSBB); 
+                                 *cur_bb_end, 0, E_CSBB);
+          //uint64_t clean_cycle = prev_bb_end->cycle();
+
           cleanUp(prev_bb_end->cycle()-std::min((uint64_t)1000,prev_bb_end->cycle()));
         }
       }
       addCCoreDeps(sh_inst,img);
+      //make sure this instruction comes after cleaning
+      assert(sh_inst->cycleOfStage(0) >= _latestCleaned);
+      assert(sh_inst->cycleOfStage(1) >= _latestCleaned);
+      assert(sh_inst->cycleOfStage(2) >= _latestCleaned);
+
+
       //have to insert it into the lsq as well
       //after all the deps are determined
       insertLSQ(sh_inst); 
+      
 
       if(sh_inst->_floating) {
         _ccores_fp_ops++;
@@ -500,6 +511,20 @@ private:
     checkLSQSize(inst[CCoresInst::BBReady],inst._isload,inst._isstore);
 
     if(prev_bb_end) {
+
+      T* horizon_event = getCPDG()->getHorizon();
+      uint64_t horizon_cycle = 0;
+      if(horizon_event) {
+        horizon_cycle=horizon_event->cycle();
+      }
+  
+      if(horizon_event && prev_bb_end->cycle() < horizon_cycle) { 
+        getCPDG()->insert_edge(*horizon_event,
+                               *prev_bb_end, 0, E_HORZ);   
+      }
+
+
+
       inst.startBB=prev_bb_end;
       getCPDG()->insert_edge(*prev_bb_end,
                                inst, CCoresInst::BBReady, 0);

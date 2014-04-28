@@ -41,7 +41,8 @@ void Subgraph::checkVec() {
 
 uint32_t LoopInfo::_idcounter=0;
 
-#define MAX_GAMS_SIZE 150
+#define MAX_GAMS_SIZE 100
+#define DONT_EVEN_TRY_GAMS_SIZE 500
 
 void LoopInfo::build_rpo() {
   BB* bb=_head;
@@ -533,7 +534,8 @@ option reslim = 200;
 option threads = 16;
 
 Model sg/all/;
-sg.limrow=10000
+sg.limrow=1
+sg.limcol=1
 solve sg using mip minimizing GOAL;
 
 display Tv.l;
@@ -721,7 +723,8 @@ obj.. interf_edges =e= sum(v,x(v)) + sum(l,on(l))*1 + sum(l$(last_l(l)),ts(l))*1
 *obj.. interf_edges =e= sum(v,x(v)) + sum(l$(last_l(l)),ts(l));
 *obj.. interf_edges =e= sum(l$(last_l(l)),ts(l));
 
-*option limrow = 100;
+option limrow = 1;
+option limcol = 1;
 option optca = 1.9999;
 option optcr = 0.15;
 option reslim = 100;
@@ -814,11 +817,19 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
      CFU_set* cfu_set, bool gams_details,bool no_gams,
      int max_beret_size, int max_mem_ops) {
 
+  static int id=0;
+
+  unsigned orig_size = sgSched.opSet().size();
+  unsigned orig_sgs = sgSched.numSubgraphs();
+
+  if(orig_size==0) {
+   id=0;
+  }
 
   if(cfu_set && !no_gams) {
     //check max size of bb()
     for(auto const& bb : bbVec) {
-      if(bb->len() > 500) {
+      if(bb->len() > DONT_EVEN_TRY_GAMS_SIZE) {
         //std::cerr << "bb too big for cfu scheduling!\n";
         return false;
       }
@@ -826,7 +837,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   }
 
   //Recursive resched if too big -- kind of dumb, but it works for now
-  if(cfu_set && !no_gams && bbVec.size()>1) { //cfu scheduling has no heuristic -- split up into many pgms
+  if(/*cfu_set && *//*!no_gams &&*/ bbVec.size()>1) { //cfu scheduling has no heuristic -- split up into many pgms
     int size=0;
     for(auto const& bb : bbVec) {
       size+=bb->len();
@@ -849,6 +860,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   
         cursize+=bb->len();
         newBBVec.push_back(bb);
+
       }
       //last one
       //std::cout << "aux scheduling, len:" << cursize << "\n";
@@ -858,6 +870,11 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       return worked; //recursively done!  (cheap hack, but w/e)
     }
   }
+
+  ++id;
+  stringstream ids;
+  ids << filename << "." << id << ".gams";
+  filename = ids.str();
 
   std::map<uint32_t, Op*> intOpMap;
   std::stringstream ss;
@@ -1018,12 +1035,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   if(nMemDepOps < countElementsM/max_mem_ops) {
     nMemDepOps = countElementsM/max_mem_ops;
   }
+  
+  //TODO: don't redo gams, just make it check current files
 
-
-  if(!cfu_set) {
+  if(!cfu_set) { //size-based
     printGamsPartitionText(out,opSet.size(),resultfile,
                            fixes.str(),nMemDepOps,max_beret_size,max_mem_ops);
-  } else {
+  } else {       //non-size-based
     printSGPartText(out,resultfile,fixes2.str(),cfu_set);
   }
 
@@ -1034,21 +1052,20 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
   int ops_in_a_subgraph = 0;
 
-  system("rm -rf 225?/");
-
   CFU* curCFU = NULL;
 
   bool gams_attempted=false;
 
   //if it's size based, the size can only go so high
   if(!cfu_set && countOps > MAX_GAMS_SIZE) {
-    std::cerr << "(size too big for size based)";
+    //std::cerr << "(ed)";
   } else if (!no_gams) {
     gams_attempted=true;
     //run gams
+    system((std::string("rm -f ") + std::string("gams/") + resultfile).c_str());
     system((std::string("gams ") + filename + std::string(" mip=gurobi wdir=gams")
       + (!gams_details?string(" lo=2"):string(""))).c_str());
-  
+
     std::ifstream ifs((string("gams/")+resultfile).c_str());
 
     while(ifs.good()) {
@@ -1060,7 +1077,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       char_separator<char> sep(" ");
       tokenizer<char_separator<char>> tokens(line, sep);
 
-      Op* prev_op; //previous op
+      Op* prev_op = NULL; //previous op
       for (const auto& t : tokens) {
         if(subgraph==NULL) {
           subgraph=new Subgraph();
@@ -1108,10 +1125,15 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       std::cerr << "GAMS-FAILED on file: \"" << filename 
                 << "\", falling back to heuristic.  ";
       std::cerr << "(ops sched: " << ops_in_a_subgraph << " / " << countOps << ")\n";
+
+      //maybe it failed because of too many files? ... lets delete temp files so that
+      //nex time it works.
+      system("rm -rf 225?/ &> /dev/null");
     }
 
     if(cfu_set) {
-      assert(0 && "No Heuristic Method For CFU Scheduling");
+      std::cerr << "No Heuristic Method For CFU Scheduling";
+      return false;
     }
 
     int curOp=0;
@@ -1120,9 +1142,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       BB::OpVec::iterator oi,oe;
       for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
         Op* op = *oi;
-        if(!sgSched.opScheduled(op)) {
+        /*if(!sgSched.opScheduled(op)) {
+          continue;
+        }*/
+        if(!opSet.count(op)) {
           continue;
         }
+
         curOp++;
 
         //try to find a good spot
@@ -1130,7 +1156,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         //it must come after all subgraphs with dependencies
         
         //int latestSGInd=0; replace with iterator below
-        SGSched::SubgraphVec::iterator latest_sg;
+        SGSched::SubgraphVec::iterator latest_sg = sgSched.sg_begin();
         //unsigned sg_ind =0;
         bool someDep=false;
         int usesInPath=0;
@@ -1165,6 +1191,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         if(someDep || /*usesInPath*/ true || curOp + max_beret_size > countOps) {
           Subgraph* subgraphFound=NULL;
           //for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) {
+
           for(auto i=latest_sg, e=sgSched.sg_end();i!=e;++i) {
 		    Subgraph* sg = *i;
             if(sg->size() < (unsigned)max_beret_size) {
@@ -1184,6 +1211,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
           }
           if(subgraphFound) {
             subgraphFound->insertOp(op);
+            ops_in_a_subgraph++;
             //op->setSubgraph(subgraphFound);
             continue; //go to next op
           }
@@ -1193,6 +1221,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         subgraph=new Subgraph();
         sgSched.insertSG(subgraph);
         subgraph->insertOp(op);
+        ops_in_a_subgraph++;
       }
     }
 
@@ -1200,7 +1229,10 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
   for(auto op : opSet) {
     sgSched.insertOp(op);
-  }  
+  } 
+  assert(sgSched.numSubgraphs() >= (int)orig_sgs);
+  assert(sgSched.opSet().size() == countOps + orig_size);
+  
   return true;
 }
 

@@ -188,11 +188,11 @@ public:
   void setIsConstLoad() { 
     assert(!isSpcMem()); 
 
-    //do this
-    /*if(memHasDataOperand()) {
+    //do this too to be safe?
+    if(memHasDataOperand()) {
       _is_const_load=false;
       return;
-    }*/
+    }
 
     //also check to make sure that the mem addr is "rdip" insruction
     for(auto addr_deps : _depsOfInd) {
@@ -501,6 +501,15 @@ private:
     _adjUses.clear();
   }
 
+  bool has_use_outside_func() {
+    for(Op* use_op : _uses) {
+      if(use_op->func() != func()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   //Ignore op if it has no deps, or if it's a limm of some sort
   bool _cached_ignore=false;
   bool _cached_ignore_valid=false;
@@ -513,9 +522,10 @@ private:
     //}
     if(checkDisasmHas(this, "lfpimm") ||
        checkDisasmHas(this, "limm") ||
-       checkDisasmHas(this, "rdip")
-       ) {
-      return true;
+       checkDisasmHas(this, "rdip") ) {
+      if(!has_use_outside_func()) {
+        return true;
+      }
     }
     return false;
   }
@@ -526,7 +536,12 @@ private:
   bool _plainMove() {
      if(checkDisasmHas(this, "mov2fpsimp") ||
         checkDisasmHas(this, "movsimp")) {
-       return true;
+
+       //we must aslo make sure that we don't read the destination.
+       //TODO: is this too conservative?
+       if(_depsOfInd.size() <= 1) {
+         return true;
+       } 
      }
      return false;
   }

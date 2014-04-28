@@ -2094,6 +2094,9 @@ protected:
     return n;
   }
 
+  std::unordered_map<Op*,int> dummies_dep;
+  std::unordered_map<Op*,int> errors_dep;
+
   //Cache Line Producer
   virtual void checkPP(Inst_t &n) {
     //lets only do this for loads
@@ -2103,7 +2106,30 @@ protected:
       uint64_t cache_prod = n._cache_prod;
 
       if (cache_prod > 0 && cache_prod < n.index()) {
+        if(!getCPDG()->hasIdx(n.index()-cache_prod)) {
+          if(!errors_dep.count(n._op)) {
+            std::cerr << "ERROR: Cache Prod MISSING!: ";
+            if(n._op) {
+              std::cerr << n._op->dotty_name();
+            } else {
+              std::cerr <<"no op->id()";
+            }
+            std::cerr << "\n";
+          }
+          errors_dep[n._op]++;
+          return;
+        }
+
         BaseInst_t& depInst = getCPDG()->queryNodes(n.index()-cache_prod);
+
+        if(depInst.isDummy()) {
+          if(!dummies_dep.count(depInst._op)) {
+            std::cerr << "Dummy Dep: "  << n._op->dotty_name()
+                      << " -> "   << depInst._op->dotty_name() << "\n";
+          }
+          dummies_dep[depInst._op]++;
+          return;
+        }
 
         if(depInst._isload) {
           getCPDG()->insert_edge(depInst, depInst.memComplete(),
@@ -2257,8 +2283,8 @@ protected:
     //uint64_t intOps=committed_int_insts;
 
     sa(core_node,"total_instructions",(uint64_t)(committed_insts*specFactor));
-    sa(core_node,"int_instructions",(uint64_t)(int_ops*specFactor));
-    sa(core_node,"fp_instructions",(uint64_t)(fp_ops*specFactor));
+    sa(core_node,"int_instructions",(uint64_t)(committed_int_insts*specFactor));
+    sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts*specFactor));
     sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts*highSpecFactor));
     sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions*sixteenthSpecFactor));
     sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*fourthSpecFactor));
@@ -2312,12 +2338,12 @@ protected:
 
     sa(core_node,"function_calls",(uint64_t)(func_calls*specFactor));
 
-    sa(core_node,"ialu_accesses",(uint64_t)(committed_int_insts*specFactor));
-    sa(core_node,"fpu_accesses",(uint64_t)(committed_fp_insts*specFactor));
+    sa(core_node,"ialu_accesses",(uint64_t)(int_ops*specFactor));
+    sa(core_node,"fpu_accesses",(uint64_t)(fp_ops*specFactor));
     sa(core_node,"mul_accesses",(uint64_t)(mult_ops*specFactor));
 
-    sa(core_node,"cdb_alu_accesses",(uint64_t)(committed_int_insts*specFactor));
-    sa(core_node,"cdb_fpu_accesses",(uint64_t)(committed_fp_insts*specFactor));
+    sa(core_node,"cdb_alu_accesses",(uint64_t)(int_ops*specFactor));
+    sa(core_node,"cdb_fpu_accesses",(uint64_t)(fp_ops*specFactor));
     sa(core_node,"cdb_mul_accesses",(uint64_t)(mult_ops*specFactor));
 
     // ---------- icache --------------
@@ -2336,6 +2362,7 @@ protected:
     if(op->isFloating()) {
       fp_ops++;
     } else if (op->opclass()==2) {
+      int_ops++;
       mult_ops++;
     } else {
       int_ops++;

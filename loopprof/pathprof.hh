@@ -484,7 +484,59 @@ public:
   FuncMap::iterator fbegin() {return _funcMap.begin();}
   FuncMap::iterator fend() {return _funcMap.end();}
 
-  //look up the stack, see if f
+
+  //look up the entire stack, find the "biggest" ccore available
+  //not used, but w/e
+  std::pair<LoopInfo*,FunctionInfo*> upStack(Op* op,
+                                            std::set<FunctionInfo*>& fiSet, 
+                                            std::set<LoopInfo*>& liSet) {
+
+    //FunctionInfo* cur_fi = op->func_info();
+    //assert(fi);
+    //LoopInfo* cur_li = cur_fi->innermostLoopFor(op->bb());
+    Op* cur_op = op;
+
+    LoopInfo* li_option;
+    FunctionInfo* fi_option;
+
+    for(auto i=_callStack.rbegin(),e=_callStack.rend();i!=e;) {
+      StackFrame& sf = *i;
+      FunctionInfo* fi = sf.funcInfo();
+      assert(cur_op->func() == fi);
+
+      LoopInfo* cur_li = fi->innermostLoopFor(cur_op->bb());
+      while((cur_li = cur_li->parentLoop())) {
+        if(liSet.count(cur_li)) {
+          li_option=cur_li;
+          fi_option=NULL;
+        }
+      }      
+      if(fiSet.count(fi)) {
+        li_option=NULL;
+        fi_option=fi;
+      }
+
+      //peek up the call stack
+      i++;
+      if(i==e) {
+        break;
+      }
+      StackFrame& up_sf = *i;
+      FunctionInfo* up_fi = up_sf.funcInfo();
+
+      std::vector<Op*> op_vec = up_fi->opsWhichCalledFunc(fi);
+      if(op_vec.size()==0) {
+        break;
+      } else { //should I check if only one?  otherwise i could get a bad ccore
+        cur_op = op_vec[0]; 
+      }
+    }
+    return std::make_pair(li_option, fi_option);
+  }
+
+
+
+  //looks down the stack, stops when finds something
   std::pair<LoopInfo*,FunctionInfo*> findEntry(Op* op,
                                             std::set<FunctionInfo*>& fiSet, 
                                             std::set<LoopInfo*>& liSet) {

@@ -184,6 +184,19 @@ public:
     //std::cout << fi->nice_name() << " called " << this->nice_name() << "\n";
   }
 
+  std::vector<Op*> opsWhichCalledFunc(FunctionInfo* fi) {
+    std::vector<Op*> ops;
+    for(const auto& iter : _calledToMap) {
+      Op* op = iter.first.first;
+      FunctionInfo* fi_cand = iter.first.second;
+
+      if(fi_cand) {
+        ops.push_back(op);
+      }
+    }
+    return ops;
+  }
+
   void calledByOp(FunctionInfo* fi,Op* op) {
     _calledByMap[op]++;
     fi->_calledToMap[std::make_pair(op,this)]++;

@@ -121,8 +121,7 @@ public:
   
   dg_edge_impl_t(TPtr src, TPtr dest, unsigned len, unsigned type = E_NONE)
     : _src(src), _dest(dest), _len(len), _type(type) {}
-  virtual ~dg_edge_impl_t() {}
-
+  virtual ~dg_edge_impl_t() {}  
   TPtr dest() { return _dest;}
   TPtr src() { return _src;}
   int length() { return _len;}
@@ -797,6 +796,7 @@ public:
   virtual void pushPipe(std::shared_ptr<Inst_t> dg) = 0;
   virtual void done(std::shared_ptr<Inst_t> dg) = 0;
 
+  virtual void no_horizon() = 0;
 
   virtual void commitNode(uint64_t index)  = 0;
   virtual void finish(uint64_t index) = 0;
@@ -805,7 +805,8 @@ public:
 
 
 // Implementation for the entire graph
-#define BSIZE 4096 //max number of insts to keep for data/mem dependence
+#define BSIZE 8192 //max number of insts to keep for data/mem dependence
+#define HSIZE 6356
 #define PSIZE  512 //max number in-flight instructions, biggest ROB size
 
 template<typename Inst_t, typename T, typename E>
@@ -860,7 +861,11 @@ public:
     if(_vec[vec_ind]==NULL) {
       return false;
     }
-    return _vec[vec_ind]->_index == idx;
+    return true; //_vec[vec_ind]->_index == idx;  this is not necessarily true...
+  }
+
+  void no_horizon() {
+    horizon_failed=true;
   }
 
   dg_inst_base<T,E>& queryNodes(uint64_t idx) {
@@ -916,13 +921,12 @@ public:
       assert(queryInst(_horizonInst->index()) == _horizonInst); 
       //make sure we still have the instruction
 
-
       uint64_t highest_hor_cand=0; //these two for debugging
       int num_iters=0;
 
       //iterate until we find a new horizon with appropriate inception time
       for(uint64_t horizonIndex = min_index; 
-          horizonIndex < min_index + BSIZE;++horizonIndex) {
+         horizonIndex < min_index + BSIZE; ++horizonIndex) {
          num_iters++; 
          dg_inst_base_ptr new_hor_inst = _vec[horizonIndex%BSIZE];
          if(!new_hor_inst || new_hor_inst->isDummy()) {
@@ -942,7 +946,7 @@ public:
                      << "(" << horizonCycle << "to " << new_hor_cycle
                      << "; iters=" << num_iters << ")\n";
            }
-
+           assert(_horizonInst != new_hor_inst);
            _horizonInst = new_hor_inst;
            return;
          }
@@ -958,6 +962,7 @@ public:
                   << "inst: " << _horizonInst->getDisasm() << "\n";
         horizon_failed=true;
         _horizonInst=NULL;
+        return;
       }
       assert(0);
    }
@@ -990,18 +995,22 @@ public:
     //Not forcing this anymore
     //assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
     assert(index + BSIZE >= _latestIdx);
-    if(_horizonInst==NULL) {
-      _horizonInst=dg;
-    }
+    //assert(index == dg->_index);
 
     int vec_ind = index%BSIZE;
     //if (_vec[vec_ind].get() != 0) {
     //  remove_instr(_vec[vec_ind].get());
     //}
-    if((index>=BSIZE && index > _latestIdx) ) {
-      updateHorizon(index-BSIZE);
-      //std::cout << "horizon = " << _horizonCycle << "\n";
-      assert(_horizonInst->index() > (index-BSIZE));
+    if(!horizon_failed) {
+      if(_horizonInst==NULL) {
+        _horizonInst=dg;
+      }
+
+      if((index>=HSIZE && index > _latestIdx) ) {
+        updateHorizon(index-HSIZE);
+        //std::cout << "horizon = " << _horizonCycle << "\n";
+        assert(_horizonInst->index() > (index-HSIZE));
+      }
     }
 
     _latestIdx=index;

@@ -1,7 +1,7 @@
 CC := /s/gcc-4.8.1/bin/gcc
 CXX := /s/gcc-4.8.1/bin/g++
 
-OPT = -O0
+OPT = -O3
 
 GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
 -include ../make.config
