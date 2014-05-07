@@ -501,30 +501,61 @@ public:
     return 0; 
   }
 
-  std::set<Op*> not_stack_op, stack_op;
+  std::set<Op*> not_stack_op;
+  std::map<Op*,std::set<Op*>> st2ld_map;
+  std::map<Op*,Op*> ld2st_map;
+
   void not_stack_candidate(Op* op) {
     //remove op from being a candidate
     not_stack_op.insert(op);
   }
 
-  void add_stack_candidate(Op* op) {
-    stack_op.insert(op);
+  void add_stack_candidate(Op* ld_op, Op* st_op) {
+    assert(ld_op->isLoad() && st_op->isStore());
+    st2ld_map[st_op].insert(ld_op);
+    if(ld2st_map.count(ld_op)) {
+      if(ld2st_map[ld_op]!=st_op) {
+        not_stack_candidate(ld_op);
+        not_stack_candidate(st_op);
+      }
+    } else {
+      ld2st_map[ld_op]=st_op;
+    }
   }
 
   void setStackOps() {
-    for(auto op : stack_op) {
-      if(not_stack_op.count(op)==0) {
-        op->setIsStack();
-        //std::cout << "is stack:";
-        //if(op->isLoad()) {
-        //  std::cout << "load ";
-        //}
-        //if(op->isStore()) {
-        //  std::cout << "store ";
-        //}
-        //std::cout << op->id() << "\n";
-      }
+    //poison everything
+
+    unsigned orig_num_not_stack=0;
+    do {
+      orig_num_not_stack=not_stack_op.size();
+      for(Op* ns_op : not_stack_op) {
+        if(ns_op->isStore()) {
+          if(st2ld_map.count(ns_op)) {
+            //invalidate corresponding loads
+            for(Op* ld_op : st2ld_map[ns_op]) {
+              not_stack_candidate(ld_op);
+            }
+            st2ld_map.erase(ns_op);
+          }
+        } else if (ns_op->isLoad()) {
+          if(ld2st_map.count(ns_op)) {
+            not_stack_candidate(ld2st_map[ns_op]);
+            ld2st_map.erase(ns_op);            
+          }
+        } else {assert(0);}
+      } 
+    } while(orig_num_not_stack != not_stack_op.size());
+
+    for(auto iter : st2ld_map) {
+      Op* st_op = iter.first;
+      st_op->setIsStack();
     }
+    for(auto iter : ld2st_map) {
+      Op* ld_op = iter.first;
+      ld_op->setIsStack(iter.second);
+    }
+
   }
 
   arg_op_iterator arg_op_begin() { return _argsMap.begin(); }

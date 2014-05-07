@@ -398,7 +398,7 @@ public:
         return;
       }
       if(op->isConstLoad()) {
-        createDummy(img,index,op);
+        createDummy(img,index,op,dg_inst_dummy<T,E>::DUMMY_CONST_LOAD);
         return;
       }
       if(op->isStack()) {
@@ -408,6 +408,8 @@ public:
 
       CCoresInst* cc_inst = new CCoresInst(img,index,op);
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
+      keepTrackOfInstOpMap(sh_inst,op);
+
       getCPDG()->addInst(sh_inst,index);
 
       _totalCCoresInsts++;
@@ -452,13 +454,12 @@ public:
         inCCore=false;
       }*/
     } else {
-      Inst_t* inst = new Inst_t(img,index,op);
-      std::shared_ptr<Inst_t> sh_inst(inst);
+      InstPtr sh_inst = createInst(img,index,op);
       getCPDG()->addInst(sh_inst,index);
       if(transitioned) { 
         if(cur_bb_end) {
           getCPDG()->insert_edge(*cur_bb_end,
-              *inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
+              *sh_inst, Inst_t::Fetch, 4/_ccores_iops, E_CXFR);
           uint64_t endCCoresCycle=cur_bb_end->cycle();
           _totalCCoresCycles+=endCCoresCycle-_startCCoresCycle;
           _startCCoresCycle=0;
@@ -557,7 +558,7 @@ private:
 
       if(error && error_with_dummy_inst==false) {
         error_with_dummy_inst=true;
-        std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << inst->_op->id() << "\n";
+        std::cerr << "ERROR: Some problem with dummy inst" << inst->_op->id() << "\n";
       }
       if(out_of_bounds) {
         continue;

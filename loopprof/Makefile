@@ -1,5 +1,5 @@
-CC := /s/gcc-4.8.1/bin/gcc
-CXX := /s/gcc-4.8.1/bin/g++
+CC := /s/gcc-4.8.2/bin/gcc
+CXX := /s/gcc-4.8.2/bin/g++
 
 OPT = -O3
 

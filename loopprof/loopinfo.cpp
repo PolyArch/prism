@@ -746,6 +746,13 @@ straighten2,
 obj/;
 
 )HERE";
+
+    //FIXME/TODO/OMG:  These two lines seem to fix something about the here docs on
+    //my implementation of gcc?  I really don't know what's going on, but without
+    //them, the text printed is a series of @ symbols.  WEIRD.
+    stringstream text_ss;
+    text_ss << text;
+
     out << text;
     out << fixes;
     out << "solve partition using mip minimizing interf_edges;\n";

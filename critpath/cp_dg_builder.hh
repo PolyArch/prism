@@ -246,37 +246,87 @@ protected:
     getCPDG()->addInst(dummy_inst,index);
   }
 
+  std::unordered_set<Op*> dummy_cycles;
+
+
+  dg_inst_base<T,E>* fixDummyInstruction(dg_inst_base<T,E>* depInst, 
+                                         bool& out_of_bounds, bool& error) {
+    std::set<Op*> seen_dummies;
+    return fixDummyInstruction(depInst,out_of_bounds,error,seen_dummies); 
+  }
 
 
   //puts the correct instruction here
   //returns true if there is an error
   dg_inst_base<T,E>* fixDummyInstruction(dg_inst_base<T,E>* depInst, 
-                                         bool& out_of_bounds, bool& error) {
+                                         bool& out_of_bounds, bool& error,
+                                         std::set<Op*>& seen_dummies) {
+    seen_dummies.insert(depInst->_op);
+
     if(depInst->isDummy()) {
       auto dummy_inst = dynamic_cast<dg_inst_dummy<T,E>*>(depInst);
       unsigned dummy_prod=0;
 
+      dg_inst_base<T,E>* retInst=NULL;
+
       if(dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_STACK_SLOT) { 
         //dummy through memory
         if(dummy_inst->_isload) {
-          error |= dummy_inst->getMemProd(dummy_prod);
+          //error |= dummy_inst->getMemProd(dummy_prod);
+          assert(depInst->_op && depInst->_op->isStack());
+          Op* st_op = depInst->_op->storeForStackLoad();
+          assert(st_op->isStack());
+          retInst = getInstForOp(st_op).get();
+          assert(retInst);
         } else {
           error |= dummy_inst->getDataProdOfStore(dummy_prod);
+          if (dummy_prod ==0 || dummy_prod >= dummy_inst->index() || 
+              !getCPDG()->hasIdx(dummy_inst->index()-dummy_prod)) {
+            out_of_bounds|=true;
+            return NULL;
+          }
+          retInst = &(getCPDG()->queryNodes(dummy_inst->index()-dummy_prod));
         }
       } else if (dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_MOVE) { 
-        //dummy through data
+        //dummy through data, use dynamic trace
         error |= dummy_inst->getProd(dummy_prod);
-      }
-
-      if (dummy_prod ==0 ||
-          dummy_prod >= dummy_inst->index() || 
-          !getCPDG()->hasIdx(dummy_inst->index()-dummy_prod)) {
+        if (dummy_prod ==0 || dummy_prod >= dummy_inst->index() || 
+            !getCPDG()->hasIdx(dummy_inst->index()-dummy_prod)) {
+          out_of_bounds|=true;
+          return NULL;
+        }
+        retInst = &(getCPDG()->queryNodes(dummy_inst->index()-dummy_prod));
+      } else if (dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_MOVE) { 
         out_of_bounds|=true;
         return NULL;
       }
 
-      dg_inst_base<T,E>* retInst = &(getCPDG()->queryNodes(dummy_inst->index()-dummy_prod));
-      return fixDummyInstruction(retInst,out_of_bounds,error);
+
+/*
+      if(retInst && seen_dummies.count(retInst->_op)) {
+        //found a cycle
+        if(!dummy_cycles.count(retInst->_op)) {
+          std::cerr << "Found dummy cycle: ";
+          for(Op* op : seen_dummies) {
+            std::cerr << op->dotty_name() << " ";
+          }
+          std::cerr << "\n";
+        }
+        for(Op* op : seen_dummies) {
+          dummy_cycles.insert(op);
+        }
+        out_of_bounds|=true;
+        return NULL;
+      }
+*/
+      if(retInst) {
+        if(retInst->index() > dummy_inst->index()) {
+          out_of_bounds|=true;
+          return NULL;
+        }
+      }
+
+      return fixDummyInstruction(retInst,out_of_bounds,error,seen_dummies);
     }
     return depInst;
   }

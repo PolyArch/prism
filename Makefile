@@ -55,5 +55,11 @@ clean:
 	+make -C critpath/nla clean
 	+make -C critpath -f Makefile.static clean
 
-static: cp
+
+static: cp nla base simd dyser ccores beret super disasm verbose npu
 	+make -C critpath -f Makefile.static
+
+#static: clean
+#	+make -C loopprof
+#	+make -C critpath
+#	+make -C critpath -f Makefile.static

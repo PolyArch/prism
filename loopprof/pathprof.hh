@@ -76,15 +76,18 @@ private:
     if(!onStack(addr)) {
       return;
     }
+    
+    LoopInfo* st_li = _funcInfo->innermostLoopFor(st_op->bb());
+    LoopInfo* ld_li = _funcInfo->innermostLoopFor(ld_op->bb());
 
     if((stack_op_addr.count(st_op) && stack_op_addr[st_op]!=addr) ||
-       (stack_op_addr.count(ld_op) && stack_op_addr[ld_op]!=addr) ||
+       (stack_op_addr.count(ld_op) && stack_op_addr[ld_op]!=addr
+       && st_li == ld_li ) ||
        st_op->isSpcMem() || ld_op->isSpcMem()) {
       _funcInfo->not_stack_candidate(st_op);
       _funcInfo->not_stack_candidate(ld_op);
     } else {
-      _funcInfo->add_stack_candidate(st_op);
-      _funcInfo->add_stack_candidate(ld_op); 
+      _funcInfo->add_stack_candidate(ld_op, st_op);
      // std::cout << "load added: " << ld_op->id() << " " << addr << "\n";
     }
 

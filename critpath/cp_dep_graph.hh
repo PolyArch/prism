@@ -915,11 +915,15 @@ public:
     return;
   }
 
+   bool horizon_warning_printed=false;
+
    void adjustHorizon(uint64_t min_index) {
       uint64_t horizonCycle = _horizonInst->cycleOfStage(_horizonInst->eventInception());
 
-      assert(queryInst(_horizonInst->index()) == _horizonInst); 
-      //make sure we still have the instruction
+      if(horizon_warning_printed==false) {
+        //make sure we still have the instruction
+        assert(queryInst(_horizonInst->index()) == _horizonInst); 
+      }
 
       uint64_t highest_hor_cand=0; //these two for debugging
       int num_iters=0;
@@ -937,7 +941,7 @@ public:
            highest_hor_cand=new_hor_cycle;
          }
 
-         if(new_hor_cycle >= horizonCycle) {
+         if(new_hor_cycle >= horizonCycle && _horizonInst != new_hor_inst) {
            if(0) { //debugging code
            std::cerr << "orig: 0, min: "
                      << (int64_t)min_index - (int64_t)_horizonInst->index();
@@ -946,13 +950,12 @@ public:
                      << "(" << horizonCycle << "to " << new_hor_cycle
                      << "; iters=" << num_iters << ")\n";
            }
-           assert(_horizonInst != new_hor_inst);
            _horizonInst = new_hor_inst;
            return;
          }
       }
       //Horizon Failed! -- Investigate!
-      if(horizon_failed==false) {
+      if(horizon_warning_printed==false) {
         std::cerr << "ERROR, no horizon instruction available! (cycle " 
                   << horizonCycle << ", highest_found:" << highest_hor_cand << ")\n";
         std::cerr << "orig horizon: " << _horizonInst->index() 
@@ -960,11 +963,11 @@ public:
                   << "(diff:" << _latestIdx - _horizonInst->index() << ")\n"
                   << "num iters: " << num_iters << "\n"
                   << "inst: " << _horizonInst->getDisasm() << "\n";
-        horizon_failed=true;
-        _horizonInst=NULL;
+        horizon_warning_printed=true;
+        //why do this?
+        //_horizonInst=NULL;
         return;
       }
-      assert(0);
    }
 
    virtual T* getHorizon() {
@@ -1009,7 +1012,7 @@ public:
       if((index>=HSIZE && index > _latestIdx) ) {
         updateHorizon(index-HSIZE);
         //std::cout << "horizon = " << _horizonCycle << "\n";
-        assert(_horizonInst->index() > (index-HSIZE));
+        //assert(_horizonInst->index() > (index-HSIZE));  -- we are allowing the horizon to get pushed out
       }
     }
 

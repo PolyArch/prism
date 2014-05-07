@@ -71,6 +71,7 @@ private:
   Deps _deps, _uses;
   Deps _memDeps,_cacheDeps,_ctrlDeps;
   Deps _adjDeps, _adjUses;
+  Deps _stackDeps;
 
   std::map<Op*, std::set<unsigned> > _indOfDep;
   std::map<unsigned, Deps> _depsOfInd;
@@ -113,6 +114,7 @@ private:
     //ar & _uses;
     ar & _memDeps;
     ar & _cacheDeps;
+    ar & _stackDeps;
     ar & _opclass;
     ar & temp_flags;
     //ar & _bb; saved in bb, just add it back from bb
@@ -182,8 +184,21 @@ public:
   //Subgraph*     subgraph() {return _subgraph;}
   //void          setSubgraph(Subgraph* sg) {_subgraph=sg;}
 
-  void setIsStack() { _is_stack=true; }
+  void setIsStack() { assert(isStore()); _is_stack=true; }
+  void setIsStack(Op* st_op) { 
+    assert(isLoad());
+    assert(st_op->isStore());
+    _is_stack=true; 
+    _stackDeps.insert(st_op);
+    assert(_stackDeps.size()==1);
+  }
+
   bool isStack() { return _is_stack; }
+  Op* storeForStackLoad() {
+    assert(isLoad());
+    assert(_stackDeps.size()==1);
+    return *(_stackDeps.begin());
+  }
 
   void setIsConstLoad() { 
     assert(!isSpcMem()); 

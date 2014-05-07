@@ -443,6 +443,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         assert(binstMap.count(op));
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
 
+        
         if(opi == sg->opv_begin()) {
           if(commit_iter) {
             T* horizon_event = getCPDG()->getHorizon();
@@ -582,7 +583,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           uint64_t clean_cycle=0;
           if(clean_event) {
             clean_cycle=clean_event->cycle();
-            cleanUp(clean_cycle);
+            if(clean_cycle>1000) {
+              cleanUp(clean_cycle-1000);
+            }
           }
 
           last_iter_switch_cycle=clean_cycle; //for debugging
