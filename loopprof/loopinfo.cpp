@@ -938,7 +938,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   out << "set A(v,v)/";
   std::stringstream fixes,fixes2,streamD,streamM,streamK;
   countElements=0;
-  int countOps=0;
+  unsigned countOps=0;
   int countElementsD=0,countElementsM=0,countElementsK=0;
   int nMemDepOps=0;
   //print graph
@@ -1057,7 +1057,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   Subgraph* subgraph=NULL;
   //Delete 225? Directories
 
-  int ops_in_a_subgraph = 0;
+  unsigned ops_in_a_subgraph = 0;
 
   CFU* curCFU = NULL;
 
@@ -1075,50 +1075,79 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
     std::ifstream ifs((string("gams/")+resultfile).c_str());
 
+    //First just make sure we can read it
+    set<Op*> found_ops;
     while(ifs.good()) {
       using namespace boost;
-  
       std::string line;
       std::getline(ifs,line);
   
       char_separator<char> sep(" ");
       tokenizer<char_separator<char>> tokens(line, sep);
 
-      Op* prev_op = NULL; //previous op
       for (const auto& t : tokens) {
-        if(subgraph==NULL) {
-          subgraph=new Subgraph();
-          sgSched.insertSG(subgraph);
-        }
- 
         string t_post = t.substr(1,string::npos);
-
-        if(t[0] == 's') {
-          uint32_t i = std::stoi(t_post);
-          curCFU=cfu_set->getCFU(i);
-          subgraph->setCFU(curCFU);
-          continue;
-        }
-
-        if(t[0] == 'n') {
-          uint32_t i = std::stoi(t_post);
-          assert(curCFU);
-          assert(prev_op);
-          CFU_node* cfu_node=curCFU->getCFUNode(i);
-          sgSched.setMapping(prev_op,cfu_node,subgraph);
+        if(t[0] == 's' || t[0] == 'n') {
           continue;
         }
 
         uint32_t i = std::stoi(t);
         assert(intOpMap.count(i));
         Op* op = intOpMap[i];
-        assert(op);
-        //op->setSubgraph(subgraph);
-        subgraph->insertOp(op);
-        ops_in_a_subgraph++;
-        prev_op=op;
+        found_ops.insert(op);
       }
-      subgraph=NULL; //reset subgraph for next group
+    }
+
+    ifs.seekg(0,ifs.beg); // seek back to begining to parse file for real
+    if(found_ops.size() != countOps) {
+      ops_in_a_subgraph=found_ops.size();
+    } else {
+
+      while(ifs.good()) {
+        using namespace boost;
+    
+        std::string line;
+        std::getline(ifs,line);
+    
+        char_separator<char> sep(" ");
+        tokenizer<char_separator<char>> tokens(line, sep);
+  
+        Op* prev_op = NULL; //previous op
+        for (const auto& t : tokens) {
+          if(subgraph==NULL) {
+            subgraph=new Subgraph();
+            sgSched.insertSG(subgraph);
+          }
+   
+          string t_post = t.substr(1,string::npos);
+  
+          if(t[0] == 's') {
+            uint32_t i = std::stoi(t_post);
+            curCFU=cfu_set->getCFU(i);
+            subgraph->setCFU(curCFU);
+            continue;
+          }
+  
+          if(t[0] == 'n') {
+            uint32_t i = std::stoi(t_post);
+            assert(curCFU);
+            assert(prev_op);
+            CFU_node* cfu_node=curCFU->getCFUNode(i);
+            sgSched.setMapping(prev_op,cfu_node,subgraph);
+            continue;
+          }
+  
+          uint32_t i = std::stoi(t);
+          assert(intOpMap.count(i));
+          Op* op = intOpMap[i];
+          assert(op);
+          //op->setSubgraph(subgraph);
+          subgraph->insertOp(op);
+          ops_in_a_subgraph++;
+          prev_op=op;
+        }
+        subgraph=NULL; //reset subgraph for next group
+      }
     }
   }
 

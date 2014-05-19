@@ -234,6 +234,7 @@ public:
             _size_based_cfus ? NULL : Prof::get().beret_cfus(),
             _gams_details,_no_gams,_beret_max_seb,_beret_max_mem);
 
+        li2sgmap[loopInfo].checkValid();
         if(worked) {
           std::cout << ".";
           std::cout.flush();

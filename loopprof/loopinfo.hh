@@ -131,7 +131,24 @@ template<class Archive>
 
   int numSubgraphs() {return _subgraphSet.size();}
   bool valid() {return _subgraphSet.size() > 0;}
-  
+ 
+  void checkValid() {
+    std::set<Op*> check_set;
+
+    for(auto i = sg_begin(), e = sg_end(); i!=e; ++i) {
+      Subgraph* sg = *i;
+      
+      for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
+        Op* op = *opi;
+        if(check_set.count(op)) {
+          assert(0 && "already scheduled");
+        }
+        check_set.insert(op);
+      }
+    }       
+    assert(_opset.size() == check_set.size());
+  }
+
   Subgraph* sgForOp(Op* op) {
     return _opSubgraphMap[op];
   } 

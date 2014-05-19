@@ -19,7 +19,9 @@ namespace npu {
     typedef dg_inst<T, E> Inst_t;
     typedef std::shared_ptr<Inst_t> InstPtr;
 
-    cp_npu() : CP_DG_Builder<T, E> () { }
+    cp_npu() : CP_DG_Builder<T, E> () {
+      getCPDG()->no_horizon();
+    }
 
     virtual ~cp_npu() {}
 
