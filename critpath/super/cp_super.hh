@@ -236,11 +236,11 @@ private:
     //resource dependnece
     SuperInst* min_node = static_cast<SuperInst*>(
          addResource(n->_opclass, n->cycleOfStage(SuperInst::Execute), 
-                                   getFUIssueLatency(n->_opclass), 10, n));
+                                   getFUIssueLatency(n->_opclass,n->_op), 10, n));
 
     if(min_node) {
       getCPDG()->insert_edge(min_node->index(), SuperInst::Execute,
-          *n, SuperInst::Execute, getFUIssueLatency(min_node->_opclass),E_FU);
+          *n, SuperInst::Execute, getFUIssueLatency(min_node->_opclass,min_node->_op),E_FU);
     }
 
     //memory dependence
@@ -251,7 +251,7 @@ private:
 
   virtual void checkNumMSHRs(std::shared_ptr<SuperInst>& n) {
     assert(n->_isload || n->_isstore);
-    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+    int ep_lat=epLat(n->_ex_lat,n.get(),n->_isload,n->_isstore,
                   n->_cache_prod,n->_true_cache_prod,true);
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
@@ -285,7 +285,7 @@ private:
       getCPDG()->insert_edge(*inst, SuperInst::Execute,
                              *inst, SuperInst::Complete, st_lat,true);
     } else {
-      int lat=epLat(inst->_ex_lat,inst->_opclass,inst->_isload,
+      int lat=epLat(inst->_ex_lat,inst.get(),inst->_isload,
                     inst->_isstore,inst->_cache_prod,inst->_true_cache_prod,true);
 
       getCPDG()->insert_edge(*inst, SuperInst::Execute,

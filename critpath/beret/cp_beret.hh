@@ -713,7 +713,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         getCPDG()->addInst(sh_inst,index);
 
         //this sets the latency for a beret instruction
-        int lat=epLat(img._cc-img._ec,img._opclass,img._isload,
+        int lat=epLat(img._cc-img._ec,b_inst.get(),img._isload,
                img._isstore,img._cache_prod,img._true_cache_prod,true);
 
         //HACK: Some instructions are internally uop loops... this is annoying.
@@ -749,8 +749,6 @@ private:
   virtual void checkNumMSHRs(std::shared_ptr<BeretInst>& n, uint64_t minT=0) {
     int ep_lat=n->ex_lat();
     
- //epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-               //   n->_cache_prod,n->_true_cache_prod);
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below

@@ -490,6 +490,19 @@ public:
     return _cached_plain_move;
   }  
   
+  char _is_sigmoid=-1;
+  bool is_sigmoid() {
+    if(_is_sigmoid==-1) {
+     uint64_t pc = _cpc.first;
+     int upc = _cpc.second;
+      std::string disasm =  ExecProfile::getDisasm(pc, upc);
+      _is_sigmoid = disasm.find("SIGMOID_SS") != std::string::npos;
+    } 
+    return _is_sigmoid;
+  }
+
+
+
   std::string getUOPName() {
     using namespace boost;
 

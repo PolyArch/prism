@@ -210,7 +210,7 @@ namespace DySER {
       if (prevInst.get() != 0) {
 
         unsigned issueLat = (SI->shouldIncludeInCSCount(op)
-                             ? getFUIssueLatency(op->img._opclass)
+                             ? getFUIssueLatency(op->img._opclass,op)
                              : 0);
         if (issueLat && (op->img._opclass ==  9 || op->img._opclass == 8))
           //override issueLatency for NBody: (fsqrt,fdiv -> rsqrt)
@@ -234,7 +234,7 @@ namespace DySER {
                                       unsigned overrideLat = (unsigned)-1) {
 
       unsigned op_lat = (SI->shouldIncludeInCSCount(op)
-                         ? getFUOpLatency(op->img._opclass)
+                         ? getFUOpLatency(op->img._opclass,op)
                          : 0);
       if (overrideLat != (unsigned)-1)
         op_lat = overrideLat;

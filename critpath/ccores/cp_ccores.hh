@@ -605,7 +605,7 @@ private:
   
 
   virtual void setCompleteCycle_cc(CCoresInst& inst, const CP_NodeDiskImage &img) {
-    int lat=epLat(inst._ex_lat,inst._opclass,inst._isload,
+    int lat=epLat(inst._ex_lat,&inst,inst._isload,
                   inst._isstore,inst._cache_prod,inst._true_cache_prod,true);
 
     getCPDG()->insert_edge(inst, CCoresInst::Execute,
@@ -655,7 +655,7 @@ private:
   }
 
   virtual void checkNumMSHRs(std::shared_ptr<CCoresInst>& n,uint64_t minT=0) {
-    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+    int ep_lat=epLat(n->_ex_lat,n.get(),n->_isload,n->_isstore,
                   n->_cache_prod,n->_true_cache_prod,true);
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 

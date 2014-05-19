@@ -349,7 +349,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           prevMemSubgraph=nla_inst->dynSubgraph;
         }
 
-        int lat=epLat(img._cc-img._ec,img._opclass,img._isload,
+        int lat=epLat(img._cc-img._ec,nla_inst.get(),img._isload,
                       img._isstore,img._cache_prod,img._true_cache_prod,true);
         nla_inst->updateLat(lat);
         int st_lat=stLat(img._xc-img._wc,img._cache_prod,
@@ -536,12 +536,13 @@ private:
           NLAInst* dep_inst = static_cast<NLAInst*>(
                addResource((uint64_t)sg->static_sg->getCFUNode(nla_inst->_op),
                nla_inst->cycleOfStage(NLAInst::Execute),
-               getFUIssueLatency(nla_inst->_op->opclass()), 1, nla_inst));
+               getFUIssueLatency(nla_inst->_op->opclass(),nla_inst->_op), 1, nla_inst));
   
           if (dep_inst) {
             getCPDG()->insert_edge(*nla_inst, NLAInst::Execute,
                                    *dep_inst, NLAInst::Execute, 
-                                   getFUIssueLatency(dep_inst->_op->opclass()),E_FU);
+                                   getFUIssueLatency(dep_inst->_op->opclass(),
+                                     dep_inst->_op),E_FU);
           }
         }
 
@@ -549,15 +550,16 @@ private:
         //TODO: Should we add another event for loads/stores who?
         if(nla_inst->_isload && nla_inst->_isstore) {
           int fuIndex = fuPoolIdx(nla_inst->_opclass);
-          int maxUnits = getNumFUAvailable(nla_inst->_opclass); //opclass
+          int maxUnits = getNumFUAvailable(nla_inst->_opclass,nla_inst->_op); //opclass
           Inst_t* min_node = static_cast<Inst_t*>(
                addResource(fuIndex, nla_inst->cycleOfStage(Inst_t::Execute), 
-                           getFUIssueLatency(nla_inst->_opclass), maxUnits, nla_inst));
+                           getFUIssueLatency(nla_inst->_opclass,nla_inst->_op),
+                                              maxUnits, nla_inst));
       
           if (min_node) {
             getCPDG()->insert_edge(*min_node, NLAInst::Execute,
                               *nla_inst, NLAInst::Execute, 
-                              getFUIssueLatency(nla_inst->_opclass),E_FU);
+                              getFUIssueLatency(nla_inst->_opclass,nla_inst->_op),E_FU);
           }
         }
 
@@ -636,8 +638,6 @@ private:
   virtual void checkNumMSHRs(std::shared_ptr<NLAInst>& n, uint64_t minT=0) {
     int ep_lat=n->ex_lat();
     
- //epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
-               //   n->_cache_prod,n->_true_cache_prod);
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below

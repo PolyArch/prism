@@ -1671,10 +1671,14 @@ protected:
   }
 
   virtual unsigned getNumFUAvailable(Inst_t &n) {
-    return getNumFUAvailable(n._opclass);
+    return getNumFUAvailable(n._opclass,n._op);
   }
 
-  virtual unsigned getNumFUAvailable(uint64_t opclass) {
+  virtual unsigned getNumFUAvailable(uint64_t opclass, Op* op) {
+    if(op && op->is_sigmoid()) {
+      return 1;
+    }
+
     if(opclass > 50) {
       return 1;
     }
@@ -1707,7 +1711,11 @@ protected:
     return 4; //and this!
   }
 
-  virtual unsigned getFUIssueLatency(int opclass) {
+  virtual unsigned getFUIssueLatency(int opclass, Op* op) {
+    if(op && op->is_sigmoid()) {
+      return 8;
+    }
+
     switch(opclass) {
     case 0: //No_OpClass
       return 1;
@@ -1737,7 +1745,11 @@ protected:
     return 1;
   }
 
-  static unsigned getFUOpLatency(int opclass) {
+  static unsigned getFUOpLatency(int opclass,Op* op) {
+    if(op && op->is_sigmoid()) {
+      return 8;
+    }
+
     switch(opclass) {
     case 0: //No_OpClass
       return 1;
@@ -1803,8 +1815,9 @@ protected:
 
 
   //KNOWN_HOLE: SSE Issue Latency Missing
+  //shouldn't matter though, as we always use scalar inputs
   virtual unsigned getFUIssueLatency(Inst_t &n) {
-    return getFUIssueLatency(n._opclass);
+    return getFUIssueLatency(n._opclass,n._op);
   }
 
   //Check Functional Units to see if they are full
@@ -1818,7 +1831,7 @@ protected:
     }
     
     int fuIndex = fuPoolIdx(inst->_opclass);
-    int maxUnits = getNumFUAvailable(inst->_opclass); //opclass
+    int maxUnits = getNumFUAvailable(*inst); //opclass
     Inst_t* min_node = static_cast<Inst_t*>(
          addResource(fuIndex, inst->cycleOfStage(Inst_t::Execute), 
                                    getFUIssueLatency(*inst), maxUnits, inst));
@@ -1853,7 +1866,7 @@ protected:
 
   //check MSHRs to see if they are full
   virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
-    int ep_lat=epLat(n->_ex_lat,n->_opclass,n->_isload,n->_isstore,
+    int ep_lat=epLat(n->_ex_lat,n.get(),n->_isload,n->_isstore,
                   n->_cache_prod,n->_true_cache_prod,n->isAccelerated);
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,
                      n->isAccelerated);
@@ -2074,7 +2087,7 @@ protected:
   }
 
   //logic to determine ep latency based on information in the trace
-  int epLat(int ex_lat, int opclass, bool isload, bool isstore, 
+  int epLat(int ex_lat, BaseInst_t* inst, bool isload, bool isstore, 
             bool cache_prod, bool true_cache_prod, bool isAccelerator) {
     //memory instructions bear their memory latency here.  If we have a cache
     //producer, that means we should be in the cache, so drop the latency
@@ -2089,7 +2102,8 @@ protected:
     } else {
       //don't want to use this dynamic latency
       //lat = n._ex_lat;
-      lat = getFUOpLatency(opclass);
+      //lat = getFUOpLatency(opclass);
+      lat = getFUOpLatency(inst->_opclass,inst->_op);
     }
 
     if( (applyMaxLatToAccel && isAccelerator ) ||
@@ -2111,7 +2125,7 @@ protected:
   //==========COMPLTE ==============
   //Complete After Execute
   virtual Inst_t &checkEP(Inst_t &n) {
-    int lat = epLat(n._ex_lat,n._opclass,n._isload,
+    int lat = epLat(n._ex_lat, &n, n._isload,
                     n._isstore,n._cache_prod,n._true_cache_prod,
                     n.isAccelerated);
 
