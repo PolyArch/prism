@@ -167,7 +167,9 @@ public:
     Inst_t& inst =
       static_cast<Inst_t&>(getCPDG()->queryNodes(index));
 
-    outs() << index + Prof::get().skipInsts << ": ";
+    outs() << index + Prof::get().skipInsts;
+    outs() << "<op" << op->id() << ">";
+    outs() << ": ";
     outs() << inst.cycleOfStage(0) << " ";
     outs() << inst.cycleOfStage(1) << " ";
     outs() << inst.cycleOfStage(2) << " ";
@@ -1642,7 +1644,11 @@ protected:
   //Execution follows Ready
 
   //get index for fuPool
-  virtual int fuPoolIdx(int opclass1) {
+  virtual int fuPoolIdx(int opclass1, Op* op) {
+    if(op && op->is_sigmoid()) {
+      return 100;
+    }
+
     if (opclass1 > 9 && opclass1 < 30) {
       return 0;
     }
@@ -1830,7 +1836,7 @@ protected:
       return;
     }
     
-    int fuIndex = fuPoolIdx(inst->_opclass);
+    int fuIndex = fuPoolIdx(inst->_opclass, inst->_op);
     int maxUnits = getNumFUAvailable(*inst); //opclass
     Inst_t* min_node = static_cast<Inst_t*>(
          addResource(fuIndex, inst->cycleOfStage(Inst_t::Execute), 

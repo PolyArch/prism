@@ -44,7 +44,7 @@ class stackDep {
 
 struct MemDep {
   uint32_t dId;
-  Op* st_op;
+  Op* op;
 };
 
 class StackFrame {
@@ -68,7 +68,9 @@ private:
   bool _isDirectRecursing=false;
 
   std::unordered_map<Op*,uint64_t> stack_op_addr;
-  std::unordered_map<uint64_t,MemDep> giganticMemDepTable;
+  std::unordered_map<uint64_t,MemDep> giganticMemDepTable;  //who last wrote this
+  std::unordered_map<uint64_t,MemDep> giganticMemLoadTable; //who last read this
+
 
   void checkIfStackSpill(Op* st_op, Op* ld_op, uint64_t addr) {
     assert(st_op && ld_op);
@@ -104,7 +106,7 @@ public:
 
   StackFrame(FunctionInfo* fi, uint32_t dId) : _funcInfo(fi), _prevBB(NULL), _pathIndex(0) {
     //create dummy _iterStack for non-loops
-    _iterStack.emplace_back(new LoopIter(_loopStack));
+    _iterStack.emplace_back(new LoopIter(_loopStack,fi->instance_num()));
     //also, put a marker in the _iterMap, at the begining
     _iterMap.emplace(std::piecewise_construct,
                      std::forward_as_tuple(dId),
@@ -157,7 +159,7 @@ public:
   }
   bool isDirectRecursing() {return _isDirectRecursing;}
 
-  void dyn_dep(Op* op, uint32_t ind, bool isMem);
+  void dyn_dep(Op* dep_op, Op* op, uint64_t dep_dId, uint64_t did, bool isMem);
 
   //Process op, determine if it is a bb or not
   Op* processOp_phase2(uint32_t dId, CPC cpc,uint64_t addr, uint8_t acc_size);

@@ -496,7 +496,7 @@ public:
      uint64_t pc = _cpc.first;
      int upc = _cpc.second;
       std::string disasm =  ExecProfile::getDisasm(pc, upc);
-      _is_sigmoid = disasm.find("SIGMOID_SS") != std::string::npos;
+      _is_sigmoid = disasm.find("SIGMOID") != std::string::npos;
     } 
     return _is_sigmoid;
   }
@@ -717,6 +717,7 @@ public:
     } 
 
     out << ":" << opname(opclass());
+    out << "-" << avg_lat();
     //out << ")";
     return out.str();
   }

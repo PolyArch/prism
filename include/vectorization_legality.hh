@@ -15,6 +15,7 @@ class VectorizationLegality {
   std::map<LoopInfo *, bool> hasNonStridedMemAccessMap;
 
 protected:
+public: //screw this multi-inheritance nonsense  : )
 
   LoopInfo *getLoop(Op *op,
                     bool prevInstAReturn = false, LoopInfo *stack_loop = 0) {
@@ -80,10 +81,67 @@ protected:
           if (hasNonStridedMemAccess)
             vectorizableMemAccess = false;
         }
-
         // FIXME:: we do not handle non strided stores yet.
         if ((*I)->isStore() && hasNonStridedMemAccess)
           vectorizableMemAccess = false;
+
+      }
+    }
+
+    #if 0
+    if(!old_loop_dep) {
+      vectorizableMemAccess = false;
+    }
+    #endif
+
+    if(!li->isLoopFullyParallelizable()) {
+      vectorizableMemAccess=false;
+    }
+
+    hasVectorizableMemAccessMap.insert(std::make_pair(li,
+                                                      vectorizableMemAccess));
+    hasNonStridedMemAccessMap.insert(std::make_pair(li,
+                                                    hasNonStridedMemAccess));
+    return vectorizableMemAccess;
+  }
+
+  // Can we vectorize the loop?
+  // clients override this
+  virtual bool canVectorize(LoopInfo *li,
+                            bool nonStrideAccessLegal,
+                            double acceptableIncrFactor) {
+    // no loop.
+    if (!li)
+      return false;
+
+    // no inner loop.
+    if (!li->isInnerLoop()) {
+      return false;
+    }
+
+    // if control flow is going to increase number of instructions too much,
+    // skip the loop from vectorization
+    if (!li->isSuperBlockProfitable(acceptableIncrFactor))
+      return false;
+
+    bool vec_mem = hasVectorizableMemAccess(li, nonStrideAccessLegal);
+    /*if(vec_mem) {
+      std::cout << "Loop" << li->id() << " is vectorizable!";
+    }*/
+    return vec_mem;
+  }
+
+  //Venkat's method for loop dependence was to calculate wether any
+  //nodes were may alias.  I am now using a more direct approach
+  virtual bool old_loop_dep(LoopInfo* li) {
+    for (auto BBI = li->body_begin(), BBE = li->body_end();
+         BBI != BBE; ++BBI) {
+
+      for (auto I = (*BBI)->op_begin(), E = (*BBI)->op_end();
+           I != E; ++I) {
+
+        if (!(*I)->isLoad() && !(*I)->isStore())
+          continue;
 
         for (auto DI = (*I)->m_begin(), DE = (*I)->m_end(); DI != DE; ++DI) {
           Op *DepOp = *DI;
@@ -111,41 +169,13 @@ protected:
           if (DepOp->isSameEffAddrAccessed(*I))
             continue;
 
-          vectorizableMemAccess = false;
+          return false;
           break;
         }
       }
     }
-    hasVectorizableMemAccessMap.insert(std::make_pair(li,
-                                                      vectorizableMemAccess));
-    hasNonStridedMemAccessMap.insert(std::make_pair(li,
-                                                    hasNonStridedMemAccess));
-    return vectorizableMemAccess;
+    return true;
   }
-
-  // Can we vectorize the loop?
-  // clients override this
-  virtual bool canVectorize(LoopInfo *li,
-                            bool nonStrideAccessLegal,
-                            double acceptableIncrFactor) {
-    // no loop.
-    if (!li)
-      return false;
-
-    // no inner loop.
-    if (!li->isInnerLoop()) {
-      return false;
-    }
-
-    // if control flow is going to increase number of instructions too much,
-    // skip the loop from vectorization
-    if (!li->isSuperBlockProfitable(acceptableIncrFactor))
-      return false;
-
-    return hasVectorizableMemAccess(li,
-                                    nonStrideAccessLegal);
-  }
-
 
   virtual bool hasNonStridedMemAccess(LoopInfo *li,
                                       bool nonStrideAccessLegal) {

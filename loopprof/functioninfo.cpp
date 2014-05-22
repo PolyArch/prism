@@ -458,16 +458,8 @@ void FunctionInfo::toDotFile(std::ostream& out) {
         out << bb->rpoNum() << ", ";
       }
       out << "\\n";
-      
-      for(auto ldsi=li.ld_begin(),ldse=li.ld_end();ldsi!=ldse;++ldsi) {
-        LoopInfo::LoopDep dep = *ldsi;
-        LoopInfo::LoopDep::iterator di,de;
-        out << "dep: ";
-        for(di=dep.begin(),de=dep.end();di!=de;++di) {
-          out << *di << " ";
-        }
-        out << "\\n";
-      }
+     
+      li.printLoopDeps(out);
 
       out << "Paths: ";
       for(auto ip=li.paths_begin(),ep=li.paths_end();ip!=ep;++ip) {
@@ -806,7 +798,6 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
 
   }
 
-
   LoopList::iterator il,el;
   for(il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
     LoopInfo& li = *il->second;
@@ -826,16 +817,7 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
     }
     out << "\\n";
 
-    LoopInfo::LoopDepSet::iterator ldsi,ldse;
-    for(ldsi=li.ld_begin(),ldse=li.ld_end();ldsi!=ldse;++ldsi) {
-      LoopInfo::LoopDep dep = *ldsi;
-      LoopInfo::LoopDep::iterator di,de;
-      out << "dep: ";
-      for(di=dep.begin(),de=dep.end();di!=de;++di) {
-        out << *di << " ";
-      }
-      out << "\\n";
-    }
+    li.printLoopDeps(out);
 
     LoopInfo::PathMap::iterator ip,ep;
     for(ip=li.paths_begin(),ep=li.paths_end();ip!=ep;++ip) {

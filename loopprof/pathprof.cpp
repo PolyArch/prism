@@ -182,20 +182,34 @@ void StackFrame::check_for_stack(Op* op, uint64_t dId, uint64_t addr, uint8_t ac
   }*/
 
   if(op->isStore()) {
+    if(giganticMemDepTable.count(addr)) { //output dep
+      uint32_t dep_dId = giganticMemDepTable[addr].dId;
+      Op*      dep_op  = giganticMemDepTable[addr].op;
+      dyn_dep(dep_op,op,dep_dId,dId,true);
+    }
+    if(giganticMemLoadTable.count(addr)) { // anti dep
+      uint32_t dep_dId = giganticMemLoadTable[addr].dId;
+      Op*      dep_op  = giganticMemLoadTable[addr].op;
+      dyn_dep(dep_op,op,dep_dId,dId,true);
+    }
     giganticMemDepTable[addr].dId=dId;
-    giganticMemDepTable[addr].st_op=op;
+    giganticMemDepTable[addr].op=op;
   }
   if(op->isLoad()) {
     if(giganticMemDepTable.count(addr)) {
       uint32_t dep_dId = giganticMemDepTable[addr].dId;
-      dyn_dep(op,dep_dId,true);
+      Op*      dep_op  = giganticMemDepTable[addr].op;
 
-      checkIfStackSpill(giganticMemDepTable[addr].st_op,op,addr);
+      dyn_dep(dep_op,op,dep_dId,dId,true);
+
+      checkIfStackSpill(giganticMemDepTable[addr].op,op,addr);
     } else {
       //This op is not a candidate b/c it is reading value before writing
       //TODO: don't do this if this is the first_function we are running
       _funcInfo->not_stack_candidate(op);
     }
+    giganticMemLoadTable[addr].dId=dId;
+    giganticMemLoadTable[addr].op=op;
   }
 }
 
@@ -206,9 +220,15 @@ void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
 
   //check if we need to iter complete
   if(profile) {
+    //only track paths for inner loops
     if(_loopStack.size() > 0 && _loopStack.back()->loop_head() == bb) {
       _loopStack.back()->iterComplete(_pathIndex,_loopPath);
-      //cout<<"iter complete\n";
+    } 
+    for(auto i =_loopStack.begin(), e=_loopStack.end(); i!=e; ++i) {
+      LoopInfo* li = *i;
+      if(li->loop_head() == bb) {
+        li->incIter();
+      }
     }
   }
  
@@ -233,7 +253,7 @@ void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
         li->beginLoop();
       }
     }
-    _iterStack.emplace_back(new LoopIter(_loopStack)); //this gets deconstructed in itermap, don't worry!
+    _iterStack.emplace_back(new LoopIter(_loopStack,_funcInfo->instance_num())); //this gets deconstructed in itermap, don't worry!
     stackChanged=true;   
   }
 
@@ -380,7 +400,8 @@ void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
 }
 #endif
 
-void StackFrame::dyn_dep(Op* op, uint32_t dId, bool isMem) {
+void StackFrame::dyn_dep(Op* dep_op, Op* op, 
+                         uint64_t dep_dId, uint64_t dId, bool isMem) {
   if(_loopStack.size()==0) {
     return; // leave if we are not dealing with a loop memory dep
   }
@@ -391,9 +412,10 @@ void StackFrame::dyn_dep(Op* op, uint32_t dId, bool isMem) {
 
   LoopIter* curIter = _iterStack.back().get();
   //get the iteration this corresponds to
-  LoopIter* depIter = (--_iterMap.upper_bound(dId))->second.get();
+  LoopIter* depIter = (--_iterMap.upper_bound(dep_dId))->second.get();
 
-  bool theSameLoops=curIter->psize()==depIter->psize();
+  bool theSameLoops=curIter->functionIter()==depIter->functionIter()
+                    && curIter->psize()==depIter->psize();
   LoopInfo::LoopDep relDep;
   //Check if loops in question are the same (zippered iterator)
   LoopIter::IterPos::iterator i1,i2,e1,e2;
@@ -404,7 +426,20 @@ void StackFrame::dyn_dep(Op* op, uint32_t dId, bool isMem) {
   }
   
   if(theSameLoops) {
-    curIter->relevantLoop()->addRelativeLoopDep(relDep);
+    if(dep_op->isStore() && op->isLoad()) {
+      curIter->relevantLoop()->addRelativeLoopDep_wr(relDep); 
+    } else if(dep_op->isStore() && op->isStore()) {
+      curIter->relevantLoop()->addRelativeLoopDep_ww(relDep);
+    } else if(dep_op->isLoad() && op->isStore()) {
+      curIter->relevantLoop()->addRelativeLoopDep_rw(relDep);
+    }
+
+    //cout << "dep dId:" << dep_dId << " dId:" << dId << " " << curIter->functionIter() << " ";
+
+    //curIter->print();
+    //cout << " -- ";
+    //depIter->print();
+    //cout << "\n";
   } else {
     //More complex dependency, must handle this seperately
     //This shouldn't interfere with anything though.
@@ -484,7 +519,7 @@ bool PathProf::adjustStack(CPC newCPC, bool isCall, bool isRet ) {
     //If call, add function if it's not there, and add an item to the call stack
     FunctionInfo* funcInfo = getOrAddFunc(newCPC);
     _callStack.emplace_back(funcInfo,_dId);
-    checkRecursion(); 
+    checkRecursion();
     return true;
   }
 
@@ -739,6 +774,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   }
 
   adjustStack(newCPC,isCall,isRet);
+
   /*if(isChanged) {
     //cout << "WOOO!\n";
     FunctionInfo* fi = _callStack.back().funcInfo();
@@ -756,6 +792,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   if(isCall && call_fi && call_op) {
     sf.funcInfo()->calledByOp(call_fi,call_op);
     call_op->setCalledFunc(sf.funcInfo());
+    sf.funcInfo()->inc_instance();
   }
 
   //check inst/execution statistics
@@ -788,7 +825,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     uint64_t full_ind = _dId -dep_ind;
     if(dep_ind<=_dId) {
       op->addDep(_op_buf[(full_ind+MAX_OPS)%MAX_OPS],i);
-      sf.dyn_dep(op,full_ind,false);
+      sf.dyn_dep(_op_buf[(full_ind+MAX_OPS)%MAX_OPS],op,full_ind,_dId,false);
     }
   }
 

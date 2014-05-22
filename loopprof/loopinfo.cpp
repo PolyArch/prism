@@ -2,6 +2,7 @@
 #include "functioninfo.hh"
 
 #include "cfu.hh"
+#include "vectorization_legality.hh"
 
 using namespace std;
 
@@ -32,11 +33,6 @@ void Subgraph::checkVec() {
   } 
   assert(_ops.size() == _opVec.size());
 }
-
-
-
-
-
 
 
 uint32_t LoopInfo::_idcounter=0;
@@ -103,6 +99,13 @@ void LoopInfo::initializePathInfo() {
   initializePathInfo(_head,numPaths); 
 }
 
+
+//generic version that doesn't track path
+void LoopInfo::incIter() {
+    _curIter++;
+    _totalIterCount++;
+}
+
 //Called when a loop iteration completes
 void LoopInfo::iterComplete(int pathIndex, BBvec& path) {
   if(_immInnerLoops.size() == 0) {
@@ -114,9 +117,6 @@ void LoopInfo::iterComplete(int pathIndex, BBvec& path) {
     }
 
     _iterCount[pathIndex]++;
-    _curIter++;
-    _totalIterCount++;
-
     if(_pathMap.count(pathIndex)==0) {
       _pathMap[pathIndex]=path;
     }
@@ -124,16 +124,14 @@ void LoopInfo::iterComplete(int pathIndex, BBvec& path) {
   std::map<uint64_t, std::set<Op*> > _effAddr2Op;
 
   for (auto I = path.begin(), E = path.end(); I != E; ++I) {
-    for (auto OI = (*I)->op_begin(), OE = (*I)->op_end();
-         OI != OE; ++OI) {
+    for (auto OI = (*I)->op_begin(), OE = (*I)->op_end(); OI != OE; ++OI) {
       if (!(*OI)->isLoad() && !(*OI)->isStore())
         continue;
       _effAddr2Op[(*OI)->getCurEffAddr()].insert(*OI);
     }
   }
   for (auto I = path.begin(), E = path.end(); I != E; ++I) {
-    for (auto OI = (*I)->op_begin(), OE = (*I)->op_end();
-         OI != OE; ++OI) {
+    for (auto OI = (*I)->op_begin(), OE = (*I)->op_end(); OI != OE; ++OI) {
       if (!(*OI)->isLoad() && !(*OI)->isStore())
         continue;
       (*OI)->iterComplete(_effAddr2Op);
@@ -388,6 +386,60 @@ void LoopInfo::calcPossibleMappings(std::set<Op*>& ops, CFU_set* cfu_set,
       }
     }
   }
+}
+
+void LoopInfo::printLoopDeps(std::ostream& out) {
+    if(isLoopFullyParallelizable()) {
+      out << "Parallelizable!\\n";
+    }
+    VectorizationLegality vl;  //this is really crappy
+
+    if(vl.canVectorize(this,true,0.5)) {
+      out << "Vectorizable at 0.5!\\n";
+    } else {
+      out << "Not Vectorizable at 0.5!\\n";
+    }
+    out << "SuperBlockEfficiency: " << superBlockEfficiency() << "\\n";
+
+    if(vl.hasVectorizableMemAccess(this,true)) {
+      out << "Vectorizable Mem!\\n";
+    }
+    if(vl.old_loop_dep(this)) {
+      out << "Vectorizable Accordng To Venkat!\\n";
+    } else {
+      out << "Not Vectorizable Accordng To Venkat!\\n";
+    }
+
+    for(int i = 0; i < 3; ++i) {
+      auto ldsi = ld_wr_begin(), ldse = ld_wr_end();
+      if(i==0) {
+        out << "wr dep: ";
+      } else if(i==1) {
+        out << "ww dep: ";
+        ldsi = ld_ww_begin();
+        ldse = ld_ww_end();
+      } else if(i==2) {
+        out << "rw dep: ";
+        ldsi = ld_rw_begin();
+        ldse = ld_rw_end();
+      }       
+      auto orig_ldsi = ldsi;
+      for(;ldsi!=ldse;++ldsi) {
+        LoopInfo::LoopDep dep = *ldsi;
+        if(ldsi != orig_ldsi) {
+          out << ", ";
+        }
+        
+        for(auto di=dep.begin(),de=dep.end();di!=de;++di) {
+          if(di != dep.begin()) {
+            out << " ";
+          }
+          out << *di;
+        }
+      }
+      out << "\\n";
+    }
+
 }
 
 void LoopInfo::printSGPartText(std::ostream& out,

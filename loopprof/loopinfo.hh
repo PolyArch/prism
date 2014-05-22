@@ -15,7 +15,6 @@
 
 #include "cfu.hh"
 
-
 class Subgraph {
 public:
   typedef std::set<Op*> OpSet;
@@ -214,7 +213,9 @@ private:
   OpBool _opStriding;
   OpInt  _opStride;
 
-  LoopDepSet _loopDepSet; //set of dependent loop iterations, specified relatively
+  LoopDepSet _loopDepSet_wr; //set of dependent loop iterations, write->read
+  LoopDepSet _loopDepSet_ww; //set of dependent loop iterations, write->write
+  LoopDepSet _loopDepSet_rw; //set of dependent loop iterations, read->write
   //std::set<FunctionInfo*> _funcsCalled; //functions called, not yet used
   char _depth=-1;
 
@@ -260,7 +261,9 @@ template<class Archive>
     ar & _immOuterLoop;
     ar & _opStriding;
     ar & _opStride;
-    ar & _loopDepSet;
+    ar & _loopDepSet_wr;
+    ar & _loopDepSet_ww;
+    ar & _loopDepSet_rw;
     ar & _depth;
     ar & _instsInPath;
     ar & _hotPathIndex;
@@ -381,8 +384,12 @@ public:
   BBset::iterator       body_end()    { return _loopBody.end(); }
   PathMap::iterator     paths_begin() { return _pathMap.begin(); }
   PathMap::iterator     paths_end()   { return _pathMap.end(); }
-  LoopDepSet::iterator  ld_begin()    { return _loopDepSet.begin(); }
-  LoopDepSet::iterator  ld_end()      { return _loopDepSet.end(); }
+  LoopDepSet::iterator  ld_wr_begin()    { return _loopDepSet_wr.begin(); }
+  LoopDepSet::iterator  ld_wr_end()      { return _loopDepSet_wr.end(); }
+  LoopDepSet::iterator  ld_ww_begin()    { return _loopDepSet_ww.begin(); }
+  LoopDepSet::iterator  ld_ww_end()      { return _loopDepSet_ww.end(); }
+  LoopDepSet::iterator  ld_rw_begin()    { return _loopDepSet_rw.begin(); }
+  LoopDepSet::iterator  ld_rw_end()      { return _loopDepSet_rw.end(); }
   BBvec::iterator       rpo_begin()   { return _rpo.begin(); }
   BBvec::iterator       rpo_end()     { return _rpo.end(); }
 
@@ -510,8 +517,7 @@ public:
     return numStaticInsts;
   }
 
-  bool isSuperBlockProfitable(double factor) {
-
+  double superBlockEfficiency() {
     uint64_t totalIterCount = getTotalIters();
     uint64_t totalDynamicInst = numInsts();
 
@@ -529,7 +535,11 @@ public:
       return false;
     }
 
-    double instrIncrFactor = (totalDynamicInst)/((double)totalInstInSB);
+    return (totalDynamicInst)/((double)totalInstInSB);
+  }
+
+  bool isSuperBlockProfitable(double factor) {
+    double instrIncrFactor = superBlockEfficiency();
     return (instrIncrFactor >= factor);
   }
 
@@ -577,6 +587,7 @@ public:
 
   int weightOf(BB* bb1, BB* bb2);
 
+  void incIter();
   void iterComplete(int pathIndex, BBvec& path);
   void endLoop();
   void beginLoop();
@@ -614,6 +625,49 @@ public:
     return staticInsts() + inlinedOnlyStaticInsts();
   }
 
+  bool isLoopFullyParallelizable() {
+    if(!isInnerLoop()) {
+      return false;  //Only inner loops for now
+    }
+
+    //check all wr,ww,rw pairs for loop dependence
+    for(int i = 0; i < 3; ++i) {
+      auto ldsi = ld_wr_begin(), ldse = ld_wr_end();
+      if(i==1) {
+        ldsi = ld_ww_begin();
+        ldse = ld_ww_end();
+      } else if(i==2) {
+        ldsi = ld_rw_begin();
+        ldse = ld_rw_end();
+      }
+
+      for(;ldsi!=ldse;++ldsi) {
+        LoopInfo::LoopDep dep = *ldsi;
+        
+        //Patterns:
+        // 0 0  0:  Only dependences inside loop iter
+        // 0 0 -1:  Inner loop dependence -- bad!
+        // 0 1 -1:  Dependence between outer iterations, this is good still!
+        for(auto di=dep.begin(),de=dep.end();di!=de;) {
+          auto di_cur=di;
+          ++di;
+
+          if(di == de) { // this is the inner loop
+            if(*di_cur !=0) { //depending on any other inner loop iteration is a no-no
+              return false;
+            }
+          } else { //this is not the inner loop
+            if(*di_cur==0) { //skip dependences that go between loop boundaries
+              break; //go to next loop dependence
+            }
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  void printLoopDeps(std::ostream& out);
 
   void initializePathInfo(BB* bb, std::map<BB*,int>& numPaths);
   void initializePathInfo();
@@ -639,9 +693,9 @@ public:
     return -3; //this looks like a weird enough value to make me scared : )
   }
 
-  void addRelativeLoopDep(LoopDep dep) {
-    _loopDepSet.insert(dep);
-  }
+  void addRelativeLoopDep_wr(LoopDep dep) {_loopDepSet_wr.insert(dep);}
+  void addRelativeLoopDep_ww(LoopDep dep) {_loopDepSet_ww.insert(dep);}
+  void addRelativeLoopDep_rw(LoopDep dep) {_loopDepSet_rw.insert(dep);}
 
   //static Functions
   //Compute blind loop subset analysis
@@ -660,9 +714,11 @@ public:
 
 private:
   IterPos iterPos;
+  uint64_t function_iter=0;
   
 public:
-  LoopIter(LoopStack& ls) {
+  LoopIter(LoopStack& ls,uint64_t fi_iter) {
+    function_iter=fi_iter;
     LoopStack::iterator i,e;
     for(i=ls.begin(),e=ls.end();i!=e;++i) {
       LoopInfo* li = *i;
@@ -672,10 +728,18 @@ public:
   
   LoopInfo* relevantLoop() {return iterPos.back().first;}
   int relevantLoopIter() {return iterPos.size() > 0 ? iterPos.back().second:-1;}
+  uint64_t functionIter() {return function_iter;}
 
   unsigned psize() {return iterPos.size();}
   IterPos::iterator pbegin() {return iterPos.begin();}
   IterPos::iterator pend()   {return iterPos.end();}
+
+  void print() {
+    for(auto i1=pbegin(),e1=pend(); i1!=e1; ++i1) {
+      std::cout << i1->second << " ";
+    }
+  }
+
 };
 
 #endif

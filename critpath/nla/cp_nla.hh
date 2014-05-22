@@ -549,7 +549,7 @@ private:
         //Execute -- 
         //TODO: Should we add another event for loads/stores who?
         if(nla_inst->_isload && nla_inst->_isstore) {
-          int fuIndex = fuPoolIdx(nla_inst->_opclass);
+          int fuIndex = fuPoolIdx(nla_inst->_opclass,nla_inst->_op);
           int maxUnits = getNumFUAvailable(nla_inst->_opclass,nla_inst->_op); //opclass
           Inst_t* min_node = static_cast<Inst_t*>(
                addResource(fuIndex, nla_inst->cycleOfStage(Inst_t::Execute), 

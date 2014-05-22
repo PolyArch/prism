@@ -46,6 +46,7 @@ private:
 
   //stats
   int _calls=0;
+  uint64_t _instance_num=0;
 
   uint64_t _insts=0;
 
@@ -178,6 +179,9 @@ public:
   bool callsFunc(FunctionInfo* fi) {return _calledTo.count(fi);}
 
   void got_called() {_calls++;}
+  void inc_instance() {_instance_num++;}
+  uint64_t instance_num() {return _instance_num;}
+
   void calledBy(FunctionInfo* fi) {
     _calledBy.insert(fi);
     fi->_calledTo.insert(this);  
