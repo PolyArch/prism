@@ -1,14 +1,14 @@
 CC := /s/gcc-4.8.2/bin/gcc
 CXX := /s/gcc-4.8.2/bin/g++
 
-OPT = -O3
+OPTI = -O3
 
 GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
 -include ../make.config
 
 
 SRC := pathprof.cpp gzstream.cpp op.cpp bb.cpp loopinfo.cpp functioninfo.cpp lpanalysis.cpp
-CFLAGS :=  -std=c++11 ${OPT} -ggdb -gdwarf-3 -g -I. -Wall -Werror -Wno-unused-local-typedefs -pedantic -fPIC -rdynamic -I$(GEM5_DIR)/src  -I$(GEM5_DIR)/src -DSTANDALONE_CRITPATH -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -I../include
+CFLAGS :=  -std=c++11 ${OPTI} -ggdb -gdwarf-3 -g -I. -Wall -Werror -Wno-unused-local-typedefs -pedantic -fPIC -rdynamic -I$(GEM5_DIR)/src  -I$(GEM5_DIR)/src -DSTANDALONE_CRITPATH -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -I../include
 LIBS := -lz -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -lboost_serialization
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 #LDFLAGS := $(EXFLAGS) -ltcmalloc_minimal -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/ -L. -Wl,-rpath,$(shell pwd)

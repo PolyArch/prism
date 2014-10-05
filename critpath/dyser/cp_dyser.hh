@@ -274,18 +274,21 @@ namespace DySER {
     }
     dep_graph_impl_t<Inst_t, T, E> cpdg;
 
-    
-  virtual bool is_accel_on() {
-
+  //TODO: Check    
+  virtual int is_accel_on() {
     if(!PrevOp) {
-      return false;
+      return 0;
     }
     LoopInfo *li = getLoop(PrevOp,
                            PrevOp && PrevOp->isReturn(),
                            StackLoop);
-    return StackLoop || canDySERize(li);
-  }
 
+    if(StackLoop || canDySERize(li)) {
+      return li->id();
+    } else {
+      return 0;
+    }
+  }
 
   protected:
     LoopInfo *StackLoop = 0;
@@ -314,8 +317,7 @@ namespace DySER {
         // check whether we are in call to sin/cos function
         if (CurLoop
             && canDySERize(CurLoop)
-            && (op->func()->nice_name() == "sincosf"
-                || (op->func()->nice_name() == "__libm_sse2_sincosf"))) {
+            && PrevOp->func()->isSinCos()) {
           StackLoop = CurLoop;
           StackLoopIter = CurLoopIter;
         }
@@ -337,8 +339,7 @@ namespace DySER {
 
         if (StackLoop
             && PrevOp && PrevOp->isReturn()
-            && ( PrevOp->func()->nice_name() == "sincosf"
-                 || PrevOp->func()->nice_name() == "__libm_sse2_sincosf")) {
+            && PrevOp->func()->isSinCos() ) {
           StackLoop = 0;
           CurLoopIter = StackLoopIter;
           StackLoopIter = 0;
@@ -462,11 +463,13 @@ namespace DySER {
       if (!li->isSuperBlockProfitable(_dyser_inst_incr_factor))
         return false;
 
+      bool can_vectorize = canVectorize(li, false, _dyser_inst_incr_factor);
+      SliceInfo::setup(li, _dyser_size, can_vectorize);
+
       SliceInfo *si = SliceInfo::get(li, _dyser_size);
       if (si->cs_size() == 0)
         return false;
-      if (!si->shouldDySERize(canVectorize(li, false,
-                                           _dyser_inst_incr_factor)))
+      if (!si->shouldDySERize(can_vectorize))
         return false;
       return true;
     }
@@ -766,7 +769,7 @@ namespace DySER {
                                        bool emitDyRecv = true,
                                        unsigned dyRecvLat = 0) {
       if (SI->isInLoadSlice(op)) {
-        if (op->isLoad() || op->isStore()) {
+        if (op->isLoad() || op->isStore() || op->shouldIgnoreInAccel()) {
           inst->isAccelerated = true;
         }
 
@@ -790,6 +793,7 @@ namespace DySER {
         return inst;
       }
 
+      inst->isAccelerated = true;
       // Computation Slice!
       if (emitDySendForCS && SI->isAInputToDySER(op)) {
         // We are here, if op is an accumulate type instruction.

@@ -163,17 +163,23 @@ public:
     if (strcmp(name, "size-based-cfus") == 0) {
       _size_based_cfus=true;
     } 
-
   }
 
 
-  virtual bool is_accel_on() {
-    return beret_state==CPU;
+  virtual int is_accel_on() {
+    if(beret_state==BERET) {
+      return li->id();
+    } else {
+      return 0;
+    }
   };
 
 
-  virtual void setDefaultsFromProf() {
-    CP_DG_Builder::setDefaultsFromProf();
+  virtual void setupComplete() {
+    if(_elide_mem) {
+      _beret_max_mem = _beret_max_seb;
+    }
+   
     //set up the subgraphs
     std::multimap<uint64_t,LoopInfo*> loops;
     PathProf::FuncMap::iterator i,e;
@@ -226,7 +232,7 @@ public:
          ) {
         std::stringstream part_gams_str;
         part_gams_str << _run_name << "partition." << loopInfo->id();
-  
+
         sched_stats << _beret_max_seb << " " << _beret_max_mem << "\n";
         worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
             loopInfo->getHotPath(),
@@ -464,7 +470,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         b_inst->reCalculate();
         if(b_inst->_isload) {
           //get the MSHR resource here!
-          checkNumMSHRs(b_inst); 
+          if(!_elide_mem) {
+            checkNumMSHRs(b_inst); 
+          }
         }
         b_inst->reCalculate();  //TODO: check this! : 
 
@@ -747,8 +755,15 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 private:
 
   virtual void checkNumMSHRs(std::shared_ptr<BeretInst>& n, uint64_t minT=0) {
+    //First do energy accounting
+    if(n->_isload || n->_isstore) {
+      calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
+                      n->_cache_prod, n->_true_cache_prod,
+                      l1_hits, l1_misses, l2_hits, l2_misses,
+                      l1_wr_hits, l1_wr_misses, l2_wr_hits, l2_wr_misses);
+    }
+
     int ep_lat=n->ex_lat();
-    
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
@@ -942,8 +957,7 @@ private:
       sa(system_node,"device_type",0);
 
 
-      pugi::xml_node core_node =
-                system_node.find_child_by_attribute("name","core0");
+      pugi::xml_node core_node = system_node.find_child_by_attribute("name","core0");
       sa(core_node,"total_cycles",numCycles());
       sa(core_node,"busy_cycles",0);
       sa(core_node,"idle_cycles",numCycles());

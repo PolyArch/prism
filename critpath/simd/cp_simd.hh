@@ -840,6 +840,24 @@ namespace simd {
     LoopInfo *StackLoop = 0;
     unsigned StackLoopIter = 0;
 
+    Op *PrevOp = 0;
+
+    //TODO: Check    
+    virtual int is_accel_on() {
+      if(!PrevOp) {
+        return 0;
+      }
+      LoopInfo *li = getLoop(PrevOp,
+                             isLastInstAReturn,
+                             StackLoop);
+  
+      if(StackLoop || shouldVectorize(li)) {
+        return li->id();
+      } else {
+        return 0;
+      }
+    }
+
     //
     // Override insert_inst to transform to SIMD graph
     //
@@ -860,7 +878,7 @@ namespace simd {
         if (isLastInstACall
             && CurLoop
             && shouldVectorize(CurLoop)) {
-          if (op->func()->nice_name() == "__libm_sse2_sincosf") {
+          if (op->func()->isSinCos()) {
             // We can vectorize this function as well.
             StackLoop = CurLoop;
             StackLoopIter = CurLoopIter;
@@ -941,6 +959,7 @@ namespace simd {
       if (op) {
         isLastInstACall = op->isCall();
         isLastInstAReturn = op->isReturn();
+        PrevOp = op;
       }
 
       if (!StackLoop && !shouldVectorize(li)) {
@@ -973,6 +992,7 @@ namespace simd {
         CurLoopIter = 0; // reset loop counter..
         forceCompleteWithIT = false;
       }
+
     }
 
   };

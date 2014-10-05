@@ -10,6 +10,11 @@
 #include <ostream>
 #include <fstream>
 
+#include "mcpat/xmlParser.h"
+#include "mcpat/XML_Parse.h"
+#include "mcpat/processor.h"
+#include "mcpat/globalvar.h"
+
 
 #include "prof.hh"
 
@@ -19,9 +24,10 @@ protected:
   std::string _run_name = "";
   std::string _name = "";
   uint64_t _last_index;
+  bool _elide_mem = false;
   bool _isInOrder = false;
   bool _setInOrder = false;
-
+  bool _scale_freq = false;
   //careful, these are not necessarily the defaults...
   //we will try to load the values from m5out/config.ini
   //as the defaults through the prof class
@@ -39,6 +45,7 @@ protected:
   int SQ_SIZE = 32;
 
   int FETCH_TO_DISPATCH_STAGES = 4;
+  int COMMIT_TO_COMPLETE_STAGES = 2;
   int INORDER_EX_DEPTH = 4; 
 
   int N_ALUS=6;
@@ -50,6 +57,8 @@ protected:
   int IBUF_SIZE=32;
   int PIPE_DEPTH=16;      
   int PHYS_REGS=256;
+
+  int CORE_CLOCK=2000;
 
   bool applyMaxLatToAccel=true;
   int _max_mem_lat=1073741824; //some big numbers that will never make sense
@@ -67,18 +76,50 @@ protected:
   uint64_t idleCycles=0;
   uint64_t nonPipelineCycles=0;
 
-
   //icache
   uint64_t icache_read_accesses=0, icache_read_misses=0, icache_conflicts=0;
 
+  //dcache
+  uint64_t l1_hits=0, l1_misses=0, l2_hits=0, l2_misses=0;
+  uint64_t l1_wr_hits=0, l1_wr_misses=0, l2_wr_hits=0, l2_wr_misses=0;
+
   //ooo-pipeline
-  uint64_t regfile_reads=0, regfile_writes=0, regfile_freads=0, regfile_fwrites=0;
+  uint64_t regfile_reads=0, regfile_writes=0;
+  uint64_t regfile_freads=0, regfile_fwrites=0;
   uint64_t rob_reads=0, rob_writes=0;
   uint64_t iw_reads=0, iw_writes=0, iw_freads=0, iw_fwrites=0;
   uint64_t rename_reads=0, rename_writes=0;
   uint64_t rename_freads=0, rename_fwrites=0;
-
   uint64_t btb_read_accesses=0, btb_write_accesses=0;
+
+  //------- energy events accumulated -----------
+  uint64_t committed_insts_acc=0, committed_int_insts_acc=0, committed_fp_insts_acc=0;
+  uint64_t committed_branch_insts_acc=0, mispeculatedInstructions_acc=0;
+  uint64_t committed_load_insts_acc=0, committed_store_insts_acc=0;
+  uint64_t squashed_insts_acc=0;
+
+  uint64_t int_ops_acc=0,mult_ops_acc=0,fp_ops_acc=0;
+  uint64_t func_calls_acc=0;
+  uint64_t idleCycles_acc=0;
+  uint64_t nonPipelineCycles_acc=0;
+
+  uint64_t cycles_acc=0;
+
+  //icache
+  uint64_t icache_read_accesses_acc=0, icache_read_misses_acc=0, icache_conflicts_acc=0;
+
+  //dcache
+  uint64_t l1_hits_acc=0, l1_misses_acc=0, l2_hits_acc=0, l2_misses_acc=0;
+  uint64_t l1_wr_hits_acc=0, l1_wr_misses_acc=0, l2_wr_hits_acc=0, l2_wr_misses_acc=0;
+
+  //ooo-pipeline
+  uint64_t regfile_reads_acc=0, regfile_writes_acc=0;
+  uint64_t regfile_freads_acc=0, regfile_fwrites_acc=0;
+  uint64_t rob_reads_acc=0, rob_writes_acc=0;
+  uint64_t iw_reads_acc=0, iw_writes_acc=0, iw_freads_acc=0, iw_fwrites_acc=0;
+  uint64_t rename_reads_acc=0, rename_writes_acc=0;
+  uint64_t rename_freads_acc=0, rename_fwrites_acc=0;
+  uint64_t btb_read_accesses_acc=0, btb_write_accesses_acc=0;
 
   virtual void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) = 0;
 
@@ -87,18 +128,124 @@ protected:
   //cur_li will either be null or have a loop
   FunctionInfo* cur_fi;
   LoopInfo* cur_li;
-  std::map<FunctionInfo*,uint64_t> cycleMapFunc;
-  std::map<LoopInfo*,uint64_t> cycleMapLoop;
+  int cur_is_acc;
+
+
+  class RegionEnergy {
+  public:
+    uint64_t cycles=0;
+    double total=0;
+    bool in_accel=false;
+    int on_id=0;
+
+    //breakdown, for fun
+    double core=0, icache=0, dcache=0, l2=0, tot_static=0, accel=0;
+
+    void fill(uint64_t cycle_diff, PrismProcessor* mc_proc, double accel_en, int is_on) {
+      cycles+=cycle_diff;
+
+      double dcache_en = mc_proc->cores[0]->lsu->dcache.rt_power.readOp.dynamic; //still energy
+      double icache_en = mc_proc->cores[0]->ifu->icache.rt_power.readOp.dynamic; //still energy
+      double core_en = (mc_proc->core.rt_power.readOp.dynamic - dcache_en -icache_en);
+      double l2_en =mc_proc->l2.rt_power.readOp.dynamic;
+
+      double ex_freq = mc_proc->XML->sys.target_core_clockrate*1e6;
+
+    bool long_channel = mc_proc->XML->sys.longer_channel_device;
+      double leakage_power = ((long_channel?mc_proc->power.readOp.longer_channel_leakage:mc_proc->power.readOp.leakage) + mc_proc->power.readOp.gate_leakage);
+      double leakage_en = leakage_power*(cycle_diff/ex_freq);
+
+      if(is_on!=0) {
+        on_id=is_on;
+      }
+
+      core+=core_en;
+      icache+=icache_en;
+      dcache+=dcache_en;
+      l2+=l2_en;
+      accel+=accel_en;
+      tot_static+=leakage_en;
+
+      total += core_en + icache_en + dcache_en+ l2_en+leakage_en+accel_en;
+    }
+
+    static const int pc=8;
+
+    static void printHeader(std::ostream& out) {
+      out << std::setw(45) << "Func Name";
+      out << std::setw(9) << "Cycles" << " ";
+      out << std::setw(pc) << "Total"  << " ";
+      out << std::setw(pc) << "Static" << " ";
+      out << std::setw(pc) << "Core"   << " ";
+      out << std::setw(pc) << "Icache" << " ";
+      out << std::setw(pc) << "DCache" << " ";
+      out << std::setw(pc) << "Accel"  << " ";
+      out << std::setw(5) << "Acc?"  << " ";
+    }
+
+    void printPower(double en, std::ostream& out, double ex_freq) {
+      double ex_time = cycles/(ex_freq);  
+
+      if(ex_time != 0 && en / ex_time != 0) {
+        out << std::fixed << std::setw(pc) << std::setprecision(4)  << (en / ex_time) * 1.0 << " ";
+      } else {
+        out << std::setw(pc) << 0 << " ";
+      }
+    }
+
+    void print(std::string name, std::ostream& out, double ex_freq) {
+      out << std::setw(45) << name << " ";
+      out << std::setw(9) << cycles  << " ";
+      printPower(total,out,ex_freq);
+      printPower(tot_static,out,ex_freq);
+      printPower(core,out,ex_freq);
+      printPower(icache,out,ex_freq);
+      printPower(dcache,out,ex_freq);
+      printPower(accel,out,ex_freq);
+      out << std::setw(5) << on_id << " ";
+    }
+
+
+
+  };
+
+  std::map<FunctionInfo*,RegionEnergy> cycleMapFunc;
+  std::map<LoopInfo*,    RegionEnergy> cycleMapLoop;
   BB* cur_bb;
 
   uint64_t  cur_cycles=0;
   //Update cycles spent in this config
 public:
-  virtual bool is_accel_on() {
-    return false; 
+  virtual double accel_region_en() {return 0;}
+
+  //Region Breakdown Thing
+  virtual void update_cycles() {
+    //get the current cycle
+    uint64_t cycles=this->numCycles();
+    uint64_t cycle_diff = cycles - cur_cycles;
+
+    if(cycles < cur_cycles || cycles     >= cur_cycles+ ((uint64_t)-1)/2 
+                           || cycle_diff >= ((uint64_t)-1)/2 ) {
+      std::cerr << "ERROR: WEIRD CYCLE COUNTS!" << "\n";
+      std::cerr << "previous last cycle: " << cur_cycles << "\n";
+      std::cerr << "new last cycle: " << cycles << "\n";
+      assert(0);
+    }
+
+    pumpMcPAT(); // pump both models
+
+    if(cur_li) {
+      cycleMapLoop[cur_li].fill(cycle_diff,mc_proc,accel_region_en(),cur_is_acc);
+    } else {
+      cycleMapFunc[cur_fi].fill(cycle_diff,mc_proc,accel_region_en(),cur_is_acc);
+    }
+
+    cur_cycles=cycles; //update cur cycles for next time
   }
 
-  virtual void update_cycles(Op* op) {
+  virtual void print_edge_weights(std::ostream& out, AnalysisType analType) { } 
+
+  virtual void check_update_cycles(Op* op) {
     if(op->bb_pos()!=0) {
       return;
     }
@@ -112,66 +259,68 @@ public:
     if(cur_fi) {
       // If there was a change
       if(li!=cur_li || cur_fi!=fi) {
-        //get the current cycle
-        uint64_t cycles=this->numCycles();
-        uint64_t cycle_diff = cycles - cur_cycles;
-
-        /*
-        if(cycles < cur_cycles) {
-          if(cycles + 200 < cur_cycles) {
-            std::cerr << "ERROR: WEIRD CYCLE COUNTS!" << "\n";
-            std::cerr << "previous last cycle: " << cur_cycles << "\n";
-            std::cerr << "new last cycle: " << cycles << "\n";
-          }
-          cycle_diff=0;
-        }*/
-        
-        if(cycles < cur_cycles || cycles     >= cur_cycles+ ((uint64_t)-1)/2 
-                               || cycle_diff >= ((uint64_t)-1)/2 ) {
-          std::cerr << "ERROR: WEIRD CYCLE COUNTS!" << "\n";
-          std::cerr << "previous last cycle: " << cur_cycles << "\n";
-          std::cerr << "new last cycle: " << cycles << "\n";
-          assert(0);
-        }
-
-        cur_cycles=cycles;
-  
-//        std::cout << "BBs: [" << cur_bb->rpoNum() << "->" << op->bb()->rpoNum()  << ")";
-       
-//        std::cout << "contrib " << cycle_diff << " to ";
-        if(cur_li) {
-//          std::cout  << cur_li->nice_name();
-          cycleMapLoop[cur_li]+=cycle_diff;
-        } else {
-//          std::cout  << cur_fi->nice_name();
-          cycleMapFunc[cur_fi]+=cycle_diff;
-        }
-//        std::cout << "\n";
+        update_cycles();
       }
     } 
 
     cur_bb=op->bb();
     cur_li=li;
     cur_fi=fi;
+    cur_is_acc=is_accel_on();
+  }
+
+  //return true if accel, and return the id as int
+  virtual int is_accel_on() {
+    return false;
+  }
+
+  virtual void printAccelHeader(std::ostream& outs) {}
+
+  virtual void printAccelRegionStats(int id, std::ostream& outs) {}
+
+  void printLoopRecursive(LoopInfo* li,std::ostream& outf,double ex_freq) {
+    std::string quote_name = std::string("\"") 
+                             + li->nice_name_full() + std::string("\"");  
+
+    cycleMapLoop[li].print(quote_name,outf,ex_freq);
+    printAccelRegionStats(cycleMapLoop[li].on_id,outf);
+    outf << "\n";
+
+    for(auto i=li->iloop_begin(),e=li->iloop_end();i!=e;++i) {
+      LoopInfo* inner_li = *i;
+      printLoopRecursive(inner_li,outf,ex_freq);
+    }
   }
 
   void printRegionBreakdown(std::ostream& outf) {
+    RegionEnergy::printHeader(outf);
+    printAccelHeader(outf);
+    outf<<"\n";
+
+    double ex_freq = mc_proc->XML->sys.target_core_clockrate*1e6;  
+
     //We need to print out loops and funcions
     for(auto i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
       FunctionInfo* fi = i->second;
       std::string quote_name = std::string("\"") + fi->nice_name() + std::string("\"");
-      outf << std::setw(30) << quote_name << " ";
-      outf << cycleMapFunc[fi] << "\n";
+      cycleMapFunc[fi].print(quote_name,outf,ex_freq);
+      outf << "\n";
 
+      /*
       for(auto i=fi->li_begin(),e=fi->li_end();i!=e;++i) {
         LoopInfo* li = i->second;
         std::string quote_name = std::string("\"") + li->nice_name() + std::string("\"");
-        outf << std::setw(30) << quote_name << " ";
-        outf << cycleMapLoop[li] << "\n";
+        cycleMapLoop[fi]->print(quote_name,outf);
+      }*/
+
+      for(auto i=fi->li_begin(),e=fi->li_end();i!=e;++i) {
+        LoopInfo* li = i->second;
+        if(li->depth()==1) { //only outer loops
+          printLoopRecursive(li,outf,ex_freq);
+        }
       }
+
     }
-
-
   }
 
 private:
@@ -255,7 +404,22 @@ public:
     }
     accelSpecificStats(out, name);
     out << "\n";
+  
+    out << "Weighted Critical Edges: ";
+    print_edge_weights(out, AnalysisType::Weighted);
+    out << "\n";
+
+    out << "Unweighted Critical Edges: ";
+    print_edge_weights(out, AnalysisType::Unweighted);
+    out << "\n";
+
+    out << "Offset Critical Edges: ";
+    print_edge_weights(out, AnalysisType::Offset);
+    out << "\n";
+
+
   }
+
 
   virtual void accelSpecificStats(std::ostream& out, std::string &name) {
   }
@@ -298,8 +462,6 @@ public:
     //N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
     //N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),2);
     //RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),2);
-
-
   }
 
   virtual ~CriticalPath() {
@@ -311,11 +473,19 @@ public:
     _setInOrder=true;
   }
 
- 
+  virtual void setupComplete() {}
+
+  virtual void set_elide_mem(bool elideMem) {
+    _elide_mem=elideMem;
+    if(_elide_mem) {
+       RW_PORTS=3;
+       //set_max_mem_lat(4);
+    }
+  } 
 
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
 
-  virtual void setWidth(int i) {
+  virtual void setWidth(int i,bool scale_freq) {
     return;
   }
 
@@ -343,7 +513,6 @@ public:
     pugi::xml_parse_result result = doc.load(ss);
     mcpat_xml_fname=std::string(filename);
 
-    //pugi::xml_parse_result result = doc.load_file("tony-ooo.xml");
     if(result) {
       setEnergyEvents(doc,nm);
     } else {
@@ -353,11 +522,67 @@ public:
     doc.save_file(filename);
   }
 
+  PrismProcessor* mc_proc = NULL; // this is a mcpat processor that accumulates energy
+  virtual void setupMcPAT(const char* filename, int nm) {
+    _nm=nm;
+    printMcPATxml(filename,nm);
+    ParseXML* mcpat_xml= new ParseXML(); //Another XML Parser : )
+    mcpat_xml->parse((char*)filename);
+    mc_proc = new PrismProcessor(mcpat_xml); 
+    pumpCoreEnergyEvents(mc_proc,0); //reset all energy stats to 0
+  } 
+
+  virtual uint64_t getIntervalBewteenEnergyMeasurements() {
+    uint64_t maxCycle = numCycles();
+    uint64_t totalCycles = maxCycle - cycles_acc;
+    assert(totalCycles >=0);
+    cycles_acc = maxCycle;
+    return totalCycles;
+  }
+
+  virtual void pumpCoreEnergyEvents(PrismProcessor*,uint64_t){}
+  virtual void pumpAccelEnergyEvents(uint64_t){}
+
+  virtual void accCoreEnergyEvents(){}
+  virtual void accAccelEnergyEvents(){}
+
+  virtual void printAccEnergyEvents(){} //this is for core
+
+  virtual void pumpAccelMcPAT(uint64_t) {}
+  virtual void pumpCoreMcPAT(uint64_t totalCycles) {
+    pumpCoreEnergyEvents(mc_proc,totalCycles);
+    mc_proc->computeEnergy();
+  }
+
+  /* use this to set the counters for McPAT */
+  virtual void pumpMcPAT() {
+    uint64_t totalCycles = getIntervalBewteenEnergyMeasurements();
+    pumpCoreMcPAT(totalCycles);
+    pumpAccelMcPAT(totalCycles);
+  }
+
+  virtual void printMcPAT() {
+    mc_proc->computeAccPower(); //need to compute the accumulated power
+    double total_dyn_power = mc_proc->core_acc_power.rt_power.readOp.dynamic + 
+                      mc_proc->l2_acc_power.rt_power.readOp.dynamic;
+
+    bool long_channel = mc_proc->XML->sys.longer_channel_device;
+    
+    double total_leakage = (long_channel?mc_proc->power.readOp.longer_channel_leakage:mc_proc->power.readOp.leakage) + mc_proc->power.readOp.gate_leakage;
+
+    cout << _name << " Dynamic Power(" << _nm << ")... " 
+                  << total_dyn_power    <<       " " << total_leakage << "\n";
+
+    //mc_proc->displayAccEnergy();
+    printMcPAT_Accel();
+  }
+
+  virtual void printMcPAT_Accel() { }
+
+
   virtual void printAccelMcPATxml(std::string filename,int nm) {
     return;
   }
-
-
   //sets a particular energy event attribute of the mcpat xml doc
   //"sa" for conciseness (set attribute)
   static void sa(pugi::xml_node& node, const char* attr, uint64_t val) {
@@ -388,6 +613,8 @@ public:
     uint64_t busyCycles=Prof::get().numCycles-Prof::get().idleCycles;
 
     sa(system_node,"core_tech_node",nm);
+    sa(system_node,"target_core_clockrate",CORE_CLOCK);
+
 
     //base stuff
     sa(system_node,"total_cycles",Prof::get().numCycles);
@@ -398,6 +625,7 @@ public:
               system_node.find_child_by_attribute("name","core0");
 
     //set params:
+    sa(core_node,"clock_rate",CORE_CLOCK);
     sa(core_node,"fetch_width",FETCH_WIDTH);
     sa(core_node,"decode_width",D_WIDTH);
     sa(core_node,"issue_width",ISSUE_WIDTH);
@@ -422,14 +650,20 @@ public:
     sa(core_node,"instruction_buffer_size", IBUF_SIZE);
     sa(core_node,"decoded_stream_buffer_size", IBUF_SIZE);
 
-    sa(core_node,"memory_ports", RW_PORTS);
+    if(!_elide_mem) {
+      sa(core_node,"memory_ports", RW_PORTS);
+    }
     sa(core_node,"RAS_size", Prof::get().RASSize);
 
-    //set stats:
+    ss.str("");
+    ss << PIPE_DEPTH << "," << PIPE_DEPTH;
+    sa(core_node,"pipeline_depth",ss.str());
+
     if(isInOrder()) {
       sa(core_node,"machine_type",1);
     }
 
+    //set stats:
     sa(core_node,"total_instructions",Prof::get().totalInsts);
     sa(core_node,"int_instructions",Prof::get().intOps);
     sa(core_node,"fp_instructions",Prof::get().fpOps);
@@ -450,10 +684,6 @@ public:
 
     sa(core_node,"ROB_reads",Prof::get().rob_reads);
     sa(core_node,"ROB_writes",Prof::get().rob_writes);
-
-    ss.str("");
-    ss << PIPE_DEPTH << "," << PIPE_DEPTH;
-    sa(core_node,"pipeline_depth",ss.str());
 
     sa(core_node,"rename_reads",Prof::get().rename_reads);
     sa(core_node,"rename_writes",Prof::get().rename_writes);
@@ -508,12 +738,11 @@ public:
 
     sa(icache_node,"read_accesses",Prof::get().icacheLinesFetched);
     sa(icache_node,"read_misses",Prof::get().icacheMisses);
-    sa(icache_node,"conflicts",Prof::get().icacheReplacements);
+    //sa(icache_node,"conflicts",Prof::get().icacheReplacements);
 
     // ---------- dcache --------------
 
-    pugi::xml_node dcache_node =
-              core_node.find_child_by_attribute("name","dcache");
+    pugi::xml_node dcache_node = core_node.find_child_by_attribute("name","dcache");
 
     ss.str("");
     ss << Prof::get().dcache_size << "," << Prof::get().cache_line_size
@@ -531,11 +760,10 @@ public:
     sa(dcache_node,"write_accesses",Prof::get().dcacheWrites);
     sa(dcache_node,"read_misses",Prof::get().dcacheReadMisses);
     sa(dcache_node,"write_misses",Prof::get().dcacheWriteMisses);
-    sa(dcache_node,"conflicts",Prof::get().dcacheReplacements);
+    //sa(dcache_node,"conflicts",Prof::get().dcacheReplacements);
 
     // ---------- L2 --------------
-    pugi::xml_node l2_node =
-              system_node.find_child_by_attribute("name","L20");
+    pugi::xml_node l2_node = system_node.find_child_by_attribute("name","L20");
 
     ss.str("");
     ss << Prof::get().l2_size << "," << Prof::get().cache_line_size
@@ -543,6 +771,7 @@ public:
       << "," << Prof::get().l2_response_latency
       << "," << 32 /*out*/ << "," << 1 /*policy*/;
     sa(l2_node,"L2_config",ss.str());
+    //sa(l2_node,"clockrate",CORE_CLOCK);
 
     ss.str("");
     ss << Prof::get().l2_mshrs << "," << Prof::get().l2_mshrs << ","
@@ -553,7 +782,7 @@ public:
     sa(l2_node,"write_accesses",Prof::get().l2Writes);
     sa(l2_node,"read_misses",Prof::get().l2ReadMisses);
     sa(l2_node,"write_misses",Prof::get().l2WriteMisses);
-    sa(l2_node,"conflicts",Prof::get().l2Replacements);
+    //sa(l2_node,"conflicts",Prof::get().l2Replacements);
   }
 
   template <class T, class E>

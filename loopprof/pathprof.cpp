@@ -619,9 +619,9 @@ void PathProf::runAnalysis() {
 }
 
 void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus) {
-
   for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
+    fi.calculatePDOM();
     fi.setStackOps();
   }
 
@@ -805,6 +805,8 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     op->setIsLoad(img._isload);
     op->setIsStore(img._isstore);
     op->setIsCtrl(img._isctrl);
+    op->setIsCondCtrl(img._iscondctrl);
+    op->setIsIndirectCtrl(img._isindctrl);
     op->setIsCall(img._iscall);
     op->setIsReturn(img._isreturn);
     op->setIsFloating(img._floating);
@@ -1263,9 +1265,9 @@ void PathProf::procStatsFile(const char* filename) {
         getStat("dcache.replacements",tag,val,dcacheReplacements);
 
         getStat("l2.ReadReq_accesses",tag,val,l2Reads); 
-        getStat("l2.WriteReq_accesses",tag,val,l2Writes); 
+        getStat("l2.ReadExReq_accesses",tag,val,l2Writes); 
         getStat("l2.ReadReq_misses",tag,val,l2ReadMisses); 
-        getStat("l2.WriteReq_misses",tag,val,l2WriteMisses); 
+        getStat("l2.ReadExReq_misses",tag,val,l2WriteMisses); 
         getStat("l2.replacements",tag,val,l2Replacements); 
       }
     }

@@ -20,104 +20,29 @@ static RegisterCP<DySER::cp_orig_dyser> OrigIn("orig-dyser", true);
 __attribute__((__constructor__))
 static void init()
 {
-
-  CPRegistry::get()->register_argument("dyser-size", true, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-size", true, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-vec-len", true, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-vec-len", true, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("disallow-non-stride-vec", false,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("allow-non-stride-vec", false,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("allow-non-stride-vec", false,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("disallow-internal-control-in-dyser", false,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("disallow-internal-control-in-dyser", false,
-                                       &VecIn.cp_obj);
-
-
-  CPRegistry::get()->register_argument("dyser-config-fetch-latency", true,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-config-fetch-latency", true,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-config-switch-latency", true,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-config-switch-latency", true,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-ctrl-miss-config-penalty", true,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-ctrl-miss-config-penalty", true,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-fu-fu-latency", true,
-                                       &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-fu-fu-latency", true,
-                                       &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-use-reduction-tree",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-use-reduction-tree",
-                                       false, &VecIn.cp_obj);
-  CPRegistry::get()->register_argument("dyser-insert-ctrl-miss-penalty",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-insert-ctrl-miss-penalty",
-                                       false, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-disallow-coalesce-mem-ops",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-disallow-coalesce-mem-ops",
-                                       false, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-try-bundle-ops",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-try-bundle-ops",
-                                       false, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-allow-merge-ops",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-allow-merge-ops",
-                                       false, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-use-rpo-index-for-output",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-use-rpo-index-for-output",
-                                       false, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-send-recv-latency",
-                                       true, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-send-recv-latency",
-                                       true, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-force-vectorize",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-force-vectorize",
-                                       false, &VecIn.cp_obj);
-
-  CPRegistry::get()->register_argument("dyser-inst-incr-factor",
-                                       true, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-inst-incr-factor",
-                                       true, &VecIn.cp_obj);
-
-  // DySER FU executes without any inorder constraint
-  CPRegistry::get()->register_argument("dyser-full-dataflow",
-                                       false, &VecOut.cp_obj);
-  CPRegistry::get()->register_argument("dyser-full-dataflow",
-                                       false, &VecIn.cp_obj);
-
+  std::vector<RegisterCP<DySER::cp_vec_dyser>*> models = {&VecOut,&VecIn};
+  for(auto &m : models) {
+    CPRegistry::get()->register_argument("dyser-size", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-vec-len", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("disallow-non-stride-vec", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("allow-non-stride-vec", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("disallow-internal-control-in-dyser", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-config-fetch-latency", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-config-switch-latency", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-ctrl-miss-config-penalty", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-count-depth-nodes-for-config", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-fu-fu-latency", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-use-reduction-tree", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-insert-ctrl-miss-penalty", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-disallow-coalesce-mem-ops", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-try-bundle-ops", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-allow-merge-ops", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-use-rpo-index-for-output", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-send-recv-latency", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-force-vectorize", false, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-inst-incr-factor", true, &m->cp_obj);
+    CPRegistry::get()->register_argument("dyser-full-dataflow", false, &m->cp_obj);
+  }
 
 }
 

@@ -6,7 +6,7 @@
 
 using namespace std;
 
-uint32_t Subgraph::_idCounter=0;
+uint32_t Subgraph::_idCounter=1;
 void Subgraph::checkVec() {
   //topological sort the subgraph
   if(_opVec.size() != _ops.size()) {
@@ -34,8 +34,7 @@ void Subgraph::checkVec() {
   assert(_ops.size() == _opVec.size());
 }
 
-
-uint32_t LoopInfo::_idcounter=0;
+uint32_t LoopInfo::_idcounter=1;
 
 #define MAX_GAMS_SIZE 100
 #define DONT_EVEN_TRY_GAMS_SIZE 500
@@ -98,7 +97,6 @@ void LoopInfo::initializePathInfo() {
   map<BB*,int> numPaths;
   initializePathInfo(_head,numPaths); 
 }
-
 
 //generic version that doesn't track path
 void LoopInfo::incIter() {
@@ -449,9 +447,11 @@ void LoopInfo::printSGPartText(std::ostream& out,
 
 out << "file stdout / \"" << resultfile << "\" /;\n"
     << "stdout.pc=8;stdout.pw=4096;put stdout;\n";
+out.flush();
 
 
   cfu_set->print_to_stream(out);  
+out.flush();
 
 const char * text_pre = R"HERE(
 
@@ -478,18 +478,22 @@ for (depth = 0 to 4,
   close_dep(v1,v2)$iter_close(v1,v2)=YES;
 );
 
-display close_dep;
+*display close_dep;
 
 Bvv.fx(v1,v2)$(not possDep(v1,v2))=1;
 
 
 )HERE";
 
+out.flush();
 
 
 
 out << text_pre;
+out.flush();
+
 out << fixes;
+out.flush();
 
 const char * text = R"HERE(
 
@@ -497,8 +501,8 @@ const char * text = R"HERE(
 set c(v,n);
 loop(k,
     c(v,n)$(kv(v,k) and kn(n,k))=YES;
-)
-display c;
+);
+*display c;
 c(v,'nreg')=YES;
 
 
@@ -581,19 +585,19 @@ c_goal..   GOAL   =e= LAT + WRITES + READS;
 
 
 option optca = 1.9999;
-option optcr = 0.1;
+option optcr = 0.15;
 option reslim = 200;
 option threads = 16;
 
 Model sg/all/;
-sg.limrow=1
-sg.limcol=1
+sg.limrow=1;
+sg.limcol=1;
 solve sg using mip minimizing GOAL;
 
-display Tv.l;
-display Mvn.l;
-display Bvv.l;
-display LAT.l;
+*display Tv.l;
+*display Mvn.l;
+*display Bvv.l;
+*display LAT.l;
 
 scalar t;
 
@@ -660,6 +664,7 @@ for (t = 0 to LAT.l,
 )HERE";
 
     out << text;
+out.flush();
 
 }
 
@@ -833,6 +838,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
    _sgSchedNLA.setCFUSet(cfu_set);
   return scheduleNLA(cfu_set, _sgSchedNLA, gams_details, no_gams);
 }
+
 
 
 /* This algo Searches chunks up the outer loop into peices, and and schedules
@@ -1080,8 +1086,8 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         out << ",";
       }
 
-      if(countElements++%1024==1023) {
-        out << "\r\n";
+      if(countElements++%512==511) {
+        out << "\n";
       }
 
       out << op1->id() << "." << op2->id();
@@ -1120,11 +1126,18 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //std::cerr << "(ed)";
   } else if (!no_gams) {
     gams_attempted=true;
-    //run gams
-    system((std::string("rm -f ") + std::string("gams/") + resultfile).c_str());
-    system((std::string("gams ") + filename + std::string(" mip=gurobi wdir=gams")
-      + (!gams_details?string(" lo=2"):string(""))).c_str());
 
+    // Delete previous
+    string full_resultfile = std::string("gams/") + resultfile;
+    string rm_cmd  = std::string("rm -f ") + full_resultfile;
+    system(rm_cmd.c_str());
+
+    //run gams
+    string gams_cmd=std::string("gams ") + filename + std::string(" mip=gurobi wdir=gams")
+      + (!gams_details?string(" lo=2"):string(""));
+    system(gams_cmd.c_str());
+
+    //Read in file
     std::ifstream ifs((string("gams/")+resultfile).c_str());
 
     //First just make sure we can read it
@@ -1150,6 +1163,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       }
     }
 
+    ifs.clear();
     ifs.seekg(0,ifs.beg); // seek back to begining to parse file for real
     if(found_ops.size() != countOps) {
       ops_in_a_subgraph=found_ops.size();
@@ -1186,6 +1200,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
             assert(prev_op);
             CFU_node* cfu_node=curCFU->getCFUNode(i);
             sgSched.setMapping(prev_op,cfu_node,subgraph);
+            //cout << func()->nice_name() << " sets " << prev_op->id() << "\n";
             continue;
           }
   
@@ -1490,6 +1505,18 @@ std::string LoopInfo::nice_name() {
   stringstream ss;
   ss <<  func()->nice_name() << "_" << id();
   return ss.str();
+}
+
+void LoopInfo::nice_name_tree(stringstream& ss) {
+  if(_immOuterLoop) {
+    _immOuterLoop->nice_name_tree(ss);
+  }
+  ss <<  "::" << id();
+}
+std::string LoopInfo::nice_name_full() {
+  stringstream ss;
+  nice_name_tree(ss);
+  return func()->nice_name() + ss.str();
 }
 
 bool LoopInfo::callsRecursiveFunc() {

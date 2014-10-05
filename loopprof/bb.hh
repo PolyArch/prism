@@ -29,10 +29,11 @@ private:
   CPC _head, _tail;
   BBvec _pred, _succ;
   //IntEdge _succ_weight; removed, delete this
-  int _freq;  
-  int _rpo_num;
+  int _freq=0;  
+  int _rpo_num=-1;
   OpVec _ops;
   OpMap _opMap;
+  bool _fake_unique_exit=false;
 
   //EdgeCount predCount;
 
@@ -50,6 +51,7 @@ template<class Archive>
     ar & _rpo_num;
     ar & _ops;
     ar & _opMap;
+    ar & _fake_unique_exit;
     for(auto i=_ops.begin(),e=_ops.end();i!=e;++i) {
       Op* op = *i;
       op->setBB(this);
@@ -68,6 +70,7 @@ public:
   //getters
   CPC head() const {return _head;}
   CPC tail() const {return _tail;}
+  bool fake_unique_exit() {return _fake_unique_exit;}
 
   int len() {return _ops.size();} 
   Op* firstOp() {return _ops.front();}
@@ -108,6 +111,8 @@ public:
   unsigned pred_size() {return _pred.size();}
   BBvec::iterator pred_begin() {return _pred.begin();}
   BBvec::iterator pred_end() {return _pred.end();}
+
+  void setFakeExit() {_fake_unique_exit=true;}
 
   //IntEdge::iterator weight_begin() {return _succ_weight.begin();}
   //IntEdge::iterator weight_end() {return _succ_weight.end();}

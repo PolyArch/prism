@@ -119,7 +119,7 @@ namespace DySER {
     }
 
   public:
-    SliceInfo(LoopInfo *li, unsigned dyser_size) {
+    SliceInfo(LoopInfo *li, unsigned dyser_size, bool can_vec) {
       LI = li;
       if (!li)
         return;
@@ -222,7 +222,7 @@ namespace DySER {
         }
       }
 
-      optimizeCS();
+      optimizeCS(can_vec);
 
       unsigned numTry = 0;
       do {
@@ -400,9 +400,13 @@ namespace DySER {
       for (auto I = OpList.begin(), E = OpList.end(); I != E; ++I) {
 
         if ((*I)->isCall() && !isInLoadSlice(*I)) {
-          if ((*I)->getCalledFuncName() == "sincosf"
-              || (*I)->getCalledFuncName() == "__libm_sse2_sincosf")
-            _hasSinCos = true;
+            if ((*I)->getCalledFuncName() == "sincosf"
+              || (*I)->getCalledFuncName() == "__sincos"
+              || (*I)->getCalledFuncName() == "__acos"
+              || (*I)->getCalledFuncName() == "__asin"
+              || (*I)->getCalledFuncName() == "__libm_sse2_sincosf") {
+              _hasSinCos = true;
+            }
         }
 
         if (!((*I)->isLoad() || (*I)->isStore()))
@@ -456,41 +460,42 @@ namespace DySER {
     }
 
 
-    void optimizeCS() {
-      for (auto I = rpoIndex.begin(), E = rpoIndex.end(); I != E; ++I) {
-        Op *op = I->first;
-        if (isInLoadSlice(op))
-          continue;
-
-        bool hasDepInCS = false;
-        bool aOutput = false;
-        bool hasUseInCS = false;
-
-        for (auto DI = op->d_begin(), DE = op->d_end(); DI != DE; ++DI) {
-          Op *DepOp = *DI;
-          if (DepOp == op)
+    void optimizeCS(bool can_vec) {
+      if(!can_vec) { 
+        for (auto I = rpoIndex.begin(), E = rpoIndex.end(); I != E; ++I) {
+          Op *op = I->first;
+          if (isInLoadSlice(op))
             continue;
-          if (IsInLoadSlice.count(DepOp) && !isInLoadSlice(DepOp)) {
-            hasDepInCS = true;
-            break;
+  
+          bool hasDepInCS = false;
+          bool aOutput = false;
+          bool hasUseInCS = false;
+  
+          for (auto DI = op->d_begin(), DE = op->d_end(); DI != DE; ++DI) {
+            Op *DepOp = *DI;
+            if (DepOp == op)
+              continue;
+            if (IsInLoadSlice.count(DepOp) && !isInLoadSlice(DepOp)) {
+              hasDepInCS = true;
+              break;
+            }
+          }
+  
+          for (auto UI = op->u_begin(), UE = op->u_end(); UI != UE; ++UI) {
+            Op *UseOp = *UI;
+            if (UseOp == op)
+              continue;
+            if (!IsInLoadSlice.count(UseOp) || isInLoadSlice(UseOp))
+              aOutput = true;
+            if (IsInLoadSlice.count(UseOp) && !isInLoadSlice(UseOp))
+              hasUseInCS = true;
+          }
+          if (aOutput && !hasDepInCS && !hasUseInCS) {
+            // This node should very well to in LS
+            IsInLoadSlice[op] = true;
           }
         }
-
-        for (auto UI = op->u_begin(), UE = op->u_end(); UI != UE; ++UI) {
-          Op *UseOp = *UI;
-          if (UseOp == op)
-            continue;
-          if (!IsInLoadSlice.count(UseOp) || isInLoadSlice(UseOp))
-            aOutput = true;
-          if (IsInLoadSlice.count(UseOp) && !isInLoadSlice(UseOp))
-            hasUseInCS = true;
-        }
-        if (aOutput && !hasDepInCS && !hasUseInCS) {
-          // This node should very well to in LS
-          IsInLoadSlice[op] = true;
-        }
       }
-
       computeBundledNodes();
 
     }
@@ -504,11 +509,23 @@ namespace DySER {
       return (IsOutput.count(op) > 0);
     }
 
+    static SliceInfo* setup(LoopInfo* LI, unsigned dyser_size,  bool can_vec) {
+      auto I = _info_cache.find(LI);
+      if (I != _info_cache.end())
+       return I->second;
+
+       SliceInfo *Info = new SliceInfo(LI, dyser_size,can_vec);
+      _info_cache[LI] = Info;
+      return Info;
+    }
+
     static SliceInfo* get(LoopInfo *LI, unsigned dyser_size) {
       auto I = _info_cache.find(LI);
       if (I != _info_cache.end())
         return I->second;
-      SliceInfo *Info = new SliceInfo(LI, dyser_size);
+
+      assert(0);
+      SliceInfo *Info = new SliceInfo(LI, dyser_size,true);
       _info_cache[LI] = Info;
       return Info;
     }

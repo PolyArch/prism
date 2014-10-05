@@ -15,6 +15,9 @@
 #include "cp_utils.hh"
 
 #define MAX_RES_DURATION 64
+#define QUAD_ISSUE_CORE_CLOCK 3000
+//This assumes the original code ran at 2000Mhz, and that memory lat was 30ns
+#define MEMORY_LATENCY 60
 
 template<typename T, typename E>
 class CP_DG_Builder : public CriticalPath {
@@ -24,7 +27,7 @@ public:
   typedef dg_inst<T, E> Inst_t;
 
   typedef std::shared_ptr<BaseInst_t> BaseInstPtr;
-  typedef std::shared_ptr<Inst_t> InstPtr;
+  typedef std::shared_ptr<Inst_t> InstPtr;  
 
   CP_DG_Builder() : CriticalPath() {
      MSHRUseMap[0];
@@ -43,34 +46,39 @@ public:
      avg_rob_head=20;
   }
 
-  virtual ~CP_DG_Builder() {
-    
-  }
+  virtual ~CP_DG_Builder() {}
 
-  virtual void setWidth(int i) {
+  virtual void setWidth(int i,bool scale_freq) {
     FETCH_WIDTH = i;
     D_WIDTH = i;
     ISSUE_WIDTH = i;
     WRITEBACK_WIDTH = i;
     COMMIT_WIDTH = i;
     SQUASH_WIDTH = i;
-
+    _scale_freq=scale_freq;
     if(_isInOrder) {
       FETCH_TO_DISPATCH_STAGES=3;
+      COMMIT_TO_COMPLETE_STAGES=0;
+
 
       N_ALUS=ISSUE_WIDTH; //only need 1-issue, 2-issue
       N_FPU=1;
       RW_PORTS=1;
       N_MUL=1;
 
-      IBUF_SIZE=16;
-      PIPE_DEPTH=16;
-      PHYS_REGS=90;
+      PIPE_DEPTH=10;//roughly bobcat, but depth is too low
+      PHYS_REGS=32;
 
       //overide incoming defaults
       IQ_WIDTH=8;
-      ROB_SIZE=80;
-      PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
+      ROB_SIZE=32;
+      LQ_SIZE = 16;
+      SQ_SIZE = 20;
+
+      PEAK_ISSUE_WIDTH=ISSUE_WIDTH+1;  
+      if(scale_freq) {
+        CORE_CLOCK=1000;
+      }
 
     } else {
       N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
@@ -78,14 +86,70 @@ public:
         N_ALUS=2;
       }
       N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),4);
-      RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),2);
+      RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),3);
       N_MUL=std::min(std::max(1,ISSUE_WIDTH/2),2);
 
-      IBUF_SIZE=32;
-      PIPE_DEPTH=20;
-      PHYS_REGS=256;
-      PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
+      if(ISSUE_WIDTH==1) {
+        std::cout << "Single issue ooo?";
+      } else if(ISSUE_WIDTH==2) { //roughly jaguar
+        CORE_CLOCK=2500;
+        FETCH_TO_DISPATCH_STAGES=4;
+        COMMIT_TO_COMPLETE_STAGES=1;
+        PHYS_REGS=136;
+        PIPE_DEPTH=13;
+        IQ_WIDTH=32;
+        LQ_SIZE = 16;
+        SQ_SIZE = 20;
+        ROB_SIZE=64;
+      } else if(ISSUE_WIDTH==4) {
+        CORE_CLOCK=QUAD_ISSUE_CORE_CLOCK;
+        FETCH_TO_DISPATCH_STAGES=4;
+        COMMIT_TO_COMPLETE_STAGES=2;
+        PIPE_DEPTH=17;
+        PHYS_REGS=160;
+        IQ_WIDTH=40;
+        LQ_SIZE = 64;
+        SQ_SIZE = 36;
+        ROB_SIZE=168;
+      } else if(ISSUE_WIDTH==6) { //roughly haswell
+        CORE_CLOCK=3000;
+        FETCH_TO_DISPATCH_STAGES=5;
+        COMMIT_TO_COMPLETE_STAGES=2;
+        PIPE_DEPTH=18;
+        PHYS_REGS=168;
+        IQ_WIDTH=48;
+        LQ_SIZE = 42;
+        SQ_SIZE = 72;
+        ROB_SIZE=192;
+      } else if(ISSUE_WIDTH==8) {
+        CORE_CLOCK=3500;
+        FETCH_TO_DISPATCH_STAGES=6;
+        COMMIT_TO_COMPLETE_STAGES=3;
+        PIPE_DEPTH=19;
+        PHYS_REGS=168;
+        IQ_WIDTH=60;
+        LQ_SIZE = 42;
+        SQ_SIZE = 72;
+        ROB_SIZE=192;
+      }
 
+      if(!scale_freq) {
+        CORE_CLOCK=2000;
+        FETCH_TO_DISPATCH_STAGES=4;
+        COMMIT_TO_COMPLETE_STAGES=2;
+        PIPE_DEPTH=19;
+        PHYS_REGS=168;
+        IQ_WIDTH=48;
+        LQ_SIZE = 32;
+        SQ_SIZE = 32;
+        ROB_SIZE=192;
+      }
+
+      LQ.resize(LQ_SIZE);
+      SQ.resize(SQ_SIZE);
+
+      IBUF_SIZE=std::max(FETCH_TO_DISPATCH_STAGES*ISSUE_WIDTH,16);
+      PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
     }
 
     //IBUF_SIZE=FETCH_TO_DISPATCH_STAGES * ISSUE_WIDTH;
@@ -111,6 +175,13 @@ public:
 
 
   virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
+    if(_elide_mem && sh_inst->isAccelerated) {
+      if(sh_inst->_op && (sh_inst->_op->shouldIgnoreInAccel() ||
+                          sh_inst->_op->isLoad())) {
+        return;
+      }
+    }
+
     Inst_t* depInst = getCPDG()->peekPipe(-1);
     if(depInst) {
       uint64_t commitCycle = depInst->cycleOfStage(Inst_t::Commit);
@@ -232,14 +303,6 @@ protected:
     return ret;
   }
 
-  /*
-   * This is never called!  (so Tony commented it)
-  void remove_instr(dg_inst_base<T, E> *p) {
-    Inst_t *ptr = dynamic_cast<Inst_t*>(p);
-    assert(ptr);
-    _inst2Op.erase(ptr);
-  }*/
-
   void createDummy(const CP_NodeDiskImage &img,uint64_t index, Op *op, 
       int dtype = dg_inst_dummy<T,E>::DUMMY_MOVE) {
     std::shared_ptr<dg_inst_dummy<T,E>> dummy_inst
@@ -340,16 +403,6 @@ protected:
   }
 
   virtual Op* getOpForInst(Inst_t &n, bool allowNull = false) {
-    /* //old version
-     * auto I2Op = _inst2Op.find(&n);
-    if (I2Op != _inst2Op.end())
-      return I2Op->second;
-    if (!allowNull) {
-      if (n.hasDisasm())
-        return 0; // Fake instructions ....
-      assert(0 && "inst2Op map does not have inst??");
-    }
-    */
     if (n._op!=NULL) {
       return n._op; 
     }
@@ -372,6 +425,15 @@ protected:
 
   //function to add dependences onto uarch event nodes -- for the pipeline
   virtual void addDeps(std::shared_ptr<Inst_t>& inst, Op* op = NULL) {
+    if(_elide_mem && inst->isAccelerated) { //normal path
+      if (inst->_isload || (op && (op->isLoad() || op->shouldIgnoreInAccel()))) {
+        checkDataDep(*inst);
+        checkRE(*inst);
+        checkEP(*inst);
+        return;
+      }
+    }
+
     setFetchCycle(*inst);
     setDispatchCycle(*inst);
     setReadyCycle(*inst);
@@ -394,7 +456,7 @@ protected:
   SingleCycleRes wbBusRes;
   SingleCycleRes issueRes;
 
-  typedef std::map<uint64_t,int> FuUsageMap;
+  typedef std::map<uint64_t,int> FuUsageMap; //maps cycle to usage until next cycle
   typedef std::map<uint64_t,FuUsageMap> FuUsage;
  
   std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
@@ -427,72 +489,78 @@ protected:
   uint16_t sq_size_at_dispatch[PSIZE];
 
 
-
-  void cleanup() {
-    getCPDG()->cleanup();
-  }
-
   uint64_t maxIndex;
   uint64_t _curCycle;
   uint64_t _lastCleaned=0;
   uint64_t _latestCleaned=0;
 
-  virtual void cleanUp(uint64_t curCycle) {
-    _lastCleaned=curCycle;
-    _latestCleaned=std::max(curCycle,_latestCleaned);
+  std::unordered_set<uint64_t> fu_monitors;
 
-    //delete irrelevent 
-    typename SingleCycleRes::iterator upperbound_sc;
-    upperbound_sc = wbBusRes.upper_bound(curCycle);
-    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
-    upperbound_sc = issueRes.upper_bound(curCycle);
-    issueRes.erase(issueRes.begin(),upperbound_sc); 
-
-    //summing up idle cycles
-    uint64_t prevCycle=0;
-    for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
-      uint64_t cycle=*I;
-      if(prevCycle!=0 && cycle-prevCycle>10) {
-        idleCycles+=(cycle-prevCycle-10);
-      }
-      if (cycle + 100  < curCycle && activityMap.size() > 2) {
-        I = activityMap.erase(I);
-        prevCycle=cycle;
-      } else {
-        break;
-      }
+  virtual void print_edge_weights(std::ostream& out, AnalysisType analType) override {
+    double total_weight=0; //should roughly equal number of cycles in program
+    for(int i = 0; i < E_NUM; ++i) {
+      double weight = getCPDG()->weightOfEdge(i,analType);
+      total_weight+=weight;
     }
 
+    for(int i = 0; i < E_NUM; ++i) {
+      double weight = getCPDG()->weightOfEdge(i,analType);
 
+      if(weight!=0.0) {
+        cout << edge_name[i] << ":" << weight/total_weight << " ";
+      }
+    }
+    cout << " (total: " << total_weight << ")";
+  }
+
+  virtual void monitorFUUsage(uint64_t id, uint64_t numCycles, int usage) {
+    
+  }
+
+  virtual void cleanFU(uint64_t curCycle) {
     //for funcUnitUsage
     for(auto &pair : fuUsage) {
       auto& fuUseMap = pair.second;
-      /*
-      for(FuUsageMap::iterator i=++fuUseMap.begin(),e=fuUseMap.end();i!=e;) {
-        uint64_t cycle = i->first;
-        assert(cycle!=0);
-        if (cycle + MAX_RES_DURATION  < curCycle) {
-          i = fuUseMap.erase(i);
-        } else {
-          break;
-        }
-      }*/
-
-      //delete irrelevent
       if(fuUseMap.begin()->first < curCycle) {
         //debug MSHRUse Deletion
         //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
         auto upperUse = --fuUseMap.upper_bound(curCycle);
         auto firstUse = fuUseMap.begin();
+
         if(upperUse->first > firstUse->first) {
+          if(fu_monitors.count(pair.first)) {
+            uint64_t prev_cycle=-1;
+            int prev_usage;
+            for(auto i=firstUse; i!=upperUse; ++i) {
+              if(prev_cycle!=-1) {
+                monitorFUUsage(pair.first,i->first-prev_cycle,prev_usage);
+              }
+              prev_cycle=i->first;
+              prev_usage=i->second;
+            }
+          }
+
           fuUseMap.erase(firstUse,upperUse); 
         }
       }
     }
 
+    for(typename NodeResp::iterator i=nodeResp.begin(),e=nodeResp.end();i!=e;++i) {
+      NodeRespMap& respMap = i->second;
+      if(respMap.begin()->first < curCycle) {
+        //debug MSHRUse Deletion
+        //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
+        auto upperUse = --respMap.upper_bound(curCycle);
+        auto firstUse = respMap.begin();
+        if(upperUse->first > firstUse->first) {
+          respMap.erase(firstUse,upperUse); 
+        }
+      }
 
+    }
+  }
 
-
+  virtual void cleanMSHR(uint64_t curCycle) {
     //DEBUG MSHR Usage
 /*    for(auto i=MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
       uint64_t cycle = i->first;
@@ -505,8 +573,6 @@ protected:
     }
     std::cerr << "(" << MSHRUseMap.size() << ")\n";*/
 
-
-    //delete irrelevent
     if(MSHRUseMap.begin()->first < curCycle) {
       //debug MSHRUse Deletion
       //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
@@ -517,45 +583,44 @@ protected:
       }
     }
 
-    //delete irrelevent 
     auto upperMSHRResp = MSHRResp.upper_bound(curCycle-200);
     auto firstMSHRResp = MSHRResp.begin();
     if(upperMSHRResp->first > firstMSHRResp->first) {
       MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
     }
-
-
-    for(typename NodeResp::iterator i=nodeResp.begin(),e=nodeResp.end();i!=e;++i) {
-      NodeRespMap& respMap = i->second;
-
-      /*
-      for(typename NodeRespMap::iterator i=respMap.begin(),e=respMap.end();i!=e;) {
-        uint64_t cycle = i->first;
-
-        if (cycle + MAX_RES_DURATION  < curCycle) {
-          i = respMap.erase(i);
-        } else {
-          break;
-        }
-      }*/
-
-      //delete irrelevent
-      if(respMap.begin()->first < curCycle) {
-        //debug MSHRUse Deletion
-        //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
-        auto upperUse = --respMap.upper_bound(curCycle);
-        auto firstUse = respMap.begin();
-        if(upperUse->first > firstUse->first) {
-          respMap.erase(firstUse,upperUse); 
-        }
-      }
-
-    }
-
   }
 
+  virtual void cleanUp(uint64_t curCycle) {
+    _lastCleaned=curCycle;
+    _latestCleaned=std::max(curCycle,_latestCleaned);
+
+    typename SingleCycleRes::iterator upperbound_sc;
+    upperbound_sc = wbBusRes.upper_bound(curCycle);
+    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
+    upperbound_sc = issueRes.upper_bound(curCycle);
+    issueRes.erase(issueRes.begin(),upperbound_sc); 
+
+    //summing up idle cycles
+    uint64_t prevCycle=0;
+    for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
+      uint64_t cycle=*I;
+      if(prevCycle!=0 && cycle-prevCycle>18) {
+        idleCycles+=(cycle-prevCycle-18);
+      }
+      if (cycle + 100  < curCycle && activityMap.size() > 2) {
+        I = activityMap.erase(I);
+        prevCycle=cycle;
+      } else {
+        break;
+      }
+    }
+
+    cleanMSHR(curCycle);
+    cleanFU(curCycle);
+  }
+
+  //Update Queues: IQ, LQ, SQ
   virtual void insertLSQ(std::shared_ptr<BaseInst_t> inst) {
-    //Update Queues: IQ, LQ, SQ
     if (inst->_isload) {
       LQ[LQind]=inst;
       LQind=(LQind+1)%LQ_SIZE;
@@ -612,9 +677,6 @@ protected:
 
     uint64_t filter_addr=(((uint64_t)-1)^(Prof::get().cache_line_size-1));
     uint64_t addr = eff_addr & filter_addr;
-
-    //std::cout << addr << ", " << filter_addr << " (" << Prof::get().cache_line_size << "," << cpnode->_eff_addr << ")\n";
-
 
     //keep going until we find a spot .. this is gauranteed
     while(true) {
@@ -926,18 +988,17 @@ protected:
     checkDD(inst);
     checkDBW(inst);
 
+    checkROBSize(inst); //Finite Rob Size  (for INORDER -- finite # in flight)
+
     if(_isInOrder) {
       //nothing
       // TODO: This is here because with out it, fetch and dispatch get
       // decoupled from the rest of the nodes, causing memory explosion
       // b/c clean dosen't get called
       // ideally, we should 
-      checkIOInFlight(inst); //Finite Rob Size
     } else {
-      checkROBSize(inst); //Finite Rob Size
       checkIQStalls(inst);
       checkLSQSize(inst[Inst_t::Dispatch],inst._isload,inst._isstore);
-
       // ------ ENERGY EVENTS -------
       if(inst._floating) {
         iw_fwrites++;
@@ -1020,14 +1081,14 @@ protected:
       checkInorderIssueWidth(*inst); //in order issue width
       checkPipelength(*inst);
     } else {
-      //TODO: below two things should be merged
       checkIssueWidth(*inst);
     }
 
     checkFuncUnits(inst);
+
     if(inst->_isload) {
       //loads acquire MSHR at execute
-      checkNumMSHRs(inst,false);
+      checkNumMSHRs(inst);
     }
 
     if(!_isInOrder) {
@@ -1060,19 +1121,7 @@ protected:
         InstQueue.insert(
                std::make_pair(inst.cycleOfStage(Inst_t::Complete),&inst));
       }
-    } /*else {
-      checkInorderComplete
-    }*/
-
-    //Energy Events
-    if(op && op->numUses()>0) {
-      if(inst._floating) {
-        //regfile_fwrites++;
-      } else {
-        //regfile_writes++;
-      }
-    }
-
+    } 
 
   }
   virtual void setCommittedCycle(Inst_t &inst) {
@@ -1091,25 +1140,6 @@ protected:
       //Energy
       rob_writes+=2;
       rob_reads++;
-      //Calculate extra rob_reads due to the pipeline checking extra instructions
-      //before it fills up the commit width
-      Inst_t* prevInst = getCPDG()->peekPipe(-1); 
-      Inst_t* widthInst = getCPDG()->peekPipe(-COMMIT_WIDTH); 
-      if(prevInst && widthInst) {
-        uint64_t widthCycle = widthInst->cycleOfStage(Inst_t::Commit);
-        uint64_t prevCycle = prevInst->cycleOfStage(Inst_t::Commit);
-        uint64_t curCycle = inst.cycleOfStage(Inst_t::Commit);
-        if(prevCycle!=curCycle && widthCycle + 1 != curCycle) {
-          int newReads=curCycle-prevCycle;
-
-          assert(prevCycle!=0);
-
-/*          if(newReads > 10) {
-            std::cout << newReads << "reads: " << prevCycle << " " << curCycle << "\n";
-          }*/
-          rob_reads+=newReads;
-        }
-      }
     }
     setEnergyStatsPerInst(inst);
   }
@@ -1126,16 +1156,14 @@ protected:
   }
 
   virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {
-    //if(!_isInOrder) {
-      if(inst->_isstore) {
-        int st_lat=stLat(inst->_st_lat,inst->_cache_prod,
-                         inst->_true_cache_prod,inst->isAccelerated);
-        getCPDG()->insert_edge(*inst, Inst_t::Commit,
-                               *inst, Inst_t::Writeback, 2+st_lat, E_WB);
-        checkNumMSHRs(inst,true);
-        checkPP(*inst);
-      }
-    //}
+    if(inst->_isstore) {
+      int st_lat=stLat(inst->_st_lat,inst->_cache_prod,
+                       inst->_true_cache_prod,inst->isAccelerated);
+      getCPDG()->insert_edge(*inst, Inst_t::Commit,
+                             *inst, Inst_t::Writeback, 2+st_lat, E_WB);
+      checkNumMSHRs(inst);
+      checkPP(*inst);
+    }
   }
 
   virtual bool predictTaken(Inst_t& dep_n, Inst_t &n) {
@@ -1166,14 +1194,6 @@ protected:
         lat+=1;
       }
 
-/*
-      if(lat==0) { //fetch ends at a control inst
-        Inst_t* depInst2 = getCPDG()->peekPipe(-2);
-        if(depInst2 && depInst2->cycleOfStage(0)==depInst->cycleOfStage(0)) {
-          lat=1;
-        }
-      }
-*/
     }
 
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
@@ -1195,34 +1215,14 @@ protected:
   }
 
 
-/*
-  //Icache miss
-  //KNOWN_ISSUE:  what happens to accelerated icache miss?
-  virtual Inst_t &checkICache(Inst_t&n) {
-    if(n._icache_lat>0) {
-      getCPDG()->insert_edge(n.index()-1,Inst_t::Fetch,
-                             n,Inst_t::Fetch,n._icache_lat,E_IC);
-    }
-    return n;
-  }
-*/
   //Finite fetch bandwidth
   virtual Inst_t &checkFBW(Inst_t &n) {
     Inst_t* depInst = getCPDG()->peekPipe(-FETCH_WIDTH);
     if(!depInst) {
       return n;
     }
-
-    int length=1;
-    //TODO: Do we need this?
-    //Inst_t* prevInst = getCPDG()->peekPipe(-1);
-    //if(prevInst && !prevInst->_isctrl) {
-      //length+=n._icache_lat; //TODO: Which is correct, this one seems to conservative sometimes
-      //length=std::max(length,n._icache_lat);  //this steems too optimistic sometimes
-    //}
-
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
-                           n, Inst_t::Fetch, length, E_FBW); 
+                           n, Inst_t::Fetch, 1, E_FBW); 
     return n;
   }
 
@@ -1243,25 +1243,6 @@ protected:
 
     return n;
   }
-/*
-  //check branch predict edges -- (in order)
-  virtual Inst_t &checkBranchPredict(Inst_t &n, Op* op) {
-    //No branch prediction implemented
-    Inst_t* depInst = getCPDG()->peekPipe(-1);
-    if(!depInst) { 
-      return n;
-    }
-    if(depInst->_isctrl) {
-      getCPDG()->insert_edge(*depInst, Inst_t::Complete,
-                             n, Inst_t::Fetch,
-                             n._icache_lat + 1,E_BP);
-    }
-    
-    return n;
-  }
-*/
-
-  
 
   //Control Dep
   virtual Inst_t &checkControlMispeculate(Inst_t &n) {
@@ -1285,7 +1266,7 @@ protected:
                                n, Inst_t::Fetch,
                                //n._icache_lat + prev_squash_penalty 
                                std::max((int)n._icache_lat, adjusted_squash_cycles)
-                               + 1,E_CM); //two to commit, 1 to 
+                               + 1,E_CM); 
 
         //we need to make sure that the processor stays active during squash
         uint64_t i=depInst->cycleOfStage(Inst_t::Complete);
@@ -1345,7 +1326,6 @@ protected:
        return n; //only check this on first fetch of new cycle
      }
    
-
      int pipeLoc = getCPDG()->getPipeLoc();
 
      //Caculate number of insts not in rob at time of fetch
@@ -1370,35 +1350,6 @@ protected:
                               n, Inst_t::Fetch, 2, E_LQTF); //3 cycles emperical
     }
 
-
-    
-    
- 
-/*
-  //Getting rid of this because i don't think lsq should stall fetch --
- //it should work like a rob for just loads, where it stalls dispatch
-
-    //number of load/store instructions not executed exceeds the LSQ_WIDTH,
-    //stall the fetch
-    //TODO XXX This isn't really consistent with simulator code... overly
-    //conservative
-    if (LQ.size() < (unsigned)LQ_SIZE && SQ.size() < (unsigned)SQ_SIZE)
-      return n;
-
-    uint64_t min_issued_cycle = (uint64_t)-1;
-
-    Inst_t* min_node=0;
-    for (auto I = LQ.begin(), EE = LQ.end(); I!=EE; ++I) {
-      Inst_t* i = I->second.get();
-      min_node=i;           
-    }
-    for (auto I = SQ.begin(), EE = SQ.end(); I!=EE; ++I) {
-      Inst_t* i = I->second.get();
-      min_node=i;
-    }
-    getCPDG()->insert_edge(min_node, Inst_t::Commit,
-                           n, Inst_t::Fetch, n._icache_lat+1,E_LSQ);
-    */
     return n;
     
   }
@@ -1436,38 +1387,8 @@ protected:
     return n;
   }
 
-
-  //Check Serializing
-  //didn't work as well at decode
-/*
-  virtual Inst_t &checkSerializing(Inst_t &n) {
-    Inst_t* depInst = getCPDG()->peekPipe(-1); 
-    if(!depInst) {
-      return n;
-    } 
-
-    if(n._serialBefore || depInst->_serialAfter) {
-      getCPDG()->insert_edge(*depInst, Inst_t::Commit,
-                             n, Inst_t::Dispatch, 3,E_SER);
-    }
-    return n;
-  }
-*/
-
-
   //Finite ROB (commit to dispatch)
-  virtual Inst_t &checkIOInFlight(Inst_t &n) {
-    Inst_t* depInst = getCPDG()->peekPipe(-36);  //TODO: parameterize
-    if(!depInst) {
-      return n;
-    }
-    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
-                           n, Inst_t::Dispatch, 1,E_ROB);
-    return n;
-  }
-
-
-  //Finite ROB (commit to dispatch)
+  //(for inorder, finite number in flight)
   virtual Inst_t &checkROBSize(Inst_t &n) {
     Inst_t* depInst = getCPDG()->peekPipe(-ROB_SIZE); 
     if(!depInst) {
@@ -1574,10 +1495,6 @@ protected:
     if ( (n._mem_prod > 0 && n._mem_prod < n.index() )  ) {
       BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
       addTrueMemDep(dep_inst,n);
-      //if(dep_inst.isPipelineInst()) {
-      //  Inst_t& prev_node = static_cast<Inst_t&>(dep_inst);
-      //  insert_mem_dep_edge(prev_node, n);
-      //}
     }
   }
 
@@ -1818,8 +1735,6 @@ protected:
     return;
   }
 
-
-
   //KNOWN_HOLE: SSE Issue Latency Missing
   //shouldn't matter though, as we always use scalar inputs
   virtual unsigned getFUIssueLatency(Inst_t &n) {
@@ -1827,7 +1742,7 @@ protected:
   }
 
   //Check Functional Units to see if they are full
-  virtual void checkFuncUnits(std::shared_ptr<Inst_t>& inst) {
+  virtual void checkFuncUnits(std::shared_ptr<BaseInst_t> inst) {
     countOpclassEnergy(inst->_opclass);
 
     // no func units if load, store, or if it has no opclass
@@ -1837,14 +1752,16 @@ protected:
     }
     
     int fuIndex = fuPoolIdx(inst->_opclass, inst->_op);
-    int maxUnits = getNumFUAvailable(*inst); //opclass
+    int maxUnits = getNumFUAvailable(inst->_opclass,inst->_op); //opclass
     Inst_t* min_node = static_cast<Inst_t*>(
-         addResource(fuIndex, inst->cycleOfStage(Inst_t::Execute), 
-                                   getFUIssueLatency(*inst), maxUnits, inst));
+         addResource(fuIndex, inst->cycleOfStage(inst->beginExecute()), 
+                                   getFUIssueLatency(inst->_opclass,inst->_op), 
+                                   maxUnits, inst));
 
     if (min_node) {
-      getCPDG()->insert_edge(*min_node, Inst_t::Execute,
-                        *inst, Inst_t::Execute, getFUIssueLatency(*min_node),E_FU);
+      getCPDG()->insert_edge(*min_node, min_node->beginExecute(),
+                        *inst, inst->beginExecute(), 
+                        getFUIssueLatency(min_node->_opclass,min_node->_op),E_FU);
     }
   }
 
@@ -1870,60 +1787,26 @@ protected:
   }
 
 
-  //check MSHRs to see if they are full
-  virtual void checkNumMSHRs(std::shared_ptr<Inst_t>& n, bool store) {
-    int ep_lat=epLat(n->_ex_lat,n.get(),n->_isload,n->_isstore,
-                  n->_cache_prod,n->_true_cache_prod,n->isAccelerated);
-    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,
-                     n->isAccelerated);
-
-
-    int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
-    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,st_lat,
-                  mlat,reqDelayT,respDelayT,mshrT)) {
-      return;
-    } 
-
-    int rechecks=0;
-    uint64_t extraLat=0;
-    if(!store) { //if load
-
-      //have to wait this long before each event
-      
+  virtual void checkMSHRStallLoadCore(std::shared_ptr<Inst_t> n,
+      int reqDelayT, int respDelayT, int mshrT) {
 #if 0
       int insts_to_squash=instsToSquash();
       int squash_cycles = squashCycles(insts_to_squash)/2;
       int recheck_cycles = squash_cycles;
-
-
-      if(recheck_cycles < 7) {
-        recheck_cycles=7;
-      }
-
-      if(recheck_cycles > 9) {
-        recheck_cycles=9;
-      }
-
 #else
-      //int insts_to_squash=FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH;
-      //int recheck_cycles=FETCH_TO_DISPATCH_STAGES;
-      int insts_to_squash=13;
-      int recheck_cycles=9;
+      int insts_to_squash=std::max(1,FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH-3);//13
+      int recheck_cycles=FETCH_TO_DISPATCH_STAGES*2+1; //9;
 
 #endif
 
+      int rechecks=0;
+      uint64_t extraLat=0;
+
       assert(recheck_cycles>=1); 
       BaseInst_t* min_node =
-         addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Execute), 
+         addMSHRResource(reqDelayT + n->cycleOfStage(n->beginExecute()), 
               mshrT, n, n->_eff_addr, recheck_cycles, rechecks, extraLat);
-      if(rechecks==0) {
-        /*if(min_node) {
-          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
-               *n, Inst_t::Execute, respDelayT+extraLat, E_MSHR);
-        }*/
-        //don't do anything!
-        
-      } else { //rechecks > 0 -- time to refetch
+      if(rechecks!=0) {
         //create a copy of the instruction to serve as a dummy
         Inst_t* dummy_inst = new Inst_t();
         dummy_inst->copyEvents(n.get());
@@ -1960,19 +1843,73 @@ protected:
         }
 
       }
-    } else { //if store
+  }
+
+  virtual void checkMSHRStallLoad(std::shared_ptr<BaseInst_t>& n,
+      int reqDelayT, int respDelayT, int mshrT) {
+
+      int rechecks=0;
+      uint64_t extraLat=0;
+
+      BaseInst_t* min_node =
+           addMSHRResource(reqDelayT + n->cycleOfStage(n->beginExecute()), 
+                           mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
+      if(min_node) {
+          getCPDG()->insert_edge(*min_node, min_node->memComplete(),
+                         *n, n->beginExecute(), mshrT+respDelayT, E_MSHR);
+     }
+  }
+
+  virtual void checkMSHRStallStore(std::shared_ptr<BaseInst_t>& n,
+      int reqDelayT, int respDelayT, int mshrT) {
+
+      int rechecks=0;
+      uint64_t extraLat=0;
+
        BaseInst_t* min_node =
-           addMSHRResource(reqDelayT + n->cycleOfStage(Inst_t::Commit), 
+           addMSHRResource(reqDelayT + n->cycleOfStage(n->eventCommit()), 
                            mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
       if(min_node) {
         getCPDG()->insert_edge(*min_node, min_node->memComplete(),
-                 *n, Inst_t::Writeback, mshrT+respDelayT, E_MSHR);
+                 *n, n->memComplete(), mshrT+respDelayT, E_MSHR);
       }
+  }
+
+  //check MSHRs to see if they are full
+  virtual void checkNumMSHRs(std::shared_ptr<BaseInst_t> n) {
+
+    //First do energy accounting
+    if(n->_isload || n->_isstore) {
+      calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
+                      n->_cache_prod, n->_true_cache_prod,
+                      l1_hits, l1_misses, l2_hits, l2_misses,
+                      l1_wr_hits, l1_wr_misses, l2_wr_hits, l2_wr_misses);
+    }
+
+    int ep_lat=epLat(n->_ex_lat,n.get(),n->_isload,n->_isstore,
+                  n->_cache_prod,n->_true_cache_prod,n->isAccelerated);
+    int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,
+                     n->isAccelerated);
+
+    int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
+    if(!l1dTiming(n->_isload,n->_isstore,ep_lat,st_lat,
+                  mlat,reqDelayT,respDelayT,mshrT)) {
+      return;
+    } 
+
+    if(n->_isload) {
+      if(n->isPipelineInst()) {
+        checkMSHRStallLoadCore(std::static_pointer_cast<Inst_t>(n),
+            reqDelayT,respDelayT,mshrT);
+      } else {
+        checkMSHRStallLoad(n,reqDelayT,respDelayT,mshrT);
+      }
+    } else { //if store
+      checkMSHRStallStore(n,reqDelayT,respDelayT,mshrT);
     }
 
     return;
   }
-
 
   //Ready to Execute Stage -- no delay
   virtual Inst_t &checkRE(Inst_t &n) {
@@ -2014,8 +1951,17 @@ protected:
     if(!depInst) {
       return n;
     }
-    getCPDG()->insert_edge(*depInst, Inst_t::Commit,
-                           n, Inst_t::Execute, -INORDER_EX_DEPTH,E_EPip);
+    //getCPDG()->insert_edge(*depInst, Inst_t::Commit,
+    //                       n, Inst_t::Execute, -INORDER_EX_DEPTH, E_EPip);
+   
+    uint64_t cycles_between=depInst->cycleOfStage(Inst_t::Commit) -
+                            depInst->cycleOfStage(Inst_t::Execute);
+
+    if(cycles_between > INORDER_EX_DEPTH) {
+      getCPDG()->insert_edge(*depInst, Inst_t::Execute,
+                                    n, Inst_t::Execute, 
+                             cycles_between-INORDER_EX_DEPTH, E_EPip);
+    }
     return n;
   }
 
@@ -2045,35 +1991,6 @@ protected:
     return n;
   }
 
-#if 0
-   //this was incredibly stupid ... i am ashamed
-   
-  //make sure current instructions are done executing before getting the next
-  //This is for inorder procs...
-  virtual Inst_t &checkExecutePipeStalls(Inst_t &n) {
-    Inst_t* depInst = getCPDG()->peekPipe(-1);
-    if(!depInst) {
-      return n;
-    }
-  
-    int lat=epLat(depInst->_ex_lat,depInst->_opclass,depInst->_isload,
-                  depInst->_isstore,depInst->_cache_prod,
-                  depInst->_true_cache_prod,
-                  true,INORDER_EX_DEPTH);
-
-    getCPDG()->insert_edge(*depInst, Inst_t::Execute,
-                           n, Inst_t::Ready, lat-INORDER_EX_DEPTH,E_EPip);
-
-/*
-    if(depInst->isMem() && lat > 8) { //
-      getCPDG()->insert_edge(*depInst, Inst_t::Complete,
-                              n, Inst_t::Ready, 0,E_EPip);
-    }*/
-
-    return n;
-  }
-#endif
-
   int stLat(int st_lat, bool cache_prod, 
             bool true_cache_prod, bool isAccelerator) {
     int lat = st_lat;
@@ -2083,6 +2000,7 @@ protected:
             Prof::get().dcache_response_latency;
     }
  */
+
     if( (applyMaxLatToAccel && isAccelerator ) ||
         !applyMaxLatToAccel) {
       if(lat > _max_mem_lat) {
@@ -2090,6 +2008,47 @@ protected:
       }
     }
     return lat;
+  }
+
+  /* TODO: Streaming accesses in slower processors may experience less cache
+   * access.  Why?  Because its complicated. 
+   * We can probably use cache producer information here to help.
+   */
+  void calcCacheAccess(BaseInst_t* inst, int hit_level, int miss_level,
+                       bool cache_prod, bool true_cache_prod,
+                       uint64_t& l1_hits,    uint64_t& l1_misses,    
+                       uint64_t& l2_hits,    uint64_t& l2_misses,
+                       uint64_t& l1_wr_hits, uint64_t& l1_wr_misses, 
+                       uint64_t& l2_wr_hits, uint64_t& l2_wr_misses) {
+     if(inst->_isload) {
+       if(miss_level>=1) {
+         l1_misses+=1;
+       }
+       if(miss_level>=2) {
+         l2_misses+=1;
+       }
+       if(hit_level==1) {
+         l1_hits+=1;
+       }
+       if(hit_level==2) {
+         l2_hits+=1;
+       }
+     } else if (inst->_isstore) {
+       if(miss_level>=1) {
+         l1_wr_misses+=1;
+       }
+       if(miss_level>=2) {
+         l2_wr_misses+=1;
+       }
+       if(hit_level==1) {
+         l1_wr_hits+=1;
+       }
+       if(hit_level==2) {
+         l2_wr_hits+=1;
+       }
+     } else {
+       assert(0);
+     }
   }
 
   //logic to determine ep latency based on information in the trace
@@ -2110,6 +2069,20 @@ protected:
       //lat = n._ex_lat;
       //lat = getFUOpLatency(opclass);
       lat = getFUOpLatency(inst->_opclass,inst->_op);
+    }
+
+    if(_scale_freq) {
+      if(isload || isstore) { //if it's a mem
+        if(lat > MEMORY_LATENCY) {
+          lat = (lat - MEMORY_LATENCY) + (MEMORY_LATENCY * CORE_CLOCK) / QUAD_ISSUE_CORE_CLOCK;
+        }
+      }
+    }
+
+    if(_elide_mem && isAccelerator && isload) {
+      if(lat > 1) {
+        lat = 1;
+      }
     }
 
     if( (applyMaxLatToAccel && isAccelerator ) ||
@@ -2221,13 +2194,8 @@ protected:
 
   //Commit follows complete
   virtual Inst_t &checkPC(Inst_t &n) {
-    if(!_isInOrder) {
-      getCPDG()->insert_edge(n, Inst_t::Complete,
-                             n, Inst_t::Commit, 2,E_PC);  
-    } else {
-      getCPDG()->insert_edge(n, Inst_t::Complete,
-                             n, Inst_t::Commit, 0,E_PC);  
-    }
+    getCPDG()->insert_edge(n, Inst_t::Complete,
+                           n, Inst_t::Commit, COMMIT_TO_COMPLETE_STAGES,E_PC);  
     //simulator says: minimum two cycles between commit and complete
     return n;
   }
@@ -2314,6 +2282,247 @@ protected:
     return n;
   }
 
+  virtual void printAccEnergyEvents() {
+    std::cout << "committed_insts_acc        " <<  committed_insts_acc        << "\n";
+    std::cout << "committed_int_insts_acc    " <<  committed_int_insts_acc    << "\n";
+    std::cout << "committed_fp_insts_acc     " <<  committed_fp_insts_acc     << "\n";
+    std::cout << "committed_fp_insts_acc     " <<  committed_fp_insts_acc     << "\n";
+    std::cout << "committed_branch_insts_acc " <<  committed_branch_insts_acc << "\n";
+    std::cout << "committed_branch_insts_acc " <<  committed_branch_insts_acc << "\n";
+    std::cout << "committed_load_insts_acc   " <<  committed_load_insts_acc   << "\n";
+    std::cout << "committed_store_insts_acc  " <<  committed_store_insts_acc  << "\n";
+    std::cout << "squashed_insts_acc         " <<  squashed_insts_acc         << "\n";
+    std::cout << "idlecycles_acc             " <<  idleCycles_acc             << "\n";
+    std::cout << "rob_reads_acc              " <<  rob_reads_acc              << "\n";
+    std::cout << "rob_writes_acc             " <<  rob_writes_acc             << "\n";
+    std::cout << "rename_reads_acc           " <<  rename_reads_acc           << "\n";
+    std::cout << "rename_writes_acc          " <<  rename_writes_acc          << "\n";
+    std::cout << "rename_freads_acc          " <<  rename_freads_acc          << "\n";
+    std::cout << "rename_fwrites_acc         " <<  rename_fwrites_acc         << "\n";
+    std::cout << "func_calls_acc             " <<  func_calls_acc             << "\n";
+    std::cout << "int_ops_acc                " <<  int_ops_acc                << "\n";
+    std::cout << "fp_ops_acc                 " <<  fp_ops_acc                 << "\n";
+    std::cout << "mult_ops_acc               " <<  mult_ops_acc               << "\n";
+    std::cout << "iw_reads_acc               " <<  iw_reads_acc               << "\n";
+    std::cout << "iw_writes_acc              " <<  iw_writes_acc              << "\n";
+    std::cout << "iw_freads_acc              " <<  iw_freads_acc              << "\n";
+    std::cout << "iw_fwrites_acc             " <<  iw_fwrites_acc             << "\n";
+    std::cout << "regfile_reads_acc          " <<  regfile_reads_acc          << "\n";
+    std::cout << "regfile_writes_acc         " <<  regfile_writes_acc         << "\n";
+    std::cout << "regfile_freads_acc         " <<  regfile_freads_acc         << "\n";
+    std::cout << "regfile_fwrites_acc        " <<  regfile_fwrites_acc        << "\n";
+    std::cout << "icache_read_accesses_acc   " <<  icache_read_accesses_acc   << "\n";
+    std::cout << "icache_read_misses_acc     " <<  icache_read_misses_acc     << "\n";
+    std::cout << "l1_hits_acc                " <<  l1_hits_acc                << "\n";
+    std::cout << "l1_misses_acc              " <<  l1_misses_acc              << "\n";
+    std::cout << "l1_wr_hits_acc             " <<  l1_wr_hits_acc             << "\n";
+    std::cout << "l1_wr_misses_acc           " <<  l1_wr_misses_acc           << "\n";
+    std::cout << "l2_hits_acc                " <<  l2_hits_acc                << "\n";
+    std::cout << "l2_misses_acc              " <<  l2_misses_acc              << "\n";
+    std::cout << "l2_wr_hits_acc             " <<  l2_wr_hits_acc             << "\n";
+    std::cout << "l2_wr_misses_acc           " <<  l2_wr_misses_acc           << "\n";
+  }
+
+  virtual void accCoreEnergyEvents() {
+    committed_insts_acc        += committed_insts;              
+    committed_int_insts_acc    += committed_int_insts;
+    committed_fp_insts_acc     += committed_fp_insts;
+    committed_fp_insts_acc     += committed_fp_insts;
+    committed_branch_insts_acc += committed_branch_insts;
+    committed_branch_insts_acc += committed_branch_insts;
+    committed_load_insts_acc   += committed_load_insts;
+    committed_store_insts_acc  += committed_store_insts;
+    squashed_insts_acc         += squashed_insts;
+    idleCycles_acc             += idleCycles;
+    rob_reads_acc              += rob_reads;
+    rob_writes_acc             += rob_writes;
+    rename_reads_acc           += rename_reads;
+    rename_writes_acc          += rename_writes;
+    rename_freads_acc          += rename_freads;
+    rename_fwrites_acc         += rename_fwrites;
+    func_calls_acc             += func_calls;
+    int_ops_acc                += int_ops;
+    fp_ops_acc                 += fp_ops;
+    mult_ops_acc               += mult_ops;
+    iw_reads_acc               += iw_reads;
+    iw_writes_acc              += iw_writes;
+    iw_freads_acc              += iw_freads;
+    iw_fwrites_acc             += iw_fwrites;
+    regfile_reads_acc          += regfile_reads;
+    regfile_writes_acc         += regfile_writes;
+    regfile_freads_acc         += regfile_freads;
+    regfile_fwrites_acc        += regfile_fwrites;
+    icache_read_accesses_acc   += icache_read_accesses;
+    icache_read_misses_acc     += icache_read_misses;
+    l1_hits_acc                += l1_hits;
+    l1_misses_acc              += l1_misses;
+    l1_wr_hits_acc             += l1_wr_hits;
+    l1_wr_misses_acc           += l1_wr_misses;
+    l2_hits_acc                += l2_hits;
+    l2_misses_acc              += l2_misses;
+    l2_wr_hits_acc             += l2_wr_hits;
+    l2_wr_misses_acc           += l2_wr_misses;
+
+    committed_insts = 0;
+    committed_int_insts = 0;
+    committed_fp_insts = 0;
+    committed_fp_insts =0;
+    committed_branch_insts = 0;
+    committed_branch_insts = 0;
+    committed_load_insts = 0;
+    committed_store_insts = 0;
+    squashed_insts=0;
+    idleCycles = 0;
+    rob_reads = 0;
+    rob_writes = 0;
+    rename_reads = 0;
+    rename_writes = 0;
+    rename_freads = 0;
+    rename_fwrites = 0;
+    func_calls = 0;
+    int_ops = 0;
+    fp_ops = 0;
+    mult_ops = 0;
+    iw_reads = 0;
+    iw_writes = 0;
+    iw_freads = 0;
+    iw_fwrites = 0;
+    regfile_reads = 0;
+    regfile_writes = 0;
+    regfile_freads = 0;
+    regfile_fwrites = 0;
+    icache_read_accesses = 0;
+    icache_read_misses = 0;
+    l1_hits = 0;
+    l1_misses = 0;
+    l1_wr_hits = 0;
+    l1_wr_misses = 0;
+    l2_hits = 0;
+    l2_misses = 0;
+    l2_wr_hits = 0;
+    l2_wr_misses = 0;
+  }
+
+  virtual void pumpCoreEnergyEvents(PrismProcessor* proc, uint64_t totalCycles) {
+    system_core* core = &proc->XML->sys.core[0];
+
+    uint64_t busyCycles;
+    if(idleCycles < totalCycles) {
+      busyCycles=totalCycles-idleCycles;
+    } else {
+      busyCycles=0;
+    }
+
+    //Modify relevent events to account for squashing
+    double squashRatio=0;
+    if(committed_insts!=0) {
+      squashRatio =(double)squashed_insts/(double)committed_insts;
+    }
+    double highSpecFactor = 1.00+1.5*squashRatio;
+    double specFactor = 1.00+squashRatio;
+    double halfSpecFactor = 1.00+0.5*squashRatio;
+    double fourthSpecFactor = 1.00+0.25*squashRatio;
+    //double eigthSpecFactor = 1.00+0.125*squashRatio;
+    double sixteenthSpecFactor = 1.00+0.0625*squashRatio;
+
+    uint64_t calc_rob_reads=(rob_reads+busyCycles)*halfSpecFactor;
+
+    core->ROB_reads = calc_rob_reads; //(calc_rob_reads+busyCycles)*halfSpecFactor;
+
+    proc->XML->sys.total_cycles=totalCycles;
+
+    core->total_cycles=totalCycles; 
+    core->idle_cycles=idleCycles; 
+    core->busy_cycles=busyCycles; 
+
+    core->total_instructions    = (uint64_t)(committed_insts*specFactor); 
+    core->int_instructions      = (uint64_t)(committed_int_insts*specFactor); 
+    core->fp_instructions       = (uint64_t)(committed_fp_insts*specFactor); 
+    core->branch_instructions   = (uint64_t)(committed_branch_insts*highSpecFactor); 
+    core->branch_mispredictions = (uint64_t)(committed_branch_insts*sixteenthSpecFactor);
+
+    core->load_instructions     = (uint64_t)(committed_load_insts*fourthSpecFactor);
+    core->store_instructions    = (uint64_t)(committed_store_insts*fourthSpecFactor);
+
+    core->committed_instructions     = committed_insts;
+    core->committed_int_instructions = committed_int_insts;
+    core->committed_fp_instructions  = committed_fp_insts;
+
+    core->ROB_writes       = (uint64_t)(rob_writes*specFactor+squashed_insts);
+    core->rename_reads     = (uint64_t)(rename_reads*specFactor);
+    core->rename_writes    = (uint64_t)(rename_writes*specFactor+squashed_insts);
+    core->fp_rename_reads  = (uint64_t)(rename_freads*specFactor);
+    core->fp_rename_writes = (uint64_t)(rename_fwrites*specFactor);
+
+    core->inst_window_reads  = (uint64_t)(iw_reads*specFactor+busyCycles);
+    core->inst_window_writes = (uint64_t)(iw_writes*specFactor+squashed_insts);
+    core->inst_window_wakeup_accesses = (uint64_t)(iw_writes*specFactor);
+
+    core->fp_inst_window_reads  = (uint64_t)(iw_freads*specFactor);
+    core->fp_inst_window_writes = (uint64_t)(iw_fwrites*specFactor);
+    core->fp_inst_window_wakeup_accesses = (uint64_t)(iw_fwrites*specFactor);
+
+    core->int_regfile_reads    = (uint64_t)(regfile_reads*halfSpecFactor);
+    core->int_regfile_writes   = (uint64_t)(regfile_writes*specFactor);
+    core->float_regfile_reads  = (uint64_t)(regfile_freads*halfSpecFactor);
+    core->float_regfile_writes = (uint64_t)(regfile_fwrites*specFactor);
+
+    core->function_calls   = (uint64_t)(func_calls*specFactor);
+
+    core->ialu_accesses    = (uint64_t)(int_ops*specFactor);
+    core->fpu_accesses     = (uint64_t)(fp_ops*specFactor);
+    core->mul_accesses     = (uint64_t)(mult_ops*specFactor);
+
+    core->cdb_alu_accesses = (uint64_t)(int_ops*specFactor);
+    core->cdb_fpu_accesses = (uint64_t)(fp_ops*specFactor);
+    core->cdb_mul_accesses = (uint64_t)(mult_ops*specFactor);
+
+    //icache
+    core->icache.read_accesses = icache_read_accesses;
+    core->icache.read_misses    = icache_read_misses;
+
+    //dcache
+    core->dcache.read_accesses   = l1_hits + l1_misses;
+    core->dcache.read_misses     = l1_misses;
+    core->dcache.write_accesses  = l1_wr_hits + l1_wr_misses;
+    core->dcache.write_misses    = l1_wr_misses;
+
+    //TODO: TLB Energy Modeling
+    core->itlb.total_accesses=0;
+    core->itlb.total_misses=0;
+    core->itlb.total_hits=0;
+    core->dtlb.total_accesses=0;
+    core->dtlb.total_misses=0;
+    core->dtlb.total_hits=0;
+    
+    double pipe_duty=0.01;
+    if(totalCycles>0) {
+      pipe_duty=std::max(std::min(((committed_insts*specFactor)/totalCycles)*3.0/2.0/ISSUE_WIDTH,2.0),0.01);
+    }
+
+    proc->cores[0]->coredynp.pipeline_duty_cycle=pipe_duty;
+
+    //l2
+    system_L2* l2 = &proc->XML->sys.L2[0];
+    l2->read_accesses   = l2_hits + l2_misses;
+    l2->read_misses     = l2_misses;
+    l2->write_accesses  = l2_wr_hits + l2_wr_misses;
+    l2->write_misses    = l2_wr_misses;
+
+    /* 
+    //Debug
+    cout << "l1a:  " << core->dcache.read_accesses  << "\n";
+    cout << "l1m:  " << core->dcache.read_misses    << "\n";  
+    cout << "l1wa: " << core->dcache.write_accesses  << "\n"; 
+    cout << "l1wm: " << core->dcache.write_misses    << "\n"; 
+    cout << "l2a:  " << l2->read_accesses           << "\n"; 
+    cout << "l2m:  " << l2->read_misses             << "\n"; 
+    cout << "l2wa: " << l2->write_accesses           << "\n"; 
+    cout << "l2wm: " << l2->write_misses             << "\n";  
+    */
+
+    accCoreEnergyEvents();
+  }
 
   // Handle enrgy events for McPAT XML DOC
   virtual void setEnergyEvents(pugi::xml_document& doc, int nm) {
@@ -2321,14 +2530,14 @@ protected:
     CriticalPath::setEnergyEvents(doc,nm);
 
     uint64_t totalCycles=numCycles();
-    uint64_t busyCycles=totalCycles-idleCycles;
+    uint64_t busyCycles=totalCycles-idleCycles_acc;
 
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
     pugi::xml_node core_node =
               system_node.find_child_by_attribute("name","core0");
 
     sa(system_node,"total_cycles",totalCycles);
-    sa(system_node,"idle_cycles", idleCycles);
+    sa(system_node,"idle_cycles", idleCycles_acc);
     sa(system_node,"busy_cycles",busyCycles);
 
     //std::cout << "squash: " << squashed_insts
@@ -2336,9 +2545,10 @@ protected:
 
     //Modify relevent events to be what we predicted
     double squashRatio=0;
-    if(committed_insts!=0) {
-      squashRatio =(double)squashed_insts/(double)committed_insts;
+    if(committed_insts_acc!=0) {
+      squashRatio =(double)squashed_insts_acc/(double)committed_insts_acc;
     }
+
     if(!_isInOrder) {
       std::cout << "Squash Ratio for \"" << _name << "\" is " << squashRatio << "\n";
     }
@@ -2352,83 +2562,63 @@ protected:
     //uint64_t intOps=committed_int_insts-committed_load_insts-committed_store_insts;
     //uint64_t intOps=committed_int_insts;
 
-    sa(core_node,"total_instructions",(uint64_t)(committed_insts*specFactor));
-    sa(core_node,"int_instructions",(uint64_t)(committed_int_insts*specFactor));
-    sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts*specFactor));
-    sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts*highSpecFactor));
-    sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions*sixteenthSpecFactor));
-    sa(core_node,"load_instructions",(uint64_t)(committed_load_insts*fourthSpecFactor));
-    sa(core_node,"store_instructions",(uint64_t)(committed_store_insts*fourthSpecFactor));
+    sa(core_node,"total_instructions",(uint64_t)(committed_insts_acc*specFactor));
+    sa(core_node,"int_instructions",(uint64_t)(committed_int_insts_acc*specFactor));
+    sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts_acc*specFactor));
+    sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts_acc*highSpecFactor));
+    sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions_acc*sixteenthSpecFactor));
+    sa(core_node,"load_instructions",(uint64_t)(committed_load_insts_acc*fourthSpecFactor));
+    sa(core_node,"store_instructions",(uint64_t)(committed_store_insts_acc*fourthSpecFactor));
 
-    sa(core_node,"committed_instructions", committed_insts);
-    sa(core_node,"committed_int_instructions", committed_int_insts);
-    sa(core_node,"committed_fp_instructions", committed_fp_insts);
+    sa(core_node,"committed_instructions", committed_insts_acc);
+    sa(core_node,"committed_int_instructions", committed_int_insts_acc);
+    sa(core_node,"committed_fp_instructions", committed_fp_insts_acc);
 
     sa(core_node,"total_cycles",totalCycles);
-    sa(core_node,"idle_cycles", idleCycles); //TODO: how to get this?
+    sa(core_node,"idle_cycles", idleCycles_acc); 
     sa(core_node,"busy_cycles",busyCycles);
 
-    uint64_t calc_rob_reads=rob_reads;
-    Inst_t* prevInst = getCPDG()->peekPipe(-1); 
-    if(!prevInst) {
-      calc_rob_reads+=totalCycles;
-    } else {
-      calc_rob_reads+=totalCycles-prevInst->cycleOfStage(Inst_t::Commit);
-    }
+    sa(core_node,"ROB_reads",(uint64_t)((rob_reads_acc+busyCycles)*halfSpecFactor));
+    sa(core_node,"ROB_writes",(uint64_t)(rob_writes_acc*specFactor)+squashed_insts);
 
-    if(!_isInOrder) {
-      if(idleCycles < calc_rob_reads) {
-        sa(core_node,"ROB_reads",(uint64_t)(calc_rob_reads-idleCycles)*halfSpecFactor);
-      } else {
-        sa(core_node,"ROB_reads",0);
-      }
-    } else {
-      sa(core_node,"ROB_reads",(uint64_t)0);
-    } 
-
-    sa(core_node,"ROB_writes",(uint64_t)(rob_writes*specFactor)+squashed_insts);
-
-    sa(core_node,"rename_reads",(uint64_t)(rename_reads*specFactor));
-    sa(core_node,"rename_writes",(uint64_t)(rename_writes*specFactor)+squashed_insts);
-    sa(core_node,"fp_rename_reads",(uint64_t)(rename_freads*specFactor));
-    sa(core_node,"fp_rename_writes",(uint64_t)(rename_fwrites*specFactor));
+    sa(core_node,"rename_reads",(uint64_t)(rename_reads_acc*specFactor));
+    sa(core_node,"rename_writes",(uint64_t)(rename_writes_acc*specFactor)+squashed_insts);
+    sa(core_node,"fp_rename_reads",(uint64_t)(rename_freads_acc*specFactor));
+    sa(core_node,"fp_rename_writes",(uint64_t)(rename_fwrites_acc*specFactor));
                                                                     
-    sa(core_node,"inst_window_reads",(uint64_t)(iw_reads*specFactor)+busyCycles);
-    sa(core_node,"inst_window_writes",(uint64_t)(iw_writes*specFactor)+squashed_insts);
-    sa(core_node,"inst_window_wakeup_accesses",(uint64_t)(iw_writes*specFactor));
+    sa(core_node,"inst_window_reads",(uint64_t)(iw_reads_acc*specFactor)+busyCycles);
+    sa(core_node,"inst_window_writes",(uint64_t)(iw_writes_acc*specFactor)+squashed_insts);
+    sa(core_node,"inst_window_wakeup_accesses",(uint64_t)(iw_writes_acc*specFactor));
 
-    sa(core_node,"fp_inst_window_reads",(uint64_t)(iw_freads*specFactor));
-    sa(core_node,"fp_inst_window_writes",(uint64_t)(iw_fwrites*specFactor));
-    sa(core_node,"fp_inst_window_wakeup_accesses",(uint64_t)(iw_fwrites*specFactor));
+    sa(core_node,"fp_inst_window_reads",(uint64_t)(iw_freads_acc*specFactor));
+    sa(core_node,"fp_inst_window_writes",(uint64_t)(iw_fwrites_acc*specFactor));
+    sa(core_node,"fp_inst_window_wakeup_accesses",(uint64_t)(iw_fwrites_acc*specFactor));
 
-    sa(core_node,"int_regfile_reads",(uint64_t)(regfile_reads*halfSpecFactor));
-    sa(core_node,"int_regfile_writes",(uint64_t)(regfile_writes*specFactor));
-    sa(core_node,"float_regfile_reads",(uint64_t)(regfile_freads*halfSpecFactor));
-    sa(core_node,"float_regfile_writes",(uint64_t)(regfile_fwrites*specFactor));
+    sa(core_node,"int_regfile_reads",(uint64_t)(regfile_reads_acc*halfSpecFactor));
+    sa(core_node,"int_regfile_writes",(uint64_t)(regfile_writes_acc*specFactor));
+    sa(core_node,"float_regfile_reads",(uint64_t)(regfile_freads_acc*halfSpecFactor));
+    sa(core_node,"float_regfile_writes",(uint64_t)(regfile_fwrites_acc*specFactor));
 
-    sa(core_node,"function_calls",(uint64_t)(func_calls*specFactor));
+    sa(core_node,"function_calls",(uint64_t)(func_calls_acc*specFactor));
 
-    sa(core_node,"ialu_accesses",(uint64_t)(int_ops*specFactor));
-    sa(core_node,"fpu_accesses",(uint64_t)(fp_ops*specFactor));
-    sa(core_node,"mul_accesses",(uint64_t)(mult_ops*specFactor));
+    sa(core_node,"ialu_accesses",(uint64_t)(int_ops_acc*specFactor));
+    sa(core_node,"fpu_accesses",(uint64_t)(fp_ops_acc*specFactor));
+    sa(core_node,"mul_accesses",(uint64_t)(mult_ops_acc*specFactor));
 
-    sa(core_node,"cdb_alu_accesses",(uint64_t)(int_ops*specFactor));
-    sa(core_node,"cdb_fpu_accesses",(uint64_t)(fp_ops*specFactor));
-    sa(core_node,"cdb_mul_accesses",(uint64_t)(mult_ops*specFactor));
+    sa(core_node,"cdb_alu_accesses",(uint64_t)(int_ops_acc*specFactor));
+    sa(core_node,"cdb_fpu_accesses",(uint64_t)(fp_ops_acc*specFactor));
+    sa(core_node,"cdb_mul_accesses",(uint64_t)(mult_ops_acc*specFactor));
 
     // ---------- icache --------------
     pugi::xml_node icache_node =
               core_node.find_child_by_attribute("name","icache");
-    sa(icache_node,"read_accesses",icache_read_accesses);
-    sa(icache_node,"read_misses",icache_read_misses);
+    sa(icache_node,"read_accesses",icache_read_accesses_acc);
+    sa(icache_node,"read_misses",icache_read_misses_acc);
     //sa(icache_node,"conflicts",Prof::get().icacheReplacements);
   }
 
-  virtual void countAccelSGRegEnergy(Op* op, Subgraph* sg, std::set<Op*>& opset,
-      uint64_t& fp_ops, uint64_t& mult_ops, uint64_t& int_ops,
-      uint64_t& regfile_reads, uint64_t& regfile_freads,
-      uint64_t& regfile_writes, uint64_t& regfile_fwrites) {
-
+  virtual void countOpEnergy(Op*op,
+      uint64_t& fp_ops, uint64_t& mult_ops, uint64_t& int_ops) {
     if(op->isFloating()) {
       fp_ops++;
     } else if (op->opclass()==2) {
@@ -2437,6 +2627,14 @@ protected:
     } else {
       int_ops++;
     }
+  }
+
+  virtual void countAccelSGRegEnergy(Op* op, Subgraph* sg, std::set<Op*>& opset,
+      uint64_t& fp_ops, uint64_t& mult_ops, uint64_t& int_ops,
+      uint64_t& regfile_reads, uint64_t& regfile_freads,
+      uint64_t& regfile_writes, uint64_t& regfile_fwrites) {
+
+    countOpEnergy(op, fp_ops,mult_ops,int_ops);
 
     for(auto di = op->adj_d_begin(),de = op->adj_d_end();di!=de;++di) {
       Op* dop = *di;

@@ -4,8 +4,8 @@
 #include "cp_ccores.hh"
 
 
-static RegisterCP<cp_ccores> OOO("ccores",false);
-static RegisterCP<cp_ccores> In("ccores",true);
+static RegisterCP<cp_ccores> CCORES_OOO("ccores",false);
+static RegisterCP<cp_ccores> CCORES_In("ccores",true);
 
 //static RegisterCP<cp_ccores_all> All("ccores-all",true);
 
@@ -13,23 +13,16 @@ static RegisterCP<cp_ccores> In("ccores",true);
 __attribute__((__constructor__))
 static void init()
 {
-  CPRegistry::get()->register_argument("ccores-num-mem", true, &OOO.cp_obj);
-  CPRegistry::get()->register_argument("ccores-num-mem", true, &In.cp_obj);
+  std::vector<RegisterCP<cp_ccores>*> models = {&CCORES_OOO,&CCORES_In};
 
-  CPRegistry::get()->register_argument("ccores-bb-runahead", true, &OOO.cp_obj);
-  CPRegistry::get()->register_argument("ccores-bb-runahead", true, &In.cp_obj);
-  
-  CPRegistry::get()->register_argument("ccores-max-ops", true, &OOO.cp_obj);
-  CPRegistry::get()->register_argument("ccores-max-ops", true, &In.cp_obj);
-
-  CPRegistry::get()->register_argument("ccores-iops", true, &OOO.cp_obj);
-  CPRegistry::get()->register_argument("ccores-iops", true, &In.cp_obj);
-
-  CPRegistry::get()->register_argument("ccores-bb-runahead",true,&OOO.cp_obj);
-  CPRegistry::get()->register_argument("ccores-bb-runahead",true,&In.cp_obj);
-
-  CPRegistry::get()->register_argument("ccores-full-dataflow",true,&OOO.cp_obj);
-  CPRegistry::get()->register_argument("ccores-full-dataflow",true,&In.cp_obj);
+  for(auto &model : models) {
+    CPRegistry::get()->register_argument("ccores-num-mem", true, &model->cp_obj);
+    CPRegistry::get()->register_argument("ccores-bb-runahead", true, &model->cp_obj);
+    CPRegistry::get()->register_argument("ccores-max-ops", true, &model->cp_obj);
+    CPRegistry::get()->register_argument("ccores-iops", true, &model->cp_obj);
+    CPRegistry::get()->register_argument("ccores-bb-runahead",true,&model->cp_obj);
+    CPRegistry::get()->register_argument("ccores-full-dataflow",true,&model->cp_obj);
+  }
 
 }
 

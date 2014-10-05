@@ -10,6 +10,17 @@
 #include "loopinfo.hh"
 #include "nla_inst.hh"
 #include "cp_utils.hh"
+
+class RegionStats {
+  public:
+    uint64_t times_started=0;
+    uint64_t total_cycles=0;    
+    uint64_t total_insts=0;    
+    uint64_t total_cinsts=0;    
+    uint64_t network_activity[16]={0}; //histogram
+    uint64_t cfu_used[16]={0};
+};
+
 // CP_NLA
 class cp_nla : public ArgumentHandler,
       public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
@@ -36,10 +47,6 @@ public:
   };
   dep_graph_impl_t<Inst_t,T,E> cpdg;
 
-  virtual bool is_accel_on() {
-    return nla_state==CPU;
-  }; 
-
   //std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
   //std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
   
@@ -48,8 +55,16 @@ public:
   uint64_t _nla_int_ops=0, _nla_fp_ops=0, _nla_mult_ops=0;
   uint64_t _nla_regfile_fwrites=0, _nla_regfile_writes=0;
   uint64_t _nla_regfile_freads=0,  _nla_regfile_reads=0;
+
+  uint64_t _nla_int_ops_acc=0, _nla_fp_ops_acc=0, _nla_mult_ops_acc=0;
+  uint64_t _nla_regfile_fwrites_acc=0, _nla_regfile_writes_acc=0;
+  uint64_t _nla_regfile_freads_acc=0,  _nla_regfile_reads_acc=0;
+
   uint64_t _timesStarted=0;
   std::map<int,int> accelLogHisto;
+
+  std::map<int,LoopInfo*> _id2li;
+  std::map<LoopInfo*,RegionStats> _regionStats;
 
 
   unsigned _nla_max_cfu=6,_nla_max_mem=2, _nla_max_ops=80;
@@ -222,7 +237,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
   std::map<Op*,std::shared_ptr<NLAInst>> nlaInstMap;
   unsigned nla_state;
-  LoopInfo* li;
+  LoopInfo* li=NULL;  // the current loop info
   uint64_t _curNLAStartCycle=0, _curNLAStartInst=0;
   uint64_t _totalNLACycles=0, _totalNLAInsts=0;
 
@@ -239,6 +254,40 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   BB* prev_bb=NULL;
   int prev_bb_pos=-1;
 
+  virtual void monitorFUUsage(uint64_t id, uint64_t numCycles, int usage) {
+    //Oh god this i/sets hacky
+    if(id==(uint64_t)&_wb_networks) {
+      _regionStats[li].network_activity[usage]+=numCycles;
+    } else {
+      if(_cfu_set) {
+        for(auto i=_cfu_set->cfus_begin(),e=_cfu_set->cfus_end();i!=e;++i) {
+          CFU* cfu = *i;
+          if(id==(uint64_t)cfu) {
+            _regionStats[li].cfu_used[cfu->ind()]+=numCycles;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+
+  CFU_set* _cfu_set=NULL;
+  void setupCFUs(CFU_set* cfu_set) {
+    if(cfu_set == _cfu_set) {
+      return;
+    }
+    _cfu_set=cfu_set;
+
+    //Add monitors too
+    for(auto i=cfu_set->cfus_begin(),e=cfu_set->cfus_end();i!=e;++i) {
+      CFU* cfu = *i;
+      fu_monitors.insert((uint64_t)cfu); //NEATO
+    }
+    fu_monitors.insert((uint64_t)&_wb_networks); //Total insanity
+  }
+
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
     
@@ -249,9 +298,13 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           li = op->func()->getLoop(op->bb());
          
           if(li &&  li->hasSubgraphs(true)) {
+            setupCFUs(li->sgSchedNLA().cfu_set());
             //std::cout << " .. and it's nla-able!\n";
             //curLoopHead=op;
             nla_state=NLA;
+
+            _id2li[li->id()]=li; //just do this for now, maybe there is a better way
+
             /*unsigned config_time = li->staticInsts()/3;
             if(li==_prevLoop) {
               config_time=1;
@@ -261,6 +314,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
  
             if(prevInst) {
               _timesStarted+=1;
+              _regionStats[li].times_started+=1;
+
               _curNLAStartCycle=prevInst->cycleOfStage(prevInst->eventComplete());
               nlaStartEv=&(*prevInst)[Inst_t::Commit];
             }
@@ -279,7 +334,16 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op->bb_pos()==0) {
           BB* bb = op->bb();
           //if(bb->pred_size() != 1 || (*bb->pred_begin())->succ_size()!=1 ) {
-          if(bb->pred_size()==0 || (*bb->pred_begin())->succ_size()!=1 ) {
+          
+          //TODO: is this the right condition?
+          bool fall_through=true;
+          for(auto i=bb->pred_begin(), e=bb->pred_end();i!=e;++i) {
+            if((*i)->succ_size()!=1) {
+              fall_through=false;
+              break;
+            }
+          }
+          if(bb->pred_size()==0 || fall_through==false) {
             schedule_cfus();  
 
             T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
@@ -297,6 +361,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             nlaEndEv=&((*prevNLAInst)[NLAInst::Writeback]);
             assert(curNLAInsts.size()==0);
             doneNLA(nlaEndEv->cycle());
+            cleanUp(nlaEndEv->cycle()-1);
           }
         } 
         break;
@@ -374,8 +439,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   }
 
   void doneNLA(uint64_t curCycle) {
-    _totalNLACycles+=curCycle-_curNLAStartCycle;
-    accelLogHisto[mylog2(curCycle-_curNLAStartCycle)]++;
+    uint64_t cycle_diff = curCycle-_curNLAStartCycle;
+    _regionStats[li].total_cycles+=cycle_diff;
+    _totalNLACycles+=cycle_diff; 
+    accelLogHisto[mylog2(cycle_diff)]++;
   }
 
   virtual uint64_t finish() {
@@ -467,10 +534,6 @@ private:
       horizon_cycle=horizon_event->cycle();
     }
 
-//    if(ctrl_event) {
-//      std::cout << "Schedule CFUS (last ctrl cycle = " << ctrl_event->cycle() << ")\n";
-//    }
-
     for(const auto &sg : _vecSubgraphs) {
       if(_serialize_sgs) {
         if(prev_end_cfu) { // completely serial subgraphs
@@ -488,17 +551,12 @@ private:
 
       if(_no_exec_speculation) { // serialize instructions after control
         if(ctrl_event) {
-           getCPDG()->insert_edge(*ctrl_event,
-                                  *sg->startCFU, 0, E_SEBD);
-           //std::cout << "ctrl " << ctrl_event->cycle() << "\n";
+           getCPDG()->insert_edge(*ctrl_event, *sg->startCFU, 0, E_SEBD);
         }
       } else {
         if(ctrl_event && ctrl_inst && ctrl_inst->_ctrl_miss) {
-          getCPDG()->insert_edge(*ctrl_event,
-                                 *sg->startCFU, 10,  E_SEBD); //some arbitrary latency :)
+          getCPDG()->insert_edge(*ctrl_event, *sg->startCFU, 10, E_SEBD); 
         }
-
-
       } 
 
       if(horizon_event && sg->startCFU->cycle() < horizon_cycle) { 
@@ -548,16 +606,19 @@ private:
 
         //Execute -- 
         //TODO: Should we add another event for loads/stores who?
-        if(nla_inst->_isload && nla_inst->_isstore) {
+        //
+        //Hmm: I think this was supposed to be memory port check.  I am updating to
+        //reflext this.  (condition non-sensically used to be &&)
+        if(nla_inst->_isload || nla_inst->_isstore) {
           int fuIndex = fuPoolIdx(nla_inst->_opclass,nla_inst->_op);
           int maxUnits = getNumFUAvailable(nla_inst->_opclass,nla_inst->_op); //opclass
-          Inst_t* min_node = static_cast<Inst_t*>(
-               addResource(fuIndex, nla_inst->cycleOfStage(Inst_t::Execute), 
+          BaseInst_t* min_node = /*static_cast<BaseInst_t*>(*/
+               addResource(fuIndex, nla_inst->cycleOfStage(NLAInst::Execute), 
                            getFUIssueLatency(nla_inst->_opclass,nla_inst->_op),
-                                              maxUnits, nla_inst));
+                                              maxUnits, nla_inst);
       
           if (min_node) {
-            getCPDG()->insert_edge(*min_node, NLAInst::Execute,
+            getCPDG()->insert_edge(*min_node, min_node->beginExecute(),
                               *nla_inst, NLAInst::Execute, 
                               getFUIssueLatency(nla_inst->_opclass,nla_inst->_op),E_FU);
           }
@@ -603,6 +664,7 @@ private:
         (*nla_inst)[NLAInst::Writeback].reCalculate();
 
         _totalNLAInsts+=1;
+        _regionStats[li].total_insts+=1;
         countAccelSGRegEnergy(nla_inst->_op,sg->static_sg,li->sgSchedNLA()._opset,
                               _nla_fp_ops,_nla_mult_ops,_nla_int_ops,
                               _nla_regfile_reads,_nla_regfile_freads,
@@ -619,6 +681,8 @@ private:
       prev_end_cfu=sg->endCFU;
 
       sg->endCFU->reCalculate();
+
+      _regionStats[li].total_cinsts+=1;
 
 //      std::cout << "end cfu: "
 //        <<  sg->endCFU->cycle()
@@ -637,7 +701,14 @@ private:
 
   virtual void checkNumMSHRs(std::shared_ptr<NLAInst>& n, uint64_t minT=0) {
     int ep_lat=n->ex_lat();
-    
+   
+    if(n->_isload || n->_isstore) {
+      calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
+                      n->_cache_prod, n->_true_cache_prod,
+                      l1_hits, l1_misses, l2_hits, l2_misses,
+                      l1_wr_hits, l1_wr_misses, l2_wr_hits, l2_wr_misses);
+    }
+
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
 
     int mlat, reqDelayT, respDelayT, mshrT; //these get filled in below
@@ -888,6 +959,185 @@ private:
   }
 */
 
+  virtual void printAccelHeader(std::ostream& out) {
+    out << std::setw(10) << "Avg_Time" << " ";
+    out << std::setw(10) << "N_Invokes" << " ";
+    out << std::setw(12) << "Insts" << " ";
+    out << std::setw(11) << "CInsts" << " ";
+    out << std::setw(12) << "NetworkHist" << " ";
+    out << std::setw(24) << "Dyn_CInst_Usage" << " ";
+    out << std::setw(32) << "Stat_CInst_Usage" << " ";
+  }
+ 
+
+  virtual void printAccelRegionStats(int id, std::ostream& out) {
+    LoopInfo* print_li = _id2li[id];
+    RegionStats& r = _regionStats[print_li];
+    if(!print_li) {
+      return;
+    }
+    
+    out << std::setw(10) << ((double)r.total_cycles) / r.times_started << " ";
+    out << std::setw(10) << r.times_started << " ";
+    out << std::setw(12) << r.total_insts << " ";
+    out << std::setw(11) << r.total_cinsts << " ";
+
+    std::stringstream ss;
+
+    //Network Hist
+    int maxAct=0;
+    for(int i=0; i < 16; ++i) {
+      if(r.network_activity[i]) {
+        maxAct=i;
+      }
+    }
+
+    for(int i=1; i <= maxAct; ++i) { //start at 1 cause 9's bogus
+      ss << std::fixed << std::setprecision(1) << ((double)r.network_activity[i])/(double)r.total_cycles;
+      if(i!=maxAct) {
+        ss << ",";
+      }
+    }
+
+    out << std::setw(12) << ss.str() << " ";
+    ss.str("");
+
+    //Dyn Cinst Usage
+    int maxCFU=0;
+    uint64_t total=0;
+    for(int i=0; i < 16; ++i) {
+      if(r.cfu_used[i]) {
+        total+=r.cfu_used[i];
+        maxCFU=i;
+      }
+    }
+
+    for(int i=0; i < maxCFU; ++i) {
+      ss << std::fixed << std::setprecision(0) << (100.0*r.cfu_used[i])/total;
+      if(i!=maxCFU) {
+        ss << ",";
+      }
+    }
+
+    out << std::setw(24) << ss.str() << " ";
+    ss.str("");
+
+    //Static Cinst Usage
+    if(_cfu_set && print_li->hasSubgraphs(true/*NLA*/)) {
+      int static_sg_usage[16]={0};
+
+      for(auto i=print_li->sgSchedNLA().sg_begin(),
+               e=print_li->sgSchedNLA().sg_end();i!=e;++i) {
+        Subgraph* sg = *i;
+        CFU* cfu = sg->cfu();
+        static_sg_usage[cfu->ind()]+=1;
+      }
+
+      for(int i=1; i <= _cfu_set->numCFUs(); ++i) { //: ( why did i start at 1?
+        if(i!=0) {
+          ss << ",";
+        }
+        ss << static_sg_usage[i];
+      }
+    }
+
+    out << std::setw(32) << ss.str() << " ";
+    ss.str("");
+  }
+
+
+  PrismProcessor* mc_accel = NULL;
+  virtual void setupMcPAT(const char* filename, int nm) 
+  {
+    CriticalPath::setupMcPAT(filename,nm); //do base class
+
+    printAccelMcPATxml(filename,nm);
+    ParseXML* mcpat_xml= new ParseXML(); 
+    mcpat_xml->parse((char*)filename);
+    mc_accel = new PrismProcessor(mcpat_xml); 
+    pumpCoreEnergyEvents(mc_accel,0); //reset all energy stats to 0
+  } 
+
+  virtual void pumpAccelMcPAT(uint64_t totalCycles) {
+    pumpAccelEnergyEvents(totalCycles);
+    mc_accel->computeEnergy();
+  }
+
+  virtual void pumpAccelEnergyEvents(uint64_t totalCycles) {
+    mc_accel->XML->sys.total_cycles=totalCycles;
+
+    //Func Units
+    system_core* core = &mc_accel->XML->sys.core[0];
+    core->ialu_accesses    = (uint64_t)(_nla_int_ops );
+    core->fpu_accesses     = (uint64_t)(_nla_fp_ops  );
+    core->mul_accesses     = (uint64_t)(_nla_mult_ops);
+
+    core->cdb_alu_accesses = (uint64_t)(_nla_int_ops );
+    core->cdb_fpu_accesses = (uint64_t)(_nla_fp_ops  );
+    core->cdb_mul_accesses = (uint64_t)(_nla_mult_ops);
+
+    //Reg File
+    core->int_regfile_reads    = (uint64_t)(_nla_regfile_reads  ); 
+    core->int_regfile_writes   = (uint64_t)(_nla_regfile_writes ); 
+    core->float_regfile_reads  = (uint64_t)(_nla_regfile_freads ); 
+    core->float_regfile_writes = (uint64_t)(_nla_regfile_fwrites); 
+
+    accAccelEnergyEvents();
+  }
+
+  virtual double accel_region_en() {
+ 
+    float ialu  = mc_accel->cores[0]->exu->exeu->rt_power.readOp.dynamic; 
+    float fpalu = mc_accel->cores[0]->exu->fp_u->rt_power.readOp.dynamic; 
+    float calu  = mc_accel->cores[0]->exu->mul->rt_power.readOp.dynamic; 
+    float reg  = mc_accel->cores[0]->exu->rfu->rt_power.readOp.dynamic; 
+
+    return ialu + fpalu + calu + reg;
+  }
+
+  virtual int is_accel_on() {
+    if(nla_state==NLA) {
+      return li->id();
+    } else {
+      return 0;
+    }
+  }
+
+  virtual void printMcPAT_Accel() {
+    mc_accel->computeAccPower(); //need to compute the accumulated power
+
+    float ialu  = mc_accel->ialu_acc_power.rt_power.readOp.dynamic; 
+    float fpalu = mc_accel->fpu_acc_power.rt_power.readOp.dynamic; 
+    float calu  = mc_accel->mul_acc_power.rt_power.readOp.dynamic; 
+    float reg   = mc_accel->rfu_acc_power.rt_power.readOp.dynamic; 
+
+    float total = ialu + fpalu + calu + reg;
+
+    std::cout << _name << " accel(" << _nm << "nm)... ";
+    std::cout << total << " (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
+
+  }
+
+
+  virtual void accAccelEnergyEvents() {
+    _nla_int_ops_acc         +=  _nla_int_ops        ;
+    _nla_fp_ops_acc          +=  _nla_fp_ops         ;
+    _nla_mult_ops_acc        +=  _nla_mult_ops       ;
+    _nla_regfile_reads_acc   +=  _nla_regfile_reads  ;
+    _nla_regfile_writes_acc  +=  _nla_regfile_writes ;
+    _nla_regfile_freads_acc  +=  _nla_regfile_freads ;
+    _nla_regfile_fwrites_acc +=  _nla_regfile_fwrites;
+
+    _nla_int_ops         = 0;
+    _nla_fp_ops          = 0;
+    _nla_mult_ops        = 0;
+    _nla_regfile_reads   = 0; 
+    _nla_regfile_writes  = 0; 
+    _nla_regfile_freads  = 0; 
+    _nla_regfile_fwrites = 0; 
+  }
+
+
   // Handle enrgy events for McPAT XML DOC
   virtual void printAccelMcPATxml(std::string fname_base, int nm) {
     #include "mcpat-defaults.hh"
@@ -918,9 +1168,9 @@ private:
       sa(core_node,"MUL_per_core", Prof::get().mul_div_count);
       sa(core_node,"FPU_per_core", Prof::get().fp_alu_count);
   
-      sa(core_node,"ialu_accesses",_nla_int_ops);
-      sa(core_node,"fpu_accesses",_nla_fp_ops);
-      sa(core_node,"mul_accesses",_nla_mult_ops);
+      sa(core_node,"ialu_accesses",_nla_int_ops_acc );
+      sa(core_node,"fpu_accesses", _nla_fp_ops_acc  );
+      sa(core_node,"mul_accesses", _nla_mult_ops_acc);
 
       sa(core_node,"archi_Regs_IRF_size",8);
       sa(core_node,"archi_Regs_FRF_size",8);
@@ -930,13 +1180,13 @@ private:
       //sa(core_node,"instruction_buffer_size",4);
       //sa(core_node,"decoded_stream_buffer_size",4);
       //sa(core_node,"instruction_window_scheme",0);
-      //sa(core_node,"instruction_window_size",8);
+      sa(core_node,"instruction_window_size",32);
       //sa(core_node,"fp_instruction_window_size",8);
 
-      sa(core_node,"int_regfile_reads",_nla_regfile_reads);
-      sa(core_node,"int_regfile_writes",_nla_regfile_writes);
-      sa(core_node,"float_regfile_reads",_nla_regfile_freads);
-      sa(core_node,"float_regfile_writes",_nla_regfile_fwrites);
+      sa(core_node,"int_regfile_reads",   _nla_regfile_reads_acc  );
+      sa(core_node,"int_regfile_writes",  _nla_regfile_writes_acc );
+      sa(core_node,"float_regfile_reads", _nla_regfile_freads_acc );
+      sa(core_node,"float_regfile_writes",_nla_regfile_fwrites_acc);
  
     } else {
       std::cerr << "XML Malformed\n";
@@ -952,7 +1202,7 @@ private:
 
     std::string outf = fname + std::string(".out");
 
-    std::cout << _name << " accel(" << nm << "nm)... ";
+    std::cout << _name << " old accel(" << nm << "nm)... ";
     std::cout.flush();
 
     execMcPAT(fname,outf);
@@ -963,8 +1213,6 @@ private:
     float total = ialu + fpalu + calu + reg;
     std::cout << total << "  (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
   }
-
-
 
 };
 

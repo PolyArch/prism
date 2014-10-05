@@ -85,7 +85,7 @@ static std::string grepF(std::string &fname, const char* sval,
 }
 */
 
-static bool is_empty(std::string fname) {
+static bool is_file_empty(std::string fname) {
   std::ifstream infile(fname);
   return infile.peek() == std::ifstream::traits_type::eof();
 }
@@ -99,7 +99,7 @@ static void execMcPAT(std::string& inf, std::string& outf) {
     //std::cout << ms << "\n";
     for(int i = 0; i < 10; i++) {
       int ret = system(ms.c_str());
-      if(ret==0 && !is_empty(outf)) {
+      if(ret==0 && !is_file_empty(outf)) {
         return;
       }
       if(i%5==0) {

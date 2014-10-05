@@ -126,7 +126,6 @@ namespace npu {
       }
 
       if (insideNPU && insert_npu_exec) {
-        // create the node for NPU execution
         // now, create a node for NPU execution
         InstPtr inst = InstPtr(new npu_inst(_npu_exec_latency));
         getCPDG()->addInst(inst, index);
@@ -134,8 +133,7 @@ namespace npu {
         // create edges from its arguments;
         FunctionInfo *func = op->getCalledFunc();
         func->computeArguments();
-        for (auto I = func->arg_op_begin(), E = func->arg_op_end();
-             I != E; ++I) {
+        for (auto I = func->arg_op_begin(), E = func->arg_op_end(); I != E; ++I) {
           if (!_op2InstPtr.count(I->first))
             continue;
           InstPtr depInst = _op2InstPtr[I->first];

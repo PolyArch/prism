@@ -36,27 +36,37 @@ int main(int argc, char *argv[])
   bool traceOutputs = false;
   int gen_loop_prof = 0;
   int nm = 0;
+  int scale_freq = false;
+  int elide_mem = false;
   int max_mem_lat=1073741824; //some big numbers that will never make sense
   int max_ex_lat=1073741824;
   uint64_t progress_granularity = 100000;
   bool progress_granularity_set = false;
   load_plugins(argv[0]);
 
+  bool mc_save=false,mc_load=true;
+  string mc_db;
   string run_name;
   string binary_name;
 
   bool isStdOutTerminal = (ttyname(1) != 0);
 
 
+  //This needs to be here
+  system("mkdir -p mcpat/");
+
   static struct option static_long_options[] =
     {
       {"help", no_argument, 0, 'h'},
+      {"elide-mem", no_argument, 0, 'e'},
       {"no-registry", no_argument, 0, 'n'},
+      {"scale-frequency", no_argument, 0, 's'},
       {"max-insts", required_argument, 0, 'm'},
       {"loop-prof-max-insts", required_argument, 0, 'l'},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
       {"no-mcpat", no_argument, &noMcPAT, 1},
       {"inorder-width", required_argument, 0, 2},
+
       {"ooo-width", required_argument, 0, 3},
       {"trace-out", no_argument, 0, 4},
       {"all-models", no_argument, &allModels, 1},
@@ -67,6 +77,11 @@ int main(int argc, char *argv[])
       {"max-mem-lat", required_argument, 0, 7},
       {"nm", required_argument, 0, 8},
       {"progress", required_argument, 0, 'p'},
+
+      {"mc-db", required_argument, 0,    9},
+      {"mc-save", no_argument, 0,    10},
+      {"mc-no-load", no_argument, 0,    11},
+
       {0,0,0,0}
     };
 
@@ -121,9 +136,17 @@ int main(int argc, char *argv[])
     case 8:
       nm=atoi(optarg);
       break;
-
-
+    case 9:
+      mc_db=string(optarg);
+      break;
+    case 10:
+      mc_save=true;
+      break;
+    case 11:
+      mc_load=false;
+      break;
     case 'b': binary_name = std::string(optarg); break;
+    case 'e': elide_mem = true; break;
     case 'h':
       std::cout << argv[0] << " [options] file\n";
       return(0);
@@ -153,11 +176,13 @@ int main(int argc, char *argv[])
       }
       break;
     }
+    case 's': scale_freq = true; break;
     case '?': break;
     default:
       abort();
     }
   }
+
   CPRegistry::get()->setRunName(run_name);
 
   if (argc - optind != 1) {
@@ -221,13 +246,23 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setDefaults();
 
   if(inorderWidth > 0) {
-    CPRegistry::get()->setWidth(inorderWidth, true);
+    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq);
   }
   if(oooWidth > 0) {
-    CPRegistry::get()->setWidth(oooWidth, false);
+    CPRegistry::get()->setWidth(oooWidth, false,scale_freq);
   }
   CPRegistry::get()->setTraceOutputs(traceOutputs);
-  CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat);
+  CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat,elide_mem);
+
+  CPRegistry::get()->setupComplete();
+
+
+
+  if(mc_load==false) {
+    PowerDatabase::dont_load();
+  } else if(mc_db.size()!=0) {
+    PowerDatabase::set_file(mc_db);
+  }
 
   uint64_t count = 0;
   uint64_t numCycles =  0;
@@ -264,6 +299,8 @@ int main(int argc, char *argv[])
     return 1;
   }
   std::cout << "\n";
+  std::cout.flush();
+
   while (!inf.eof()) {
     CP_NodeDiskImage::read_from_file_into(inf, img);
 
@@ -348,11 +385,15 @@ int main(int argc, char *argv[])
     CPRegistry::get()->results();
 
     if(!noMcPAT) {
-      system("mkdir -p mcpat/");
       CPRegistry::get()->printMcPATFiles();
       CPRegistry::get()->runMcPAT();
     }
   }
+
+  if(mc_save) {
+    PowerDatabase::save();
+  }
+
   std::cout << "--------------------\n";
 
   return 0;

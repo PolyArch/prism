@@ -4,6 +4,7 @@
 #include <map>
 #include <list>
 #include <vector>
+#include <sstream>
 
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/set.hpp>
@@ -121,6 +122,7 @@ template<class Archive>
   std::set<Op*>& opSet() {return _opset;}
 
   void setCFUSet(CFU_set* cfu_set) {_cfu_set = cfu_set;}
+  CFU_set* cfu_set() {return _cfu_set;}
 
   SubgraphVec::iterator sg_begin() {return _subgraphVec.begin();}
   SubgraphVec::iterator sg_end()   {return _subgraphVec.end();  }
@@ -369,6 +371,8 @@ public:
   }
 
   std::string nice_name();
+  std::string nice_name_full();
+  void nice_name_tree(std::stringstream& ss);
 
   void setFuncInfo(FunctionInfo* f) {_funcInfo=f;}
   bool hasSubgraphs(bool NLA=false) {
@@ -500,6 +504,11 @@ public:
   bool isParentOf(LoopInfo* li) {
     return _immInnerLoops.count(li);
   }
+
+  LoopSet::iterator iloop_begin() {return _immInnerLoops.begin();} 
+  LoopSet::iterator iloop_end() {return _immInnerLoops.end();} 
+
+  
 
   bool callsFunc(FunctionInfo* fi) {
     return _calledTo.count(fi);

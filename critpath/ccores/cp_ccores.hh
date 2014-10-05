@@ -29,8 +29,14 @@ public:
   virtual ~cp_ccores() {
   }
 
-  virtual bool is_accel_on() {
-    return _fi_ccore || _li_ccore;
+  virtual int is_accel_on() {
+    if(_fi_ccore) {
+      return -_fi_ccore->id();
+    } else if(_li_ccore) {
+      return _li_ccore->id();
+    } else {
+      return 0;
+    }
   };
 
 
@@ -479,9 +485,15 @@ private:
 
   unsigned numMem=0;
   bool endOfBB(Op* op, const CP_NodeDiskImage& img) {
-    if(op->isMem()) {
-      numMem+=1;
-    } 
+    if(!_elide_mem) { //normal path
+      if(op->isMem()) {
+        numMem+=1;
+      } 
+    } else {
+      if(op->isStore()) {
+        numMem+=1;
+      } 
+    }
     if(img._serialBefore || img._serialAfter || 
        op->isBBHead() || numMem==_ccores_num_mem) {
       numMem=0;
@@ -596,7 +608,9 @@ private:
 
     //check to make sure that L1 cache bandwidth is satisfied
     if(inst->_isload) {
-      checkNumMSHRs(inst);
+      if(!_elide_mem) {
+        checkNumMSHRs(inst);
+      }
     }
   }
 

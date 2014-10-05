@@ -11,7 +11,6 @@
 #include "bb.hh"
 #include "loopinfo.hh"
 
-
 class FunctionInfo {
 
 struct bb_compare {
@@ -26,6 +25,10 @@ public:
   typedef std::vector<BB*> BBvec;
   typedef std::vector<int> DOMvec;
   typedef std::map<BB*,LoopInfo*> LoopList;
+
+  typedef std::set<std::pair<BB*,BB*>> BBPairList;
+  typedef std::map<BB*,BBPairList> BBFrontier;
+
   typedef std::set<FunctionInfo*> FuncSet;
   typedef std::map<Op*,int> CallByMap; //which op did the call, how many times
   typedef std::map<std::pair<Op*,FunctionInfo*>,int> CallToMap; //which op did the call, how many times
@@ -59,13 +62,23 @@ private:
   
   LoopList _loopList;
   DOMvec _dom;
-  BBvec _rpo;
+  DOMvec _pdom;
+  BBFrontier _pdomFrontier;
+  BBFrontier _pdomReverseFrontier;
+
+
+  BBvec _rpo; //Reverse Post Order
+  BB*   _unique_exit=NULL;
+
   prof_symbol* _sym=0;
 
   bool _canRecurse=false;
   bool _callsRecursiveFunc=false;
 
   int _ninputs=0, _noutputs=-1;
+
+  std::set<BB*> _retBBs; //NOT SAVED
+
 
 friend class boost::serialization::access;
 template<class Archive>
@@ -88,7 +101,11 @@ template<class Archive>
     ar & _nonLoopAnyRecInsts;
     ar & _loopList;
     ar & _dom;
+    ar & _pdom;
+    ar & _pdomFrontier;
+    ar & _pdomReverseFrontier;
     ar & _rpo;
+    ar & _unique_exit;
     ar & _sym;
     ar & _canRecurse;
     ar & _callsRecursiveFunc;
@@ -106,9 +123,20 @@ template<class Archive>
   void calculateRPO(BB* bb);
 
   int intersectDOM(int finger1,int finger2);  
+  bool dominates(BB* bb1,BB* bb2);
+  void calculateDOM_Frontier();
+
+  void hookupExitBB(std::set<BB*>& exitBBs);
+  void back_remove(BB* bb, std::set<BB*>& remainingBBs);
+  bool addUniqueExitBB();
+
+  int intersectPDOM(int finger1,int finger2);  
+  bool post_dominates(BB* bb1,BB* bb2);
+  void calculatePDOM_Frontier();
+
   void getLoopBody(BB* latch_bb, std::set<BB*>& loopBody);
   void createLoop(BB* head_bb, BB* latch_bb);
-  bool dominates(BB* bb1,BB* bb2);
+
 
 public:
   FunctionInfo(CPC cpc) : _id(_idcounter++), _firstBB(NULL), _calls(0), _sym(NULL)
@@ -120,6 +148,17 @@ public:
   BBMap::iterator bb_end() {return _bbMap.end();}
   LoopList::iterator li_begin() {return _loopList.begin();}
   LoopList::iterator li_end() {return _loopList.end();}
+
+  BBPairList::iterator pdom_begin(BB* bb) {return _pdomFrontier[bb].begin();}
+  BBPairList::iterator pdom_end(BB* bb)   {return _pdomFrontier[bb].end();}
+  int pdom_has(BB* bb){return _pdomFrontier.count(bb);}
+
+  BBPairList::iterator pdomR_begin(BB* bb) {return _pdomReverseFrontier[bb].begin();}
+  BBPairList::iterator pdomR_end(BB* bb)   {return _pdomReverseFrontier[bb].end();}
+  int pdomR_has(BB* bb){return _pdomReverseFrontier.count(bb);}
+
+
+
 
   uint32_t id() {return _id;}
   int nBBs() {return _bbMap.size();}
@@ -135,6 +174,22 @@ public:
     std::stringstream ss;
     ss << _id;
     return ss.str();
+  }
+
+  char _isSinCos=-1;
+  bool isSinCos() {
+    if(_isSinCos==-1) {
+      if ( nice_name() == "sincosf"
+           || nice_name() == "__sincos"
+           || nice_name() == "__acos"
+           || nice_name() == "__asin"
+           || nice_name() == "__libm_sse2_sincosf") {
+        _isSinCos=true; 
+      } else {
+        _isSinCos=false;
+      }
+    }
+    return _isSinCos;
   }
 
   void setCanRecurse(bool b) {
@@ -224,6 +279,17 @@ public:
   CallToMap::iterator callto_end()   {return _calledToMap.end();}
 
   int calls() {return _calls;}
+
+  FunctionInfo* funcCallForOp(Op* call_op) {
+    for(auto i = _calledToMap.begin(), e = _calledToMap.end(); i!=e; ++i) {
+      Op* op = i->first.first;
+      FunctionInfo* fi = i->first.second;
+      if(op==call_op) {
+        return fi;
+      }
+    }
+    return NULL;
+  }
 
   bool hasFuncCalls() {
     return _calledToMap.size() > 0;
@@ -461,6 +527,8 @@ public:
   }
 
   void calculateDOM();
+  void calculatePDOM();
+
   void detectLoops();
   void loopNestAnalysis();
 

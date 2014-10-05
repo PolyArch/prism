@@ -2,7 +2,7 @@
 
 using namespace std;
 
-uint32_t BB::_idcounter=0;
+uint32_t BB::_idcounter=1;
 
 void BB::rev_trace(BB* bb_prev) {
   _pred.push_back(bb_prev);

@@ -6,7 +6,7 @@
 
 using namespace std;
 
-uint32_t FunctionInfo::_idcounter=0;
+uint32_t FunctionInfo::_idcounter=1;
 
 void FunctionInfo::ascertainBBs() {
   //iterate through each tail, see if there are issues
@@ -41,6 +41,7 @@ void FunctionInfo::ascertainBBs() {
       nextSmallestBB=*bbi;
     }
   }
+
 }
 
 BB* FunctionInfo::addBB(BB* prevBB, CPC headCPC, CPC tailCPC) {
@@ -158,6 +159,212 @@ void FunctionInfo::calculateRPO(BB* bb) {
 }
 
 
+void FunctionInfo::hookupExitBB(std::set<BB*>& exitBBs) {
+  assert(exitBBs.size()>0);
+  BB* newExitBB=NULL;
+  for(auto i=exitBBs.begin(),e=exitBBs.end();i!=e;++i) {
+    BB* exitBB = *i;
+    newExitBB = addBB(exitBB,make_pair(-2,-2),make_pair(-3,-3));
+  }
+  newExitBB->setRPONum(_rpo.size());
+  newExitBB->setFakeExit();
+  _unique_exit=newExitBB;
+}
+
+void FunctionInfo::back_remove(BB* bb, std::set<BB*>& remainingBBs) {
+  if(remainingBBs.count(bb)==0) {
+    return;
+  }
+  remainingBBs.erase(bb);
+  for(auto i=bb->pred_begin(),e=bb->pred_end();i!=e;++i) {
+    BB* pred_bb = *i;
+    back_remove(pred_bb,remainingBBs);
+  }
+}
+
+//Add's a new BB if there isn't a unique exit.
+//Returns true if BB is added
+bool FunctionInfo::addUniqueExitBB() {
+  std::set<BB*> exitBBs;
+  std::set<BB*> remainingBBs;
+  //bool
+ 
+  for(auto ii=_rpo.rbegin(),ee=_rpo.rend();ii!=ee;++ii) { //reverse reverse post order
+    BB* bb = *ii;
+    if(bb->succ_size()==0 || (bb->lastOp() && bb->lastOp()->isReturn())) {
+      exitBBs.insert(bb);
+    }
+    remainingBBs.insert(bb);
+  }
+
+  for(auto ii=exitBBs.begin(),ee=exitBBs.end();ii!=ee;++ii) { 
+    back_remove(*ii,remainingBBs);   
+  }
+
+  //eliminate any remaining weird loops
+  while(remainingBBs.size()!=0) {
+    BB* highestRPO=NULL;
+    for(auto ii=remainingBBs.begin(),ee=remainingBBs.end();ii!=ee;++ii) {
+      BB* remBB = *ii;
+      if(highestRPO==NULL || highestRPO->rpoNum() < remBB->rpoNum()) {
+        highestRPO=remBB;
+      }
+    }
+    //Fake Exit
+    assert(highestRPO!=NULL);
+    exitBBs.insert(highestRPO);
+    back_remove(highestRPO,remainingBBs);
+  }
+
+/* No longer needed
+  if(exitBBs.size() == 0) {
+    //FUDGE! we must have stopped recording in a loop.  Only thing to do is
+    //create a fake exit node.
+    exitBBs.insert(*_rpo.rbegin());
+    hookupExitBB(exitBBs);
+    return true;
+  }
+*/
+  BB* first_exit_bb=*(exitBBs.begin());
+  if(exitBBs.size() == 1 && first_exit_bb->rpoNum()==(int)(_rpo.size()-1)) {
+    //we can skip creating a unique exit, because we already have one
+    _unique_exit=first_exit_bb;
+    return false;
+  }
+  
+  hookupExitBB(exitBBs);
+  return true;
+}
+
+void FunctionInfo::calculatePDOM() {
+  if(_bbMap.size()==0) {
+    return;
+  } 
+  //For later analysis, add a fake BB as a unique exit node.
+  bool added_one = addUniqueExitBB();
+  bool changed=true;
+  
+  int pdom_size = _rpo.size()+added_one;
+
+  _pdom.resize(pdom_size,-1);
+  _pdom[pdom_size-1]=pdom_size-1; // this *has* to be the unique exit node
+
+  while(changed) {
+    changed=false;
+
+    for(auto ii=_rpo.rbegin(),ee=_rpo.rend();ii!=ee;++ii) { //reverse reverse post order
+      BB* bb = *ii;
+     
+      int new_ipdom_rpo=-1;
+      for(auto ip=bb->succ_begin(),ep=bb->succ_end();ip!=ep;++ip) {
+        BB* succ_bb = *ip;
+        int succ_rpo = succ_bb->rpoNum();
+
+        int succ_ipdom_rpo = _pdom[succ_rpo];
+        if(succ_ipdom_rpo==-1) {
+          continue;
+        }
+
+        if(new_ipdom_rpo==-1) {
+          new_ipdom_rpo=succ_rpo;
+        } else {
+          new_ipdom_rpo=intersectPDOM(new_ipdom_rpo,succ_rpo);
+        }
+      }
+
+      if(new_ipdom_rpo == -1) {
+        continue;
+      }
+
+      if(new_ipdom_rpo != _pdom[bb->rpoNum()]) {
+        changed=true;
+        _pdom[bb->rpoNum()]=new_ipdom_rpo;
+      }
+    }
+  }
+
+  calculatePDOM_Frontier();
+}
+
+// I <3 Cooper / Harvey / Kennedy (& Ferrante)
+/*for all nodes, b
+ * if the number of predecessors of b ≥ 2
+ *   for all predecessors, p, of b
+ *     runner ← p
+ *     while runner != doms[b]
+ *       add b to runner’s dominance frontier set
+ *       runner = doms[runner] 
+ */
+void FunctionInfo::calculateDOM_Frontier() {
+  assert(0 && "To be done");  
+}
+
+/*for all nodes, b
+ * if the number of successors of b ≥ 2
+ *   for all succecessors, s, of b
+ *     runner ← s
+ *     while runner != pdoms[b]
+ *       add b to runner’s post_dominance frontier set
+ *       runner = pdoms[runner] 
+ */
+void FunctionInfo::calculatePDOM_Frontier() {
+  for(auto ii=_rpo.rbegin(),ee=_rpo.rend();ii!=ee;++ii) { //reverse reverse post order
+    BB* bb = *ii;
+    for(auto ip=bb->succ_begin(),ep=bb->succ_end();ip!=ep;++ip) {
+      BB* succ_bb = *ip;
+      BB* runner = succ_bb;
+
+      set<BB*> originBBs;
+
+      while (runner->rpoNum() != _pdom[bb->rpoNum()]) {
+        originBBs.insert(runner);
+
+        unsigned pdom_ind = _pdom[runner->rpoNum()];
+        if(pdom_ind==_rpo.size()) {
+          runner=_unique_exit;
+        } else {
+          runner=_rpo[pdom_ind];
+        }
+      }
+
+      for(auto i=originBBs.begin(), e=originBBs.end();i!=e;++i) {
+        BB* originBB = *i;
+        _pdomFrontier[originBB].insert(make_pair(bb,succ_bb));
+        _pdomReverseFrontier[bb].insert(make_pair(succ_bb,originBB));
+      }
+
+
+    }
+  }
+}
+
+int FunctionInfo::intersectPDOM(int finger1, int finger2) {
+  //if(finger1==-1) return _dom[finger2];
+  //if(finger2==-1) return _dom[finger1];
+
+  while (finger1 != finger2) {
+    while (finger1 < finger2) {
+      finger1 = _pdom[finger1];
+    }
+    while (finger2 < finger1) {
+      finger2 = _pdom[finger2];
+    }
+  }
+
+  return finger1;
+}
+
+bool FunctionInfo::post_dominates(BB* bb1, BB* bb2) {
+  int finger1=bb1->rpoNum();
+  int finger2=bb2->rpoNum();
+
+  while (finger2 > finger1) {
+    finger2 = _pdom[finger2];
+  }
+  
+  return finger1==finger2;
+}
+
 void FunctionInfo::calculateDOM() {
   bool changed=true;
 
@@ -169,13 +376,11 @@ void FunctionInfo::calculateDOM() {
   while(changed) {
     changed=false;
 
-    BBvec::iterator ii,ee;
-    for(ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) {
+    for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) {
       BB* bb = *ii;
      
       int new_idom_rpo=-1;
-      BB::BBvec::iterator ip,ep;
-      for(ip=bb->pred_begin(),ep=bb->pred_end();ip!=ep;++ip) {
+      for(auto ip=bb->pred_begin(),ep=bb->pred_end();ip!=ep;++ip) {
         BB* pred_bb = *ip;
         int pred_rpo = pred_bb->rpoNum();
 
@@ -362,7 +567,16 @@ void FunctionInfo::toDotFile(std::ostream& out) {
       if(smallest_li) {
         out << " L" << smallest_li->id();
       }
-      
+
+      if(bb.fake_unique_exit()) {
+        out << "(fake exit)";
+      }
+     
+      Op* last_op = bb.lastOp();
+      if(FunctionInfo* fi = funcCallForOp(last_op)) {
+        out << " ->" << fi->nice_name();
+      }
+
       out << "\"]\n;";
 
       for(auto si=bb.succ_begin(),  se=bb.succ_end(); si!=se;++si) {
@@ -409,10 +623,49 @@ void FunctionInfo::toDotFile(std::ostream& out) {
     */
 
     out << "rpo [label=\"";
+    out << "doms:\\n";
     for(unsigned i = 0; i < _dom.size(); ++i) {
       out << i << " " << _dom[i] << "\\n";
     }
     out << "\"];\n";
+
+    out << "po [label=\"";
+    out << "pdoms:\\n";
+    for(unsigned i = 0; i < _pdom.size(); ++i) {
+      out << i << " " << _pdom[i] << "\\n";
+    }
+    out << "\"];\n";
+
+    out << "pof [label=\"";
+    out << "pdomFrontier:\\n";
+    for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) { 
+      BB* bb = *ii;
+      out << bb->rpoNum() << ": "; 
+      for(auto i=_pdomFrontier[bb].begin(), e=_pdomFrontier[bb].end(); i!=e; ++i) {
+        BB* frontBB = (*i).first;
+        BB* toBB = (*i).second;
+        out << frontBB->rpoNum() <<"->"<< toBB->rpoNum()<< " ";
+      }
+      out << "\\n";
+    }
+    out << "\"];\n";
+
+    out << "porf [label=\"";
+    out << "Reverse pdomFrontier:\\n";
+    for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) { 
+      BB* bb = *ii;
+      if(_pdomReverseFrontier[bb].size()==0) continue;
+      out << bb->rpoNum() << ": "; 
+      for(auto i=_pdomReverseFrontier[bb].begin(), 
+               e=_pdomReverseFrontier[bb].end(); i!=e; ++i) {
+        BB* frontBB = (*i).first;
+        BB* toBB = (*i).second;
+        out << frontBB->rpoNum() <<"->"<< toBB->rpoNum()<< " ";
+      }
+      out << "\\n";
+    }
+    out << "\"];\n";
+
 
     LoopList::iterator il,el;
     for(il=_loopList.begin(),el=_loopList.end();il!=el;++il) {

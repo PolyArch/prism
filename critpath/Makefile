@@ -5,6 +5,7 @@ SRC := critpath.cpp gzstream.cpp prof.cpp plugin.cpp origcp.cpp exec_profile.cpp
 
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 
+EXT_OBJ := mcpat/mcpat.a
 
 LIBS := -lz  -lloopprof -lboost_serialization -ldl -ltcmalloc
 

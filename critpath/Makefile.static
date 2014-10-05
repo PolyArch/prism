@@ -28,6 +28,8 @@ SRC := critpath.cpp \
 
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 
+EXT_OBJ := mcpat/mcpat.a
+
 LIBS := -lz  -lboost_serialization -ldl -ltcmalloc_minimal
 
 

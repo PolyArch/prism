@@ -64,7 +64,7 @@ public:
 
 private:
 
-  enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISRETURN, ISFLOATING };
+  enum { ISLOAD, ISSTORE, ISCALL, ISCTRL, ISCONDCTRL, ISINDCTRL, ISRETURN, ISFLOATING };
   uint32_t _id;
 
   CPC _cpc;
@@ -173,6 +173,8 @@ public:
   bool isLoad() {return _flags[ISLOAD];}
   bool isStore() {return _flags[ISSTORE];}
   bool isCtrl() {return _flags[ISCTRL];}
+  bool isCondCtrl() {return _flags[ISCONDCTRL];}
+  bool isIndirectCtrl() {return _flags[ISINDCTRL];}
   bool isCall() {return _flags[ISCALL];}
   bool isReturn() {return _flags[ISRETURN];}
   bool isMem() {return _flags[ISLOAD] || _flags[ISSTORE];}
@@ -417,6 +419,8 @@ public:
   void setIsLoad(bool isload)    {_flags.set(ISLOAD,isload);}
   void setIsStore(bool isstore)  {_flags.set(ISSTORE,isstore);}
   void setIsCtrl(bool isctrl)    {_flags.set(ISCTRL,isctrl);}
+  void setIsCondCtrl(bool flag)    {_flags.set(ISCONDCTRL,flag);}
+  void setIsIndirectCtrl(bool flag)    {_flags.set(ISINDCTRL,flag);}
   void setIsCall(bool iscall)    {_flags.set(ISCALL,iscall);}
   void setIsReturn(bool isreturn){_flags.set(ISRETURN,isreturn);}
   void setIsFloating(bool isflt) {_flags.set(ISFLOATING,isflt);}

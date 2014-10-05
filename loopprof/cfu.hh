@@ -303,6 +303,8 @@ public:
   CFU* getCFU(int i) {
     return _map[i];
   }
+
+  int numCFUs() {return _map.size();}
 };
 
 

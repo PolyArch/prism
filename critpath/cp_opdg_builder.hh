@@ -216,6 +216,8 @@ protected:
   std::unordered_map<Op*, bool> _trueCacheProd;
   std::unordered_map<Op*, bool> _ctrlMiss;
   std::unordered_map<Op*, uint64_t> _latestLoopIdx; //Todo: make this more robust
+  std::unordered_map<Op*, std::pair<uint8_t,uint8_t>> _cacheHitLevel;
+
 
 
   virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
@@ -236,6 +238,9 @@ protected:
       else
         _trueCacheProd[op] = inst->_true_cache_prod;
 
+      _cacheHitLevel[op]=std::make_pair(
+          std::max(_cacheHitLevel[op].first, inst->_hit_level),
+          std::max(_cacheHitLevel[op].second,inst->_miss_level));
       // TODO: do something for _cache_prod
     }
 
@@ -278,14 +283,16 @@ protected:
       inst->_st_lat = std::max(inst_lat, _cacheLat[op]);
     }
 
-    if (getenv("MAFIA_SIMD_NO_TRUE_CACHEPROD") == 0) {
-      if (op->isLoad() || op->isStore()) {
-        if (useInst)
-          inst->_true_cache_prod &= _trueCacheProd[op];
-        else
-          inst->_true_cache_prod = _trueCacheProd[op];
+    if (op->isLoad() || op->isStore()) {
+      if (useInst) {
+        inst->_true_cache_prod &= _trueCacheProd[op];
+      } else {
+        inst->_true_cache_prod = _trueCacheProd[op];
       }
     }
+    
+    inst->_hit_level = _cacheHitLevel[op].first;
+    inst->_miss_level = _cacheHitLevel[op].second;
 
     if (op->isCtrl()) {
       if (useInst)
@@ -310,6 +317,7 @@ protected:
     _cacheLat.clear();
     _trueCacheProd.clear();
     _ctrlMiss.clear();
+    _cacheHitLevel.clear();
     _latestLoopIdx.clear();
   }
 
@@ -338,6 +346,7 @@ protected:
     _cacheLat.clear();
     _trueCacheProd.clear();
     _ctrlMiss.clear();
+    _cacheHitLevel.clear();
 
     unsigned numIter = 0;
     // repopulate --- for iter worth of instructions

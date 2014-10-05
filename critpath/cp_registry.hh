@@ -65,23 +65,25 @@ public:
     handleModelArgv(ooo.c_str(), false);
   }
 
-  void setWidth(int width, bool inorder) {
+  void setWidth(int width, bool inorder, bool scale_freq) {
     for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
       if(i->second->isInOrder() == inorder) {
-        i->second->setWidth(width);
+        i->second->setWidth(width, scale_freq);
       }
+      
     }
   }
 
   int _nm=0;
   std::vector<int> nm_vec;
 
-  void setGlobalParams(int nm, int maxEx, int maxMem) {
+  void setGlobalParams(int nm, int maxEx, int maxMem, bool elideMem) {
     _nm=nm;
     if(_nm==0) {
-      nm_vec.push_back(65);
-      nm_vec.push_back(45);
-      nm_vec.push_back(32);
+//      nm_vec.push_back(65);
+ //     nm_vec.push_back(45);
+  //    nm_vec.push_back(32);
+      //I just want 22nm for now
       nm_vec.push_back(22);
     } else {
       nm_vec.push_back(nm);
@@ -91,6 +93,15 @@ public:
       i->second->set_nm(nm);
       i->second->set_max_mem_lat(maxMem);
       i->second->set_max_ex_lat(maxEx);
+      i->second->set_elide_mem(elideMem);
+    }
+
+    //Now start mcpat
+    for(auto i = cpmap.begin(); i != cpmap.end();++i) {
+      std::string mcpat_fname=std::string("mcpat/") + _run_name +
+                              std::to_string(nm) + std::string(".") +
+                              i->first + std::string("_init.xml");
+      i->second->setupMcPAT(mcpat_fname.c_str(),nm_vec[nm_vec.size()-1]);
     }
   }
 
@@ -137,6 +148,11 @@ public:
     }
   }
 
+  void setupComplete() {
+    for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
+      i->second->setupComplete();
+    }
+  }
 
   void register_cp(std::string name, CriticalPath *cp,
                    bool EnableByDefault, bool isBaseline,
@@ -169,7 +185,7 @@ public:
   void insert(CP_NodeDiskImage img, uint64_t index, Op* op) {
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       I->second->insert(img, index, op);
-      I->second->update_cycles(op);
+      I->second->check_update_cycles(op);
     }
   }
 
@@ -186,6 +202,10 @@ public:
 
     for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
       I->second->finish();
+      I->second->update_cycles(); //update per-region counters
+      I->second->printMcPAT();
+      //I->second->printAccEnergyEvents();
+
       I->second->printResults(std::cout, I->first, baselineCycles);
       std::string region_bdown=std::string("stats/") + prefix +
                                I->first + std::string(".out");
@@ -213,7 +233,6 @@ public:
         msleep(100);
         I->second->printAccelMcPATxml(mcpat_fname.c_str(),nm);
         msleep(100);
-
       }
     }
   }
@@ -225,7 +244,7 @@ public:
       // look up env
       for (auto I = cpmap.begin(), E = cpmap.end(); I != E; ++I) {
         I->second->set_nm(nm);   
-        std::cout << I->first << " Dynamic Power(" << nm << "nm)... ";
+        std::cout << I->first << " old Dynamic Power(" << nm << "nm)... ";
         std::cout.flush();
   
         std::string inf = std::string("mcpat/") + _run_name +
@@ -242,7 +261,6 @@ public:
         std::cout << tot_dyn_p << " " << tot_leak_p << "\n";
 
         I->second->calcAccelEnergy(inf,nm);
-
       }
     }
   }
