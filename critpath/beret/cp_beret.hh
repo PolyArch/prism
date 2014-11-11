@@ -92,11 +92,17 @@ public:
   uint64_t _beret_regfile_fwrites=0, _beret_regfile_writes=0;
   uint64_t _beret_regfile_freads=0,  _beret_regfile_reads=0;
 
+  //Acc stats
+  uint64_t _beret_int_ops_acc=0, _beret_fp_ops_acc=0, _beret_mult_ops_acc=0;
+  uint64_t _beret_regfile_fwrites_acc=0, _beret_regfile_writes_acc=0;
+  uint64_t _beret_regfile_freads_acc=0,  _beret_regfile_reads_acc=0;
+
+
   unsigned _beret_max_seb=6,_beret_max_mem=2,_beret_max_ops=80;
   unsigned _beret_config_time=1,_beret_iops=2;
   unsigned _beret_dataflow_seb=0,_beret_dataflow_pure=0;
   bool  _no_gams=false, _gams_details=false, _size_based_cfus=false;
-  
+
   void handle_argument(const char *name, const char *optarg) {
     if (strcmp(name, "beret-max-seb") == 0) {
       unsigned temp = atoi(optarg);
@@ -164,16 +170,6 @@ public:
       _size_based_cfus=true;
     } 
   }
-
-
-  virtual int is_accel_on() {
-    if(beret_state==BERET) {
-      return li->id();
-    } else {
-      return 0;
-    }
-  };
-
 
   virtual void setupComplete() {
     if(_elide_mem) {
@@ -324,7 +320,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   uint64_t _totalBeretCycles=0, _totalBeretInsts=0;
 
   std::shared_ptr<T> prevStartSEB = NULL;
-  //Add a loop iteration based on the CFG and hot path
+
+  //-----------------------------------------------------------------------------------
+  // -------------------------------- ADD LOOP ITERATION ------------------------------
+  // Add a loop iteration based on the CFG and hot path
   std::shared_ptr<T> addLoopIteration(T* startIterEv, unsigned xfer_cycles) {
     binstMap.clear();
     replay_queue.clear();
@@ -337,7 +336,6 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
       Subgraph* sg = *i;
       std::shared_ptr<T> startSEB(new T());
       std::shared_ptr<T> endSEB(new T());
-      endSEB->_index=343;
 
       //if load or store queue is full, then delay
       checkLSQSize(*startIterEv,true,true);
@@ -371,6 +369,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
       for(auto opi = sg->opv_begin(),ope=sg->opv_end();opi!=ope;++opi) {
         Op* op = *opi;
         BeretInst* b_inst = new BeretInst(op);
+        
+        b_inst->setCumWeights(curWeights());
 
         b_inst->startSEB=startSEB;
         b_inst->endSEB=endSEB;
@@ -386,7 +386,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         getCPDG()->insert_edge(*b_inst, BeretInst::Complete,*endSEB, 0, E_SEBL);
 
         b_inst->ex_edge = getCPDG()->insert_edge(*b_inst, BeretInst::Execute,
-                   *b_inst, BeretInst::Complete,/*op->avg_lat()*/1, E_SEBL);
+                   *b_inst, BeretInst::Complete,/*op->avg_lat()*/1, E_EP);
 
         b_inst->st_edge = getCPDG()->insert_edge(*b_inst, BeretInst::Complete,
                                *b_inst, BeretInst::Writeback, 0, E_SEBW);
@@ -412,6 +412,11 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
            
           if(binstMap.count(dop) && li->forwardDep(dop,op)) {
             std::shared_ptr<BeretInst> dep_BeretInst = binstMap[dop];
+
+//            if(dep_BeretInst->_index >= b_inst->_index) {
+//              cout << dep_BeretInst->_index << " " << b_inst->_index << "\n";
+//            }
+
             getCPDG()->insert_edge(*dep_BeretInst, BeretInst::Complete,
                        *b_inst, BeretInst::Execute, 0,E_SEBD);
             /*std::cout << dop->id() << "->" << op->id()
@@ -427,6 +432,20 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     }
     assert(binstMap.size() == li2sgmap[li].opSet().size());
 
+    /*
+    std::unordered_set<T*> seen;
+    std::unordered_set<T*> temp;
+
+    T* cycle_start=NULL;
+    bool cycling = detectCycle(,seen,temp,cycle_start); //ERROR CHECKING, TODO: Comment
+    if(cycling) {
+      std::cout << "CYCLEING!\n";
+    }
+    if(cycle_start) {
+      std::cout << "had a cycle!\n";
+    }
+   
+*/
     return prevEndSEB;
   }
  
@@ -575,6 +594,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             _curBeretStartInst=index;
 
             beretEndEv = addLoopIteration(iterStartEv,8/_beret_iops + config_time);
+//            cout << "TRANSITION Iter.  index:" << index << " name:" << li->nice_name_full() << "\n";
+
             _prevLoop=li;
           }
         }
@@ -583,6 +604,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         if(op==curLoopHead) { //came back into beret
           reCalcBeretLoop(true); //get correct beret timing
           std::shared_ptr<T> event = addLoopIteration(beretEndEv.get(),0);
+//           cout << "Iter.  index:" << index << " name:" << li->nice_name_full() << "\n";
+
           cleanLSQEntries(beretEndEv->cycle()); // TODO: i think this doesn't work with the relaxations turned on?
 
           //TODO, why do I need this to be so high?
@@ -636,6 +659,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             _totalBeretInsts+=index-_curBeretStartInst;
 
             if(replay) {
+//              cout << " --------------------------------------------REPLAY!\n";
               supress_errors(true);
               //Replay BERET on CPU
               for(unsigned i=0; i < replay_queue.size();++i) {
@@ -714,11 +738,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         
         assert(binstMap.count(op));
         std::shared_ptr<BeretInst> b_inst = binstMap[op];
-        assert(b_inst);
-        std::shared_ptr<BeretInst> sh_inst(b_inst);
         b_inst->updateImg(img);
         b_inst->_index=index;
-        getCPDG()->addInst(sh_inst,index);
+        getCPDG()->addInst(b_inst,index);
 
         //this sets the latency for a beret instruction
         int lat=epLat(img._cc-img._ec,b_inst.get(),img._isload,
@@ -832,8 +854,8 @@ private:
         BeretInst* dep_binst = dynamic_cast<BeretInst*>(depInst);
         assert(dep_binst);
         if(dep_binst->startSEB != inst.startSEB) {
-          if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SEBS)) {
-            getCPDG()->insert_edge(*dep_binst->endSEB,*inst.startSEB, 0, E_SEBS);
+          if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SSDF)) {
+            getCPDG()->insert_edge(*dep_binst->endSEB,*inst.startSEB, 0, E_SSDF);
           }
         } else {
           //getCPDG()->insert_edge(depInst, depInst.eventComplete(),
@@ -852,8 +874,8 @@ private:
         assert(dep_binst);
         if(dep_binst->startSEB != inst.startSEB
           &&(!(dep_binst->_isload && inst._isload))) {  
-          if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SEBS)) {
-            getCPDG()->insert_edge(*dep_binst->endSEB,*inst.startSEB, 0, E_SEBS);
+          if(!inst.startSEB->has_pred(dep_binst->endSEB.get(),E_SSMD)) {
+            getCPDG()->insert_edge(*dep_binst->endSEB,*inst.startSEB, 0, E_SSMD);
           }
         } else {
           //getCPDG()->insert_edge(depInst, depInst.eventComplete(),
@@ -937,6 +959,112 @@ private:
   }
 */
 
+
+
+  NLAProcessor* mc_accel = NULL;
+  virtual void setupMcPAT(const char* filename, int nm) 
+  {
+    CriticalPath::setupMcPAT(filename,nm); //do base class
+
+    printAccelMcPATxml(filename,nm);
+    ParseXML* mcpat_xml= new ParseXML(); 
+    mcpat_xml->parse((char*)filename);
+    mc_accel = new NLAProcessor(mcpat_xml); 
+    pumpCoreEnergyEvents(mc_accel,0); //reset all energy stats to 0
+  }
+
+  virtual void pumpAccelMcPAT(uint64_t totalCycles) {
+    pumpAccelEnergyEvents(totalCycles);
+    mc_accel->computeEnergy();
+  }
+
+  virtual void pumpAccelEnergyEvents(uint64_t totalCycles) {
+    mc_accel->XML->sys.total_cycles=totalCycles;
+
+    //Func Units
+    system_core* core = &mc_accel->XML->sys.core[0];
+    core->ialu_accesses    = (uint64_t)(_beret_int_ops );
+    core->fpu_accesses     = (uint64_t)(_beret_fp_ops  );
+    core->mul_accesses     = (uint64_t)(_beret_mult_ops);
+
+    core->cdb_alu_accesses = (uint64_t)(_beret_int_ops );
+    core->cdb_fpu_accesses = (uint64_t)(_beret_fp_ops  );
+    core->cdb_mul_accesses = (uint64_t)(_beret_mult_ops);
+
+    //Reg File
+    core->int_regfile_reads    = (uint64_t)(_beret_regfile_reads  ); 
+    core->int_regfile_writes   = (uint64_t)(_beret_regfile_writes ); 
+    core->float_regfile_reads  = (uint64_t)(_beret_regfile_freads ); 
+    core->float_regfile_writes = (uint64_t)(_beret_regfile_fwrites); 
+
+    accAccelEnergyEvents();
+  }
+
+  virtual double accel_leakage() override {
+    //if(false) {
+    //  float ialu = RegionStats::get_leakage(mc_accel->cores[0]->exu->exeu,lc)* nALUs_on;
+    //  float mul  = RegionStats::get_leakage(mc_accel->cores[0]->exu->mul,lc) * nMULs_on;
+    //  float imu  = RegionStats::get_leakage(mc_accel->nlas[0]->imu_window,lc)* imus_on;
+    //  return ialu + mul + imu + net;
+    //} else {
+      return 0;
+    //}
+
+  }
+
+  virtual double accel_region_en() override {
+ 
+    float ialu  = mc_accel->cores[0]->exu->exeu->rt_power.readOp.dynamic; 
+    float fpalu = mc_accel->cores[0]->exu->fp_u->rt_power.readOp.dynamic; 
+    float calu  = mc_accel->cores[0]->exu->mul->rt_power.readOp.dynamic; 
+    float reg   = mc_accel->cores[0]->exu->rfu->rt_power.readOp.dynamic; 
+
+    return ialu + fpalu + calu + reg;
+  }
+
+  virtual int is_accel_on() {
+    if(beret_state==BERET) {
+      return li->id();
+    } else {
+      return 0;
+    }
+  }
+
+  virtual void printMcPAT_Accel() {
+    mc_accel->computeAccPower(); //need to compute the accumulated power
+
+    float ialu  = mc_accel->ialu_acc_power.rt_power.readOp.dynamic; 
+    float fpalu = mc_accel->fpu_acc_power.rt_power.readOp.dynamic; 
+    float calu  = mc_accel->mul_acc_power.rt_power.readOp.dynamic; 
+    float reg   = mc_accel->rfu_acc_power.rt_power.readOp.dynamic; 
+
+    float total = ialu + fpalu + calu + reg;
+
+    std::cout << _name << " accel(" << _nm << "nm)... ";
+    std::cout << total << " (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ")\n";
+
+  }
+
+  virtual void accAccelEnergyEvents() {
+    _beret_int_ops_acc         +=  _beret_int_ops        ;
+    _beret_fp_ops_acc          +=  _beret_fp_ops         ;
+    _beret_mult_ops_acc        +=  _beret_mult_ops       ;
+    _beret_regfile_reads_acc   +=  _beret_regfile_reads  ;
+    _beret_regfile_writes_acc  +=  _beret_regfile_writes ;
+    _beret_regfile_freads_acc  +=  _beret_regfile_freads ;
+    _beret_regfile_fwrites_acc +=  _beret_regfile_fwrites;
+
+    _beret_int_ops         = 0;
+    _beret_fp_ops          = 0;
+    _beret_mult_ops        = 0;
+    _beret_regfile_reads   = 0; 
+    _beret_regfile_writes  = 0; 
+    _beret_regfile_freads  = 0; 
+    _beret_regfile_fwrites = 0;
+  }
+
+
+
   // Handle enrgy events for McPAT XML DOC
   virtual void printAccelMcPATxml(std::string fname_base, int nm) {
     #include "mcpat-defaults.hh"
@@ -958,6 +1086,8 @@ private:
 
 
       pugi::xml_node core_node = system_node.find_child_by_attribute("name","core0");
+      sa(core_node,"machine_type",1);	//<!-- inorder/OoO; 1 inorder; 0 OOO-->
+
       sa(core_node,"total_cycles",numCycles());
       sa(core_node,"busy_cycles",0);
       sa(core_node,"idle_cycles",numCycles());

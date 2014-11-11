@@ -34,6 +34,8 @@ private:
   OpVec _ops;
   OpMap _opMap;
   bool _fake_unique_exit=false;
+  bool _static_only=true;
+  int _line_number=0,_srcno=0;
 
   //EdgeCount predCount;
 
@@ -52,6 +54,9 @@ template<class Archive>
     ar & _ops;
     ar & _opMap;
     ar & _fake_unique_exit;
+    ar & _static_only;
+    ar & _line_number;
+    ar & _srcno;
     for(auto i=_ops.begin(),e=_ops.end();i!=e;++i) {
       Op* op = *i;
       op->setBB(this);
@@ -72,9 +77,23 @@ public:
   CPC tail() const {return _tail;}
   bool fake_unique_exit() {return _fake_unique_exit;}
 
+  int static_estimate() {
+    if(int l = len()) {
+      return l;
+    } else {
+      return 5;
+    }
+  }
+
   int len() {return _ops.size();} 
   Op* firstOp() {return _ops.front();}
-  Op* lastOp() {return _ops.back();}
+  Op* lastOp() {
+    if(_ops.size()>0) {
+      return _ops.back();
+    } else {
+      return NULL;
+    }
+  }
   Op* firstNonIgnoredOp() {
     for(auto& op : _ops) {
       if(!op->shouldIgnoreInAccel() && !op->plainMove()) {
@@ -90,7 +109,6 @@ public:
       op->print();
     }
   }
-
 
 
   bool freq() {return _freq;}
@@ -112,7 +130,14 @@ public:
   BBvec::iterator pred_begin() {return _pred.begin();}
   BBvec::iterator pred_end() {return _pred.end();}
 
+  void setNotStatic() {_static_only=false;}
   void setFakeExit() {_fake_unique_exit=true;}
+
+  bool static_only() {return _static_only;}
+
+  int line_number() {return _line_number;}
+  int src_number() {return _srcno;}
+  void set_line_number(int i,int j) {_line_number=i; _srcno=j;}
 
   //IntEdge::iterator weight_begin() {return _succ_weight.begin();}
   //IntEdge::iterator weight_end() {return _succ_weight.end();}
@@ -122,8 +147,6 @@ public:
 
   OpVec::reverse_iterator op_rbegin() {return _ops.rbegin();}
   OpVec::reverse_iterator op_rend() {return _ops.rend();}
-
-
 
   void rev_trace(BB* bb_prev);
   void trace(BB* bb_next);

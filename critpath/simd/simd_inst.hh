@@ -52,10 +52,11 @@ namespace simd {
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
+      /*
       for (int i = 0; i < NumStages; ++i) {
         events[i].set_inst(this);
         events[i].prop_changed();
-      }
+      }*/
 
       _op=op;
     }
@@ -101,10 +102,12 @@ namespace simd {
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
+      /*
       for (int i = 0; i < NumStages; ++i) {
         events[i].set_inst(this);
         events[i].prop_changed();
-      }
+      }*/
+
       _op=op;
     }
 
@@ -151,10 +154,11 @@ namespace simd {
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
+      /*
       for (int i = 0; i < NumStages; ++i) {
         events[i].set_inst(this);
         events[i].prop_changed();
-      }
+      }*/
 
       _op=op;
     }
@@ -211,10 +215,11 @@ namespace simd {
       _numIntDestRegs = 0;
       _eff_addr = 0;
 
+      /*
       for (int i = 0; i < NumStages; ++i) {
         events[i].set_inst(this);
         events[i].prop_changed();
-      }
+      }*/
 
       _op=op;
     }

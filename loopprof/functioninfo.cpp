@@ -8,6 +8,23 @@ using namespace std;
 
 uint32_t FunctionInfo::_idcounter=1;
 
+bool FunctionInfo::no_loops_in_inlined_callgraph() {
+  if(cantFullyInline()) {
+    return false; //zero means recursive
+  }
+  if(_loopList.size() > 0) {
+    return false;
+  }
+  for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+    FunctionInfo* fi = i->first.second;
+    if(!fi->no_loops_in_inlined_callgraph()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+
 void FunctionInfo::ascertainBBs() {
   //iterate through each tail, see if there are issues
   for(auto ti = _bbTailMap.begin(), te=_bbTailMap.end();ti!=te;++ti) {
@@ -41,10 +58,10 @@ void FunctionInfo::ascertainBBs() {
       nextSmallestBB=*bbi;
     }
   }
-
+  deleteUnreachableStaticBBs(); //doing this here makes sense.
 }
 
-BB* FunctionInfo::addBB(BB* prevBB, CPC headCPC, CPC tailCPC) {
+BB* FunctionInfo::addBB(BB* prevBB, CPC headCPC, CPC tailCPC, bool dynamic) {
 
    //std::cout << headCPC.first << "." << headCPC.second << " " << tailCPC.first << tailCPC.second << "\n"; 
 
@@ -66,8 +83,12 @@ BB* FunctionInfo::addBB(BB* prevBB, CPC headCPC, CPC tailCPC) {
      prevBB->trace(bb);
    }
 
-   if(_firstBB==NULL) {
+   if(_firstBB==NULL || bb->head().first < _firstBB->head().first) {
      _firstBB=bb;
+   }
+
+   if(dynamic) {
+     bb->setNotStatic();
    }
 
    return bb;
@@ -144,6 +165,170 @@ BB* FunctionInfo::getBB(CPC cpc) {
     }
     return ((*bbiter).second);
 }
+
+void FunctionInfo::deleteBB(BB* bb) {
+   for(auto i=bb->succ_begin(),e=bb->succ_end();i!=e;++i) {
+     BB* succ_bb = *i;
+     bb->remove(succ_bb);
+   }
+   for(auto i=bb->pred_begin(),e=bb->pred_end();i!=e;++i) {
+     BB* pred_bb = *i;
+     pred_bb->remove(bb);
+   }
+   _bbMap.erase(bb->head());
+   //TODO: Memory Leak (bb)
+}
+
+bool FunctionInfo::findNonStaticOnlyBB(BB* bb, std::set<BB*>& seen_bbs) {
+  if(seen_bbs.count(bb)) {
+    return false;
+  }
+  seen_bbs.insert(bb);
+  for(auto i=bb->succ_begin(),e=bb->succ_end();i!=e;++i) {
+    BB* succ_bb = *i;
+    if(!succ_bb->static_only()) {
+      return true;
+    }
+    bool nsr = findNonStaticOnlyBB(succ_bb,seen_bbs);
+    if(nsr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
+void FunctionInfo::markReachable(BB* bb, std::set<BB*>& seen_bbs) {
+  if(seen_bbs.count(bb)) {
+    return;
+  }
+  seen_bbs.insert(bb);
+  for(auto i=bb->succ_begin(),e=bb->succ_end();i!=e;++i) {
+    BB* succ_bb = *i;
+    markReachable(succ_bb,seen_bbs);
+  }
+}
+
+//Delete any BBs which are not reachable by a real bb or the _firstBB
+void FunctionInfo::deleteUnreachableStaticBBs() {
+  std::set<BB*> seen_bbs;
+  bool count_first=true;
+
+  //first determine if _firstBB can reach anyone
+  if(_firstBB->static_only()) {
+    count_first = findNonStaticOnlyBB(_firstBB,seen_bbs);
+  }
+
+  seen_bbs.clear();
+  for(auto i = _bbMap.begin(),e=_bbMap.end();i!=e;++i) {
+    BB* bb = i->second;
+    if(!bb->static_only() || (count_first && bb==_firstBB)) {
+      markReachable(bb,seen_bbs);
+    }
+  }
+
+  //This deletes any unreachable fake nodes.
+  vector<BB*> delete_list;
+  for(auto i = _bbMap.begin(),e=_bbMap.end();i!=e;++i) {
+    BB* bb = i->second;
+    if(bb->static_only() && seen_bbs.count(bb)==0 && bb!=_firstBB) {
+      delete_list.push_back(bb);
+    }
+  }
+
+  for(BB* i : delete_list) {
+    deleteBB(i);
+  }
+ 
+  bool all_reachable=false;
+
+  for(int i = 0; i < 1000; ++i) {
+    seen_bbs.clear();
+    markReachable(_firstBB,seen_bbs);
+    
+    if(seen_bbs.size() != _bbMap.size()) {
+    
+      BB* nBB=NULL;
+      for(auto& i : _bbMap) {
+        BB* bb = i.second;
+        if(bb!=_firstBB && seen_bbs.count(bb)==0 && (nBB==NULL || nBB->head().first > bb->head().first)) {
+          nBB=bb;
+        }
+      }
+      assert(nBB);
+      if(nBB) {
+        addBB(_firstBB,nBB->head(),nBB->tail());
+      }
+    } else {
+      all_reachable=true;
+      break;
+    }
+  }
+
+  assert(all_reachable);
+  
+
+}
+
+void FunctionInfo::calculateRPO() {
+
+  if(_firstBB) { //do first BB first
+    calculateRPO(_firstBB);
+  }
+
+  //iterate over bbs, and find the ones with no predecessors
+  for(auto i=_bbMap.begin(),e=_bbMap.end();i!=e;++i) {
+    BB* bb = i->second;
+    if(bb->pred_size()==0  && _firstBB!=bb) {
+      calculateRPO(bb);
+    }
+  }
+  //Not needed
+ /*    if(_rpo.size()!=_bbMap.size()) {
+    if( _firstBB->rpoNum() == -1) {
+      calculateRPO(_firstBB);
+    }  else {
+      assert(0 && "rpo calc error: this should never happen");
+    }
+  }*/
+
+  std::reverse(_rpo.begin(), _rpo.end());
+  if(_bbMap.size() != _rpo.size()) {
+    std::cerr << nice_name() << " ";
+    std::cerr << "bbmapsize: " << _bbMap.size() 
+              << " rposize " << _rpo.size() << "\n";
+
+    for(auto& i : _rpo) {
+      std::cerr << i->head().first << "\n";
+      if(_bbMap.count(i->head())==0) {
+        std::cerr << "^ Not in bb map\n";
+        for(auto& j : _bbMap) {
+          BB* bb = j.second;
+          for(auto ii = bb->pred_begin(), ie = bb->pred_end();ii!=ie;++ii) {
+            BB* check_bb = *ii;
+            if(check_bb == i) {
+              std::cerr << bb->head().first << "was responsible (had preD)\n";
+            }
+          }
+          for(auto ii = bb->succ_begin(), ie = bb->succ_end();ii!=ie;++ii) {
+            BB* check_bb = *ii;
+            if(check_bb == i) {
+              std::cerr << bb->head().first << "was responsible (had succ)\n";
+            }
+          }
+
+        }
+      }
+    }
+    std::ofstream err_ofs;
+    err_ofs.open ("rpo_bb_mismatch.dot", std::ofstream::out | std::ofstream::trunc);
+    toDotFile(err_ofs);
+    assert(0);
+    //assert(_bbMap.size() == _rpo.size()); //make sure we've got everyone once
+  }
+}
+
+
 
 void FunctionInfo::calculateRPO(BB* bb) {
   bb->setRPONum(-2);
@@ -506,6 +691,10 @@ void FunctionInfo::loopNestAnalysis() {
   }
 }
 
+//static std::string gcolors[] = {"azure", "cornflowerblue", "lightgoldenrodyellow", "palegreen3", "ybrown1", "powderblue", "oldlace", "lavenderblush1", "grey89", "deepskyblue1", "darkolivegreen1", "darksalmon", "mediumorchid","yellowgreen","lightgoldenrod" };
+        
+static std::vector<std::string> gcolors = {"azure", "cornflowerblue", "lightgoldenrodyellow", "palegreen3", "rosybrown1", "powderblue", "oldlace", "lavenderblush1", "grey89", "deepskyblue1", "darkolivegreen1", "darksalmon", "mediumorchid","yellowgreen","lightgoldenrod" };
+
 void FunctionInfo::toDotFile(std::ostream& out) {
     out << "digraph GA{\n";
 
@@ -555,29 +744,49 @@ void FunctionInfo::toDotFile(std::ostream& out) {
           << "[label=\"" << bb.rpoNum();
         //                 << "\\n" << bb.head().first << "_" << bb.tail().first
 
-      LoopInfo* smallest_li=NULL;
-      for(auto il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
+      LoopInfo* smallest_li=innermostLoopFor(&bb);
+      /*for(auto il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
         LoopInfo* li = il->second;
         if(li->inLoop(&bb)) {
           if(smallest_li == NULL || smallest_li->loopSize() > li->loopSize()) {
             smallest_li=li;
           }
         }
-      }
+      }*/
       if(smallest_li) {
         out << " L" << smallest_li->id();
       }
+
+      //out << hex << " " << bb.head().first << " " << hex << bb.tail().first;
+      //out << dec;
 
       if(bb.fake_unique_exit()) {
         out << "(fake exit)";
       }
      
       Op* last_op = bb.lastOp();
-      if(FunctionInfo* fi = funcCallForOp(last_op)) {
-        out << " ->" << fi->nice_name();
+      if(last_op) {
+        if(FunctionInfo* fi = funcCallForOp(last_op)) {
+          out << " ->" << fi->nice_name();
+        }
       }
 
-      out << "\"]\n;";
+      out << "\"";
+      
+      if(bb.static_only()) {
+        out << ",style=\"dashed,filled\"";
+      } else {
+        out << ",style=\"filled\"";
+      }
+
+      if(smallest_li) {
+        out << ", fillcolor=" << gcolors[smallest_li->id() % gcolors.size()];
+      } else {
+        out << ", fillcolor=white";
+      }
+
+      
+      out << "]\n;";
 
       for(auto si=bb.succ_begin(),  se=bb.succ_end(); si!=se;++si) {
         BB* succ_bb = *si;
@@ -622,21 +831,21 @@ void FunctionInfo::toDotFile(std::ostream& out) {
 
     */
 
-    out << "rpo [label=\"";
+    out << "rpo [shape=rectangle,label=\"";
     out << "doms:\\n";
     for(unsigned i = 0; i < _dom.size(); ++i) {
       out << i << " " << _dom[i] << "\\n";
     }
     out << "\"];\n";
 
-    out << "po [label=\"";
+    out << "po [shape=rectangle,label=\"";
     out << "pdoms:\\n";
     for(unsigned i = 0; i < _pdom.size(); ++i) {
       out << i << " " << _pdom[i] << "\\n";
     }
     out << "\"];\n";
 
-    out << "pof [label=\"";
+    out << "pof [shape=rectangle,label=\"";
     out << "pdomFrontier:\\n";
     for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) { 
       BB* bb = *ii;
@@ -650,7 +859,7 @@ void FunctionInfo::toDotFile(std::ostream& out) {
     }
     out << "\"];\n";
 
-    out << "porf [label=\"";
+    out << "porf [shape=rectangle,label=\"";
     out << "Reverse pdomFrontier:\\n";
     for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) { 
       BB* bb = *ii;
@@ -676,7 +885,6 @@ void FunctionInfo::toDotFile(std::ostream& out) {
         out << "\"loop_" << pli->loop_head()->head().first << "\"->"
             << "\"loop_" << li.loop_head()->head().first << "\";";
       }
-  
   
       out << "\"loop_" << li.loop_head()->head().first <<  "\" [label=\"";
       out << "L" << li.id(); 
@@ -728,7 +936,11 @@ void FunctionInfo::toDotFile(std::ostream& out) {
         out << "(" << freq << " times)\\n";
       }
   
-      out << "\", shape=box, margin=\"0.2,0.2\"];\n";     
+      out << "\",";
+      
+      out << "fillcolor=" << gcolors[li.id() % gcolors.size()];
+
+      out << ", style=filled, shape=box, margin=\"0.2,0.2\"];\n";     
     }
 
 
@@ -905,7 +1117,7 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
     }
 
 
-    out << "\"loop_" << li.loop_head()->head().first <<  "\" [label=\"";
+    out << "\"loop_" << li.loop_head()->head().first <<  "\" [fillcolor=pink,label=\"";
     out << "depth = " << li.depth() << ";\\n";
     LoopInfo::BBset::iterator ib,eb;
     for(ib=li.body_begin(),eb=li.body_end();ib!=eb;++ib) {
@@ -1061,7 +1273,7 @@ void FunctionInfo::toDotFile_record(std::ostream& out) {
           << "\"loop_" << li.loop_head()->head().first << "\";";
     }
 
-    out << "\"loop_" << li.loop_head()->head().first <<  "\" [label=\"";
+    out << "\"loop_" << li.loop_head()->head().first <<  "\" [fillcolor=pink,label=\"";
     out << "depth = " << li.depth() << ";\\n";
     LoopInfo::BBset::iterator ib,eb;
     for(ib=li.body_begin(),eb=li.body_end();ib!=eb;++ib) {

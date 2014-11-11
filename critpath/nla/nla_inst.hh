@@ -2,6 +2,7 @@
 #define BERET_INST
 
 #include "cp_dep_graph.hh"
+#include "loopinfo.hh"
 
 class NLAInst;
 
@@ -19,8 +20,8 @@ public:
   std::vector<std::weak_ptr<NLAInst>> insts;
   std::set<Op*> ops_in_subgraph;
 
-  std::vector<std::weak_ptr<DynSubgraph>> dep_subgraphs;
-  std::vector<std::weak_ptr<DynSubgraph>> use_subgraphs;
+  std::vector<std::weak_ptr<DynSubgraph>> dep_subgraphs; //things that i depend on
+  std::vector<std::weak_ptr<DynSubgraph>> use_subgraphs; //things that use me
 
   int ind;
   DynSubgraph(Subgraph *sg, int index) {
@@ -30,16 +31,48 @@ public:
     ind=index;
   }
 
-  static void addDep(std::shared_ptr<DynSubgraph> use, 
-                     std::shared_ptr<DynSubgraph> dep) {
-    assert(dep!=use);
-    use->use_subgraphs.push_back(dep);
-    dep->dep_subgraphs.push_back(use);
+  static void addDep(std::shared_ptr<DynSubgraph> a, 
+                     std::shared_ptr<DynSubgraph> b, bool ignore_if_cycle=false) {
+    assert(a!=b);
+
+    bool bs_use_has_a=false,as_dep_has_b=false;
+    for(auto& i : b->use_subgraphs) {
+      if(i.lock() == a) {
+        bs_use_has_a=true;
+        break;
+      }
+    }
+    for(auto& i : a->dep_subgraphs) {
+      if(i.lock() == b) {
+        as_dep_has_b=true;
+        break;
+      }
+    }
+
+    if(bs_use_has_a && as_dep_has_b) {
+      if(ignore_if_cycle) {
+        return;
+      } else {
+        assert(0&& "cycle created\n");
+      }
+    }
+
+    b->dep_subgraphs.push_back(a);
+    a->use_subgraphs.push_back(b);
+    //std::cout << "dep " << a->static_sg->id() << "->" << b->static_sg->id() << "\n";
+  }
+
+  void setCumWeights(CumWeights* cum_weights) {
+    startCFU->_cum_weights=cum_weights;
+    endCFU->_cum_weights=cum_weights;
   }
 
   int critCycles; 
   std::shared_ptr<NLAInst> calcCritCycles();
 };
+
+
+
 
 class NLAInst : public dg_inst_base<dg_event,dg_edge_impl_t<dg_event>> {
   typedef dg_event T;
@@ -68,7 +101,7 @@ public:
   std::shared_ptr<T>& startCFU() {return dynSubgraph->startCFU;}
   std::shared_ptr<T>& endCFU() {return dynSubgraph->endCFU;}
    
-
+  int iter = -1;
 
   NLAInst(Op* op) {
     this->_op=op;
@@ -111,6 +144,12 @@ public:
     this->_op=op;
     isAccelerated=true;
   }
+
+/*  void setCumWeights(CumWeights* cum_weights) {
+    for (int i = 0; i < NumStages; ++i) {
+      events[i]._cum_weights=cum_weights;
+    }
+  }*/
 
   NLAInst() : dg_inst_base<T,E>() {}
 

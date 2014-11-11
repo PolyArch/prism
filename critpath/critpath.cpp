@@ -32,6 +32,7 @@ int main(int argc, char *argv[])
   int  noMcPAT=0;
   int  allModels=0;
   int inorderWidth=0;
+  bool revolver=false;
   int oooWidth=0;
   bool traceOutputs = false;
   int gen_loop_prof = 0;
@@ -81,6 +82,9 @@ int main(int argc, char *argv[])
       {"mc-db", required_argument, 0,    9},
       {"mc-save", no_argument, 0,    10},
       {"mc-no-load", no_argument, 0,    11},
+
+      {"revolver", no_argument, 0, 12},
+
 
       {0,0,0,0}
     };
@@ -144,6 +148,9 @@ int main(int argc, char *argv[])
       break;
     case 11:
       mc_load=false;
+      break;
+    case 12:
+      revolver=true;
       break;
     case 'b': binary_name = std::string(optarg); break;
     case 'e': elide_mem = true; break;
@@ -246,10 +253,10 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setDefaults();
 
   if(inorderWidth > 0) {
-    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq);
+    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,revolver);
   }
   if(oooWidth > 0) {
-    CPRegistry::get()->setWidth(oooWidth, false,scale_freq);
+    CPRegistry::get()->setWidth(oooWidth, false,scale_freq,revolver);
   }
   CPRegistry::get()->setTraceOutputs(traceOutputs);
   CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat,elide_mem);

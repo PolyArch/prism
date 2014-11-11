@@ -26,6 +26,7 @@
 #include "bb.hh"
 #include "functioninfo.hh"
 #include "loopinfo.hh"
+#include "durhisto.hh"
 
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/set.hpp>
@@ -47,6 +48,8 @@ struct MemDep {
   Op* op;
 };
 
+class PathProf;
+
 class StackFrame {
 public:
 
@@ -67,10 +70,27 @@ private:
   bool _isRecursing=false;
   bool _isDirectRecursing=false;
 
+  uint64_t _trace_duration=0;
+  uint64_t _prev_trace_interval=0;
+
+  int _cur_trace_id=-1;
+
+  uint64_t  _cur_i_iloop_start=0, _cur_i_oloop_start=0; //inlinable loops
+  LoopInfo* _cur_i_iloop=NULL, *_cur_i_oloop=NULL; //inlinable loops
+  int _trace_start=0;
+
   std::unordered_map<Op*,uint64_t> stack_op_addr;
   std::unordered_map<uint64_t,MemDep> giganticMemDepTable;  //who last wrote this
   std::unordered_map<uint64_t,MemDep> giganticMemLoadTable; //who last read this
 
+  void fixup(uint64_t dId, PathProf* prof) {
+    hot_trace_gran(dId, prof, true);
+    FunctionInfo* fi = funcInfo();
+    for(auto ii = fi->li_begin(), ee = fi->li_end(); ii!=ee; ++ii) {
+      LoopInfo* li = ii->second;  
+      checkLoopGranComplete(dId, li, prof);
+    } 
+  }
 
   void checkIfStackSpill(Op* st_op, Op* ld_op, uint64_t addr) {
     assert(st_op && ld_op);
@@ -98,6 +118,14 @@ private:
   }
 
 public:
+  void hot_trace_gran(uint64_t did, PathProf* prof, bool stack_changed);
+  void checkLoopGranBegin(uint64_t dId, LoopInfo* li, PathProf* prof);
+  void checkLoopGranComplete(uint64_t dId, LoopInfo* li,PathProf* prof);
+
+  void returning(uint64_t dId, PathProf* prof) {
+    fixup(dId,prof);
+  }
+
   static bool onStack(uint64_t addr) {
     return addr >= 0x7f0000000000;
   }
@@ -163,12 +191,39 @@ public:
 
   //Process op, determine if it is a bb or not
   Op* processOp_phase2(uint32_t dId, CPC cpc,uint64_t addr, uint8_t acc_size);
-  void processBB_phase2(uint32_t dId, BB* bb,bool profile=true);
+  void processBB_phase2(uint32_t dId, BB* bb, int profile=1, PathProf* prof=NULL);
 
-  Op* processOp_phase3(uint32_t dId, CPC cpc);
+  Op* processOp_phase3(uint32_t dId, CPC cpc,PathProf* prof, bool extra);
+
   
 };
 
+
+class StaticBB {
+public:
+  uint64_t head,tail;
+  int line=0,srcno=-1;
+  std::set<std::pair<uint64_t,uint64_t>> next_static_bb;
+  StaticBB(uint64_t head_, uint64_t tail_, int line_, int srcno_) {
+    head = head_;
+    tail = tail_;
+    line = line_;
+    srcno = srcno_;
+  }
+};
+
+class StaticFunction {
+public:
+  int line=0;
+  std::string filename;
+  std::string name;
+  std::map<uint64_t, StaticBB*> static_bbs;
+};
+
+class StaticCFG {
+public:
+  std::unordered_map<uint64_t,StaticFunction*> static_funcs;
+};
 
 //Path Profiler
 class PathProf {
@@ -185,6 +240,24 @@ public:
   typedef std::map<CPC,FunctionInfo*>  FuncMap;
 
   SYM_TAB sym_tab;
+  StaticCFG static_cfg;
+  std::vector<std::string> static_func_names;
+
+  void print_loop_loc(std::ostream& out, LoopInfo* li) {
+    std::map<int,std::set<int>> f2bb;
+    for(auto ii = li->body_begin(), ee = li->body_end();ii!=ee;++ii) {
+      BB* bb = *ii;
+      f2bb[bb->src_number()].insert(bb->line_number());
+    }
+    for(auto i : f2bb) {
+      out << "\"" << static_func_names[i.first] << "\"";
+      for(auto j : i.second) {
+        out << " " << j;
+      }
+    }
+  }
+
+  uint64_t dId() {return _dId;}
 
   //some stats for loops/recursion
   uint64_t insts_in_beret=0;
@@ -193,6 +266,14 @@ public:
   uint64_t insts_in_all_loops=0;
   uint64_t non_loop_insts_direct_recursion=0;
   uint64_t non_loop_insts_any_recursion=0;
+
+  enum structure {
+    ST_TRACE, ST_ILOOP, ST_OLOOP, ST_NUM
+  };
+
+  std::vector<DurationHisto> _gran_duration;
+  std::map<LoopInfo*,uint64_t> longer_loops_d16384_s256;
+  std::map<LoopInfo*,uint64_t> longer_loops_d16384_s256_i;
 
   //stats from m5out/stats.txt -- memory stats must be put here
   uint64_t numCycles=0,idleCycles=0,totalInsts=0;
@@ -327,6 +408,7 @@ private:
     maxLoops = LoopInfo::_idcounter;
     maxFuncs = FunctionInfo::_idcounter;
     ar & sym_tab;
+    ar & static_func_names;
     ar & _beret_cfus;
     ar & _funcMap;
     ar & maxOps;
@@ -341,6 +423,7 @@ private:
     ar & _origPrevCall;
     ar & _origPrevRet;
     ar & _origPrevCPC;
+//    ar & _gran_duration;
     Op::_idcounter           = maxOps;
     BB::_idcounter           = maxBBs; 
     LoopInfo::_idcounter     = maxLoops;
@@ -455,6 +538,7 @@ public:
 
 public:
   PathProf() {
+    _gran_duration.resize(ST_NUM);
     _beret_cfus.beret_set();
     _dId=0;
   }
@@ -467,6 +551,7 @@ public:
     ELF_parser::read_symbol_tables(filename,sym_tab);
   }
 
+  void procStaticCFG(const char* filename);
   void procConfigFile(const char* filename);
   void procStatsFile(const char* filename);
   void procStackFile(const char* filename);
@@ -476,6 +561,7 @@ public:
   void setStopInst(uint64_t count) {stopInst=count;}
   void setSkipInsts(uint64_t count) {skipInsts=count;}
 
+  bool isBB(CPC cpc);
   void processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet);
   void processAddr(CPC cpc, uint64_t addr, bool is_load, bool is_store);
 
@@ -485,6 +571,8 @@ public:
   void processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
                        CP_NodeDiskImage& img);
   Op* processOpPhase3(CPC newCPC, bool wasCalled, bool wasReturned);
+  Op* processOpPhaseExtra(CPC newCPC, bool wasCalled, bool wasReturned);
+
 
   FuncMap::iterator fbegin() {return _funcMap.begin();}
   FuncMap::iterator fend() {return _funcMap.end();}
@@ -565,6 +653,8 @@ public:
     return std::make_pair((LoopInfo*) NULL, (FunctionInfo*)NULL);
   }
 
+  std::list<StackFrame>::iterator cs_begin() {return _callStack.begin();}
+  std::list<StackFrame>::iterator cs_end()   {return _callStack.end();}
 
   //void initCPC(CPC cpc) {_prevHead=cpc;}
   void printInfo();
@@ -579,20 +669,23 @@ public:
       FunctionInfo& fi = *i->second;
       std::stringstream filename;
 
+      //filename "/func_" << fi.id() << "_" << fi.calls(
+      std::string file_base = fi.nice_filename(); 
+
       std::ofstream ofs;
-      filename << dir << "/func_" << fi.id() << "_" << fi.calls() << ".dot";
+      filename << dir << "/" << file_base << ".dot";
       ofs.open(filename.str().c_str(), std::ofstream::out | std::ofstream::trunc);
       fi.toDotFile(ofs);
       ofs.close();
 
       filename.str("");
-      filename << dir << "/func_" << fi.id() << "_" << fi.calls() << ".det.dot";
+      filename << dir << "/" << file_base << ".det.dot";
       ofs.open(filename.str().c_str(), std::ofstream::out | std::ofstream::trunc);
       fi.toDotFile_detailed(ofs);
       ofs.close();
 
       filename.str("");
-      filename << dir << "/func_" << fi.id() << "_" << fi.calls() << ".rec.dot";
+      filename << dir << "/" << file_base << ".rec.dot";
       ofs.open(filename.str().c_str(), std::ofstream::out | std::ofstream::trunc);
       fi.toDotFile_record(ofs);
       ofs.close();
@@ -601,14 +694,14 @@ public:
         LoopInfo* li = I->second;
         if(li->hasSubgraphs()) {
 	  filename.str("");
-	  filename << dir << "/func_" << fi.id() << "_" << fi.calls() << ".loopsg" << li->id() << ".dot"; 
+	  filename << dir << "/" << file_base << ".loopsg" << li->id() << ".dot"; 
           std::ofstream dotOutFile(filename.str().c_str()); 
 
           li->printSubgraphDot(dotOutFile);
 	}
         if(li->hasSubgraphs(true)) {
 	  filename.str("");
-	  filename << dir << "/func_" << fi.id() << "_" << fi.calls() << ".NLA.loopsg" << li->id() << ".dot"; 
+	  filename << dir << "/" << file_base << ".NLA.loopsg" << li->id() << ".dot"; 
           std::ofstream dotOutFile(filename.str().c_str()); 
           li->printSubgraphDot(dotOutFile,true);
 	}

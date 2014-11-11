@@ -65,10 +65,10 @@ public:
     handleModelArgv(ooo.c_str(), false);
   }
 
-  void setWidth(int width, bool inorder, bool scale_freq) {
+  void setWidth(int width, bool inorder, bool scale_freq, bool revolver) {
     for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
       if(i->second->isInOrder() == inorder) {
-        i->second->setWidth(width, scale_freq);
+        i->second->setWidth(width, scale_freq,revolver);
       }
       
     }

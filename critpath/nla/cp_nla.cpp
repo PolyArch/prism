@@ -21,6 +21,11 @@ static void init()
     CPRegistry::get()->register_argument("nla-exclusive-cfus",      true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-pipelined-cfus",      true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-wb-networks",         true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-dataflow-ctrl",       true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-inorder-per-sg",      true,&model->cp_obj);
+
+    CPRegistry::get()->register_argument("nla-ser-loops",           true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-loop-iter-dist",      true,&model->cp_obj);
 
     CPRegistry::get()->register_argument("no-gams",                false,&model->cp_obj);
   }

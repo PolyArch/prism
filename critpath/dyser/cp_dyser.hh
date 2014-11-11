@@ -283,7 +283,7 @@ namespace DySER {
                            PrevOp && PrevOp->isReturn(),
                            StackLoop);
 
-    if(StackLoop || canDySERize(li)) {
+    if(li && (StackLoop || canDySERize(li))) {
       return li->id();
     } else {
       return 0;

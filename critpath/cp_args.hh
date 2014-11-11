@@ -14,7 +14,7 @@ public:
 
   static bool parse(const char* argname, const char* name, 
                        const char* optarg, int& arg) {
-    if (strcmp(name, argname) == 0) {
+    if (strcmp(name, argname) == 0 && strlen(name) == strlen(argname) ) {
       int temp;// = atoi(optarg);
       if(( std::istringstream( optarg ) >> temp ).eof()) {
 //      if (temp != 0) {
@@ -27,6 +27,7 @@ public:
     }
     return false;
   } 
+
   static bool parse(const char* argname, const char* name, 
                        const char* optarg, bool& arg) {
     int intarg;
@@ -37,7 +38,15 @@ public:
     return false;
   }
 
+  static bool parse(const char* argname, const char* name, bool& arg) {
+    if(strlen(name)==strlen(argname) && strcmp(name, argname) == 0 ) {
+      arg=true;
+      return true;
+    }
+    return false;
+  }
 
+  
 };
 
 

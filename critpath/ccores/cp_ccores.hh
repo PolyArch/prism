@@ -29,18 +29,6 @@ public:
   virtual ~cp_ccores() {
   }
 
-  virtual int is_accel_on() {
-    if(_fi_ccore) {
-      return -_fi_ccore->id();
-    } else if(_li_ccore) {
-      return _li_ccore->id();
-    } else {
-      return 0;
-    }
-  };
-
-
-
   virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
     return &cpdg;
   };
@@ -59,6 +47,9 @@ public:
 
   //energy things
   uint64_t _ccores_int_ops=0, _ccores_fp_ops=0, _ccores_mult_ops=0;
+
+  //Acc stats
+  uint64_t _ccores_int_ops_acc=0, _ccores_fp_ops_acc=0, _ccores_mult_ops_acc=0;
 
   //arguements
   unsigned _ccores_num_mem=1, _ccores_max_ops=1000,_ccores_iops=2;
@@ -385,14 +376,19 @@ public:
       if(transitioned) {
         Inst_t* prevInst = getCPDG()->peekPipe(-1);
         assert(prevInst);
+
         T* event_ptr = new T();
+        prev_bb_end.reset(event_ptr);;
+        event_ptr = new T();
         cur_bb_end.reset(event_ptr);
-        prev_bb_end=cur_bb_end;
         getCPDG()->insert_edge(*prevInst, Inst_t::Commit,
-                               *cur_bb_end, 8/_ccores_iops, E_CXFR);
-        
+                               *prev_bb_end, 8/_ccores_iops, E_CXFR);
+ 
+        getCPDG()->insert_edge(*prev_bb_end,
+                                 *cur_bb_end, 0, E_CSBB);
+       
         // _startCCoresCycle=cc_inst->cycleOfStage(CCoresInst::BBReady);
-         _startCCoresCycle=cur_bb_end->cycle();
+         _startCCoresCycle=prev_bb_end->cycle();
       }
 
       if(op->shouldIgnoreInAccel()) {
@@ -422,6 +418,7 @@ public:
   
       if(endOfBB(op,img)) {
         //only one memory instruction per basic block
+        prev_prev_bb_end=prev_bb_end;
         prev_bb_end=cur_bb_end;
         T* event_ptr = new T();
         cur_bb_end.reset(event_ptr);
@@ -430,8 +427,11 @@ public:
           getCPDG()->insert_edge(*prev_bb_end,
                                  *cur_bb_end, 0, E_CSBB);
           //uint64_t clean_cycle = prev_bb_end->cycle();
+        }
 
-          cleanUp(prev_bb_end->cycle()-std::min((uint64_t)1000,prev_bb_end->cycle()));
+        if(prev_prev_bb_end) {
+          cleanUp(prev_prev_bb_end->cycle()-
+                  std::min((uint64_t)1000,prev_prev_bb_end->cycle()));
         }
       }
       addCCoreDeps(sh_inst,img);
@@ -480,7 +480,7 @@ public:
 
 private:
   typedef std::vector<std::shared_ptr<CCoresInst>> CCoresBB;
-  std::shared_ptr<T> prev_bb_end, cur_bb_end;
+  std::shared_ptr<T> prev_prev_bb_end, prev_bb_end, cur_bb_end;
 
 
   unsigned numMem=0;
@@ -505,10 +505,15 @@ private:
 
   virtual void addCCoreDeps(std::shared_ptr<CCoresInst>& inst,
                             const CP_NodeDiskImage &img) { 
+    assert((prev_bb_end==NULL && cur_bb_end==NULL) ||
+           (prev_bb_end!=cur_bb_end)                  );
     setBBReadyCycle_cc(*inst,img);
     setExecuteCycle_cc(inst,img);
     setCompleteCycle_cc(*inst,img);
     setWritebackCycle_cc(inst,img);
+    assert((prev_bb_end==NULL && cur_bb_end==NULL) ||
+           (prev_bb_end!=cur_bb_end)                  );
+
   }
 
   //This node when current ccores BB is active
@@ -540,7 +545,7 @@ private:
 
       inst.startBB=prev_bb_end;
       getCPDG()->insert_edge(*prev_bb_end,
-                               inst, CCoresInst::BBReady, 0);
+                               inst, CCoresInst::BBReady, 0, E_BBN);
     }
 
     //at this point, we can clean up the old entries
@@ -623,7 +628,7 @@ private:
                   inst._isstore,inst._cache_prod,inst._true_cache_prod,true);
 
     getCPDG()->insert_edge(inst, CCoresInst::Execute,
-                           inst, CCoresInst::Complete, lat);
+                           inst, CCoresInst::Complete, lat, E_EP);
     
     if(cur_bb_end) {
       inst.endBB = cur_bb_end; // have instruction keep
@@ -707,6 +712,100 @@ private:
     }
   }
 
+
+  NLAProcessor* mc_accel = NULL;
+  virtual void setupMcPAT(const char* filename, int nm) 
+  {
+    CriticalPath::setupMcPAT(filename,nm); //do base class
+
+    printAccelMcPATxml(filename,nm);
+    ParseXML* mcpat_xml= new ParseXML(); 
+    mcpat_xml->parse((char*)filename);
+    mc_accel = new NLAProcessor(mcpat_xml); 
+    pumpCoreEnergyEvents(mc_accel,0); //reset all energy stats to 0
+  }
+
+  virtual void pumpAccelMcPAT(uint64_t totalCycles) {
+    pumpAccelEnergyEvents(totalCycles);
+    mc_accel->computeEnergy();
+  }
+
+  virtual void pumpAccelEnergyEvents(uint64_t totalCycles) {
+    mc_accel->XML->sys.total_cycles=totalCycles;
+
+    //Func Units
+    system_core* core = &mc_accel->XML->sys.core[0];
+    core->ialu_accesses    = (uint64_t)(_ccores_int_ops );
+    core->fpu_accesses     = (uint64_t)(_ccores_fp_ops  );
+    core->mul_accesses     = (uint64_t)(_ccores_mult_ops);
+
+    core->cdb_alu_accesses = (uint64_t)(_ccores_int_ops );
+    core->cdb_fpu_accesses = (uint64_t)(_ccores_fp_ops  );
+    core->cdb_mul_accesses = (uint64_t)(_ccores_mult_ops);
+
+    accAccelEnergyEvents();
+  }
+
+  virtual double accel_leakage() override {
+    //if(false) {
+    //  float ialu = RegionStats::get_leakage(mc_accel->cores[0]->exu->exeu,lc)* nALUs_on;
+    //  float mul  = RegionStats::get_leakage(mc_accel->cores[0]->exu->mul,lc) * nMULs_on;
+    //  float imu  = RegionStats::get_leakage(mc_accel->nlas[0]->imu_window,lc)* imus_on;
+    //  return ialu + mul + imu + net;
+    //} else {
+      return 0;
+    //}
+  }
+
+  virtual double accel_region_en() override {
+ 
+    float ialu  = mc_accel->cores[0]->exu->exeu->rt_power.readOp.dynamic; 
+    float fpalu = mc_accel->cores[0]->exu->fp_u->rt_power.readOp.dynamic; 
+    float calu  = mc_accel->cores[0]->exu->mul->rt_power.readOp.dynamic; 
+
+    return ialu + fpalu + calu;
+  }
+
+  virtual int is_accel_on() {
+    if(_fi_ccore) {
+      return -_fi_ccore->id();
+    } else if (_li_ccore) {
+      return _li_ccore->id();
+    } else {
+      return 0;
+    }
+  }
+
+  virtual void printMcPAT_Accel() {
+    mc_accel->computeAccPower(); //need to compute the accumulated power
+
+    float ialu  = mc_accel->ialu_acc_power.rt_power.readOp.dynamic; 
+    float fpalu = mc_accel->fpu_acc_power.rt_power.readOp.dynamic; 
+    float calu  = mc_accel->mul_acc_power.rt_power.readOp.dynamic; 
+
+    float total = ialu + fpalu + calu;
+
+    std::cout << _name << " accel(" << _nm << "nm)... ";
+    std::cout << total << " (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu 
+                       << ")\n";
+
+  }
+
+  virtual void accAccelEnergyEvents() {
+    _ccores_int_ops_acc         +=  _ccores_int_ops        ;
+    _ccores_fp_ops_acc          +=  _ccores_fp_ops         ;
+    _ccores_mult_ops_acc        +=  _ccores_mult_ops       ;
+
+    _ccores_int_ops         = 0;
+    _ccores_fp_ops          = 0;
+    _ccores_mult_ops        = 0;
+  }
+
+
+
+
+
+
   // Handle enrgy events for McPAT XML DOC
   virtual void printAccelMcPATxml(std::string fname_base,int nm) {
     #include "mcpat-defaults.hh"
@@ -728,6 +827,9 @@ private:
 
       pugi::xml_node core_node =
                 system_node.find_child_by_attribute("name","core0");
+
+      sa(core_node,"machine_type",1);	//<!-- inorder/OoO; 1 inorder; 0 OOO-->
+
 
       sa(core_node,"total_cycles",numCycles());
       sa(core_node,"busy_cycles",0);

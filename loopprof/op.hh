@@ -743,6 +743,12 @@ public:
         out << use_op->id() << ",";
       }
 
+      out << " mem deps:";
+      for(auto mi=m_begin(),me=m_end();mi!=me;++mi) {
+        Op* mem_dep = *mi;
+        out << mem_dep->id() << ",";
+      }
+
       out << "    ";
       out << "adj defs:";
       for(auto di=adj_d_begin(),de=adj_d_end();di!=de;++di) {

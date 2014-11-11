@@ -48,7 +48,9 @@ public:
 
   virtual ~CP_DG_Builder() {}
 
-  virtual void setWidth(int i,bool scale_freq) {
+  virtual void setWidth(int i,bool scale_freq,bool revolver) {
+    _enable_revolver=revolver;
+
     FETCH_WIDTH = i;
     D_WIDTH = i;
     ISSUE_WIDTH = i;
@@ -135,6 +137,45 @@ public:
 
       if(!scale_freq) {
         CORE_CLOCK=2000;
+        if(ISSUE_WIDTH==2) { //roughly jaguar
+          FETCH_TO_DISPATCH_STAGES=4;
+          COMMIT_TO_COMPLETE_STAGES=1;
+          PHYS_REGS=136;
+          PIPE_DEPTH=13;
+          IQ_WIDTH=32;
+          LQ_SIZE = 16;
+          SQ_SIZE = 20;
+          ROB_SIZE=64;
+        } else if(ISSUE_WIDTH==4) {
+          FETCH_TO_DISPATCH_STAGES=4;
+          COMMIT_TO_COMPLETE_STAGES=2;
+          PIPE_DEPTH=17;
+          PHYS_REGS=160;
+          IQ_WIDTH=40;
+          LQ_SIZE = 64;
+          SQ_SIZE = 36;
+          ROB_SIZE=168;
+        } else if(ISSUE_WIDTH==6) { //roughly haswell
+          FETCH_TO_DISPATCH_STAGES=5;
+          COMMIT_TO_COMPLETE_STAGES=2;
+          PIPE_DEPTH=18;
+          PHYS_REGS=168;
+          IQ_WIDTH=48;
+          LQ_SIZE = 42;
+          SQ_SIZE = 72;
+          ROB_SIZE=192;
+        } else if(ISSUE_WIDTH==8) {
+          FETCH_TO_DISPATCH_STAGES=6;
+          COMMIT_TO_COMPLETE_STAGES=3;
+          PIPE_DEPTH=19;
+          PHYS_REGS=168;
+          IQ_WIDTH=60;
+          LQ_SIZE = 42;
+          SQ_SIZE = 72;
+          ROB_SIZE=192;
+        }
+        /*
+        CORE_CLOCK=2000;
         FETCH_TO_DISPATCH_STAGES=4;
         COMMIT_TO_COMPLETE_STAGES=2;
         PIPE_DEPTH=19;
@@ -142,7 +183,7 @@ public:
         IQ_WIDTH=48;
         LQ_SIZE = 32;
         SQ_SIZE = 32;
-        ROB_SIZE=192;
+        ROB_SIZE=192;*/
       }
 
       LQ.resize(LQ_SIZE);
@@ -162,15 +203,144 @@ public:
   }
 
 
+  virtual void track_revolver(const CP_NodeDiskImage &img,
+                   uint64_t index, Op* op) {
+    FunctionInfo* fi = op->func();
+    BB* bb = op->bb();
+    _prev_cycle_revolver_active=_revolver_active; //record this for energy accounting
+
+    //two conditions for breaking out:
+    //1. inside li->func but not inside bbs
+    //2. return from li->func
+    //3. same BB twice
+
+    bool breakout=false, side_exit=false;
+    if(_cur_revolver_li) {
+      if(_cur_revolver_li->func() == fi) { //in same function
+        if(op->isReturn()) {
+          breakout=true;
+          side_exit=true;
+        } else if(op->bb_pos()==0) {
+          if(!_cur_revolver_li->inLoop(bb)) {
+            breakout=true;
+            if(!_cur_revolver_li->isLatch(_prev_op->bb())) {
+              side_exit=true;
+//              cout << " not loop latch\n";
+            }
+          }
+        }
+      }
+      if(!breakout && op->bb_pos()==0) { //check for either loop or hot
+        BB* bb = op->bb();
+//        cout << "bb " << bb->rpoNum() << "\n";
+
+        if(_revolver_bbs[_cur_revolver_li].count(bb)) {
+          if(!_revolver_active) {  //this means i found a loop in the func
+            if(bb!=_cur_revolver_li->loop_head()) {
+              breakout=true;
+              side_exit=true;
+//              cout << " double add\n";
+            }
+          }
+        } else { //did not find bb
+          if(_revolver_active) {  // took wrong path inside loop
+            if(bb!=_cur_revolver_li->loop_head()) {
+              breakout=true;
+              side_exit=true;
+//              cout << " coud not find bb\n";
+            }
+          }
+        }
+      }
+
+      if(breakout) {
+        if(side_exit) {
+          _revolver_bbs[_cur_revolver_li].clear();
+          _revolver_profit[_cur_revolver_li]=0;
+//          cout << " side_exit\n";
+        } else {
+          _revolver_profit[_cur_revolver_li]=std::min(
+              _revolver_profit[_cur_revolver_li]+2,16);
+        }
+//        if(_revolver_active) {
+//          cout << "revolver de-activated: " << bb->rpoNum();
+//          cout << "\n";
+//        }
+        _revolver_active=false;
+        _cur_revolver_li=NULL;
+      }
+    }
+
+
+    //enter?
+    if(!_revolver_active) {
+      if(op->bb_pos()==0) {
+        LoopInfo* li = fi->getLoop(bb);
+  
+        //Detected a loop head
+        if(li && li->isInnerLoop() && !li->cantFullyInline()) {
+
+           //adjust profit
+           if(li==_cur_revolver_li) {
+             if(_revolver_prev_trace == _revolver_bbs[li]) {
+                _revolver_profit[li]=std::min(_revolver_profit[li]+1,16);           
+             } else {
+                _revolver_profit[li]=std::max(_revolver_profit[li]-2,0);           
+             }
+             _revolver_prev_trace=_revolver_bbs[li];
+
+           } else {
+             _revolver_prev_trace.clear();
+             _revolver_profit[_cur_revolver_li]=0;
+             _revolver_bbs[_cur_revolver_li].clear();
+           }
+
+
+           //see what the current profit is:
+           if(_revolver_profit[li] >= 8) {
+             if(_revolver_bbs.size() > 0) {
+               _revolver_active=true;
+//               cout << "revolver activated: " << bb->rpoNum() << " " << "-- size:" <<_revolver_bbs.size() << "\n   ";
+//               for(BB* rbb : _revolver_bbs[li]) {
+//                 cout << rbb->rpoNum() << " ";
+//               }
+//               cout << "\n";
+
+             }
+           } else {
+             _revolver_bbs.clear(); //clear if not setting true
+           }
+  
+//           cout << "li" << li->loop_head()->rpoNum() 
+//                << "profit: " << _revolver_profit[li] << "\n";
+
+           _cur_revolver_li=li;
+        }
+
+        if(_cur_revolver_li && !_revolver_active) {
+          _revolver_bbs[_cur_revolver_li].insert(bb); //insert BB
+        }
+
+      }
+    } 
+  }
+
+  Op* _prev_op=NULL;
   //Public function which inserts functions from the trace
   virtual void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
 
+    if(_enable_revolver) { 
+      track_revolver(img,index,op);
+    }
+    //The Important Stuff
     InstPtr sh_inst = createInst(img,index,op);
     getCPDG()->addInst(sh_inst,index);
     addDeps(sh_inst,op);
     pushPipe(sh_inst);
     inserted(sh_inst);
+
+    _prev_op=op;
   }
 
 
@@ -309,6 +479,18 @@ protected:
                 = std::make_shared<dg_inst_dummy<T,E>>(img,index,op,dtype); 
     keepTrackOfInstOpMap(dummy_inst,op);
     getCPDG()->addInst(dummy_inst,index);
+
+    unsigned dummy_prod=0;
+    bool err = dummy_inst->getProd(dummy_prod);
+    if (!err && dummy_prod !=0 && dummy_prod < dummy_inst->index() &&
+           getCPDG()->hasIdx(dummy_inst->index()-dummy_prod)) {
+
+      dg_inst_base<T,E>* retInst = 
+         &(getCPDG()->queryNodes(dummy_inst->index()-dummy_prod));
+
+      getCPDG()->insert_edge(*retInst, retInst->eventComplete(),
+                             *dummy_inst, dummy_inst->beginExecute(), 0, E_RDep);
+    }
   }
 
   std::unordered_set<Op*> dummy_cycles;
@@ -361,10 +543,10 @@ protected:
           return NULL;
         }
         retInst = &(getCPDG()->queryNodes(dummy_inst->index()-dummy_prod));
-      } else if (dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_MOVE) { 
+      } /*else if (dummy_inst->_dtype == dg_inst_dummy<T,E>::DUMMY_MOVE) { 
         out_of_bounds|=true;
         return NULL;
-      }
+      }*/
 
 
 /*
@@ -399,6 +581,8 @@ protected:
 
   virtual void keepTrackOfInstOpMap(BaseInstPtr ret, Op *op) {
     _op2InstPtr[op] = ret;
+    ret->setCumWeights(curWeights());
+
     //_inst2Op[ret.get()] = op;
   }
 
@@ -497,7 +681,8 @@ protected:
   std::unordered_set<uint64_t> fu_monitors;
 
   virtual void print_edge_weights(std::ostream& out, AnalysisType analType) override {
-    double total_weight=0; //should roughly equal number of cycles in program
+    getCPDG()->cumWeights()->print_edge_weights(out,analType);
+/*    double total_weight=0; //should roughly equal number of cycles in program
     for(int i = 0; i < E_NUM; ++i) {
       double weight = getCPDG()->weightOfEdge(i,analType);
       total_weight+=weight;
@@ -510,7 +695,7 @@ protected:
         cout << edge_name[i] << ":" << weight/total_weight << " ";
       }
     }
-    cout << " (total: " << total_weight << ")";
+    cout << " (total: " << total_weight << ")";*/
   }
 
   virtual void monitorFUUsage(uint64_t id, uint64_t numCycles, int usage) {
@@ -919,26 +1104,27 @@ protected:
   }
 
   virtual void setFetchCycle(Inst_t& inst) {
-    checkFBW(inst);
-    //checkICache(inst);
-    checkPipeStalls(inst);
+    if(!_revolver_active) {
+      checkFBW(inst);
+      checkPipeStalls(inst);
+    }
     checkControlMispeculate(inst);
     checkFF(inst);
     checkSerializing(inst);
 
-    //-----FETCH ENERGY-------
-    //Need to get ICACHE accesses somehow
-    if(inst._icache_lat>0) {
-      icache_read_accesses++;
+    if(!_revolver_active) {
+      //-----FETCH ENERGY-------
+      //Need to get ICACHE accesses somehow
+      if(inst._icache_lat>0) {
+        icache_read_accesses++;
+      }
+      if(inst._icache_lat>20) {
+        icache_read_misses++;
+      }
     }
-    if(inst._icache_lat>20) {
-      icache_read_misses++;
-    }
-
-
 
     if(_isInOrder) {
-//      checkBranchPredict(inst,op); //just control dependence
+      //checkBranchPredict(inst,op); //just control dependence
     } else {
       //checkIQStalls(inst);
       checkLSQStalls(inst);
@@ -985,8 +1171,11 @@ protected:
 
   virtual void setDispatchCycle(Inst_t &inst) {
     checkFD(inst);
-    checkDD(inst);
-    checkDBW(inst);
+
+//    if(!_revolver_active) {
+      checkDD(inst);
+      checkDBW(inst);
+//    }
 
     checkROBSize(inst); //Finite Rob Size  (for INORDER -- finite # in flight)
 
@@ -1007,14 +1196,16 @@ protected:
       }
     }
 
-    //rename_fwrites+=inst._numFPDestRegs;
-    //rename_writes+=inst._numIntDestRegs;
-    if(inst._floating) {
-      rename_freads+=inst._numSrcRegs;
-      rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
-    } else {
-      rename_reads+=inst._numSrcRegs;
-      rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
+    if(!_revolver_active) {
+      //rename_fwrites+=inst._numFPDestRegs;
+      //rename_writes+=inst._numIntDestRegs;
+      if(inst._floating) {
+        rename_freads+=inst._numSrcRegs;
+        rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
+      } else {
+        rename_reads+=inst._numSrcRegs;
+        rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
+      }
     }
 
     //HANDLE ROB STUFF
@@ -1557,6 +1748,17 @@ protected:
 
 
 
+  enum FU_Type{
+    FU_Other=0,
+    FU_Unknown=1,
+    FU_IntALU=2,
+    FU_IntMulDiv=3,
+    FU_FloatALU=4,
+    FU_FloatMulDiv=5,
+    FU_MemPort=6,
+    FU_Sigmoid=100
+  };
+
   //==========EXECUTION ==============
   //Execution follows Ready
 
@@ -1567,28 +1769,28 @@ protected:
     }
 
     if (opclass1 > 9 && opclass1 < 30) {
-      return 0;
+      return FU_Other;
     }
 
     switch(opclass1) {
     default: 
-      return 1;
+      return FU_Unknown;
     case 1: //IntALU
-      return 2;
+      return FU_IntALU;
     case 2: //IntMult
     case 3: //IntDiv
-      return 3;
+      return FU_IntMulDiv;
     case 4: //FloatAdd
     case 5: //FloatCmp
     case 6: //FloatCvt
-      return 4;
+      return FU_FloatALU;
     case 7: //FloatMult
     case 8: //FloatDiv
     case 9: //FloatSqrt
-      return 5;
+      return FU_FloatMulDiv;
     case 30: //MemRead
     case 31: //MemWrite
-      return 6;
+      return FU_MemPort;
     }
     assert(0);
   }
@@ -1759,9 +1961,14 @@ protected:
                                    maxUnits, inst));
 
     if (min_node) {
+      int edge_type = E_FU;
+      if(fuIndex==FU_MemPort) {
+        edge_type = E_MP;
+      }
+
       getCPDG()->insert_edge(*min_node, min_node->beginExecute(),
                         *inst, inst->beginExecute(), 
-                        getFUIssueLatency(min_node->_opclass,min_node->_op),E_FU);
+                        getFUIssueLatency(min_node->_opclass,min_node->_op),edge_type);
     }
   }
 
@@ -1809,6 +2016,7 @@ protected:
       if(rechecks!=0) {
         //create a copy of the instruction to serve as a dummy
         Inst_t* dummy_inst = new Inst_t();
+        dummy_inst->setCumWeights(curWeights());
         dummy_inst->copyEvents(n.get());
         //Inst_t* dummy_inst = new Inst_t(*n);
         std::shared_ptr<Inst_t> sh_dummy_inst(dummy_inst);
@@ -2020,6 +2228,7 @@ protected:
                        uint64_t& l2_hits,    uint64_t& l2_misses,
                        uint64_t& l1_wr_hits, uint64_t& l1_wr_misses, 
                        uint64_t& l2_wr_hits, uint64_t& l2_wr_misses) {
+     
      if(inst->_isload) {
        if(miss_level>=1) {
          l1_misses+=1;
@@ -2488,10 +2697,10 @@ protected:
     core->dcache.write_misses    = l1_wr_misses;
 
     //TODO: TLB Energy Modeling
-    core->itlb.total_accesses=0;
+    core->itlb.total_accesses=icache_read_accesses;
     core->itlb.total_misses=0;
     core->itlb.total_hits=0;
-    core->dtlb.total_accesses=0;
+    core->dtlb.total_accesses=l1_hits+l1_misses+l1_wr_hits+l1_wr_misses;
     core->dtlb.total_misses=0;
     core->dtlb.total_hits=0;
     

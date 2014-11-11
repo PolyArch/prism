@@ -87,6 +87,27 @@ public:
   CFU_set* _cfu_set = NULL;
   std::set<Op*> _opset;
 
+  std::vector<int> _cfu_util;
+  int _total_util=0;
+
+  void add_util(int i) {
+    if(_cfu_set) {
+      if(_cfu_util.size()==0) {
+        _cfu_util.resize(_cfu_set->numCFUs()+2);
+      }
+      _cfu_util[i]++;
+      _total_util++;
+    }
+  }
+  void calc_set() {
+    for(auto i = sg_begin(), e = sg_end(); i!=e; ++i) {
+      Subgraph* sg = *i;
+      if(sg->cfu()) {
+        add_util(sg->cfu()->ind());
+      }
+    }
+  }
+
 public:
 friend class boost::serialization::access;
 template<class Archive>
@@ -96,12 +117,19 @@ template<class Archive>
     ar & _opSubgraphMap;
     ar & _opset;
     ar & _cfu_set;
+    calc_set();
   }
 
   void insertSG(Subgraph* subgraph) {
     _subgraphSet.insert(subgraph);
     _subgraphVec.push_back(subgraph);
+    if(subgraph->cfu()) {
+      add_util(subgraph->cfu()->ind());
+    }
   }
+
+  int maxUtil()     {return _total_util;}
+  int utilOf(int i) {return _cfu_util[i];}
 
   void reset() {
     _subgraphSet.clear();
@@ -110,6 +138,20 @@ template<class Archive>
 
   Subgraph* subgraphOfOp(Op* op) {
     return _opSubgraphMap[op];
+  }
+
+  static bool depFromTo(Subgraph* sg1, Subgraph* sg2) {
+    for(auto i1 = sg1->opv_begin(), e1=sg1->opv_end(); i1!=e1;++i1) {
+      Op* op1 = *i1; //an op in sg1
+      
+      for(auto ui=op1->u_begin(), ue=op1->u_end(); ui!=ue; ++ui) {
+        Op* op2 = *ui;
+        if(sg2->hasOp(op2)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   void setMapping(Op* op, CFU_node* cfu_node, Subgraph* sg) {
@@ -473,6 +515,7 @@ public:
     _calledTo.insert(fi);
   }
 
+  bool is_revolverable();
 
   // does this loop call any recursive function?
   bool cant_inline_first_time=true;
@@ -596,31 +639,34 @@ public:
 
   int weightOf(BB* bb1, BB* bb2);
 
-  void incIter();
+  void incIter(bool profile);
   void iterComplete(int pathIndex, BBvec& path);
-  void endLoop();
-  void beginLoop();
+  void endLoop(bool profile);
+  void beginLoop(bool profile);
   int curIter() {return _curIter;}
 
   void incInstr() {_numInsts++;}
   uint64_t numInsts() {return _numInsts;} 
 
+  //Static Instructions in Loop Nest
   int staticInsts() {
     int static_insts=0;
     for(auto i=_loopBody.begin(),e=_loopBody.end();i!=e;++i) {
       BB* bb = *i;
-      static_insts+=bb->len();
+      //static_insts+=bb->len();
+      static_insts+=bb->static_estimate();
     }
     return static_insts;
   }
 
+  //Static Instructions in *just* my BBs, not including deeper nests
   int myStaticInsts() {
     int static_insts=staticInsts();
     for(auto i=_immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
       LoopInfo* li=*i;
       static_insts-=li->staticInsts();
     }
-    assert(static_insts>0);
+    //assert(static_insts>0); I can have 0 static_insts, if some of the bbs 
     return static_insts;
   }
 

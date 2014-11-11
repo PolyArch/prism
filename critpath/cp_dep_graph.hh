@@ -16,6 +16,7 @@
 #include <set> 
 #include <deque>
 #include <unordered_set>
+#include <iomanip>
 
 // Terminology:
 // "event" refers to individual instruction "stages" like fetch/decode/etc..
@@ -51,6 +52,7 @@
   X(EP,   "EP",  "Execute to Complete")                 \
   X(WBBW, "WBBW","WriteBack BandWidth")                 \
   X(MSHR, "MSHR","MSHR Resource")                       \
+  X(MP,   "MP",  "Memory Port Resource")                \
   X(WB,   "WB",  "Writeback")                           \
   X(PP,   "PP",  "Cache Dep (w/e)")                     \
   X(PC,   "PC",  "Complete To Commit")                  \
@@ -63,11 +65,14 @@
   X(BBA,  "BBA", "CCores Activate Basic Block")         \
   X(BBE,  "BBR", "CCores Basic Block Ready")            \
   X(BBC,  "BBC", "CCores Basic Block Complete")         \
+  X(BBN,  "BBN", "CCores Basic Block Not sure")         \
   X(SEBB, "SEBB", "SEB Region Begin")                   \
   X(SEBA, "SEBA", "SEB Activate")                       \
   X(SEBW, "SEBW", "SEB Writeback")                      \
   X(SEBS, "SEBS", "SEB Serialization")                  \
-  X(SEBL, "SEBL", "SEB Execute to Complete Latency")    \
+  X(SSDF, "SSDF", "SEB Serialization, dataflow")        \
+  X(SSMD, "SSMD", "SEB Serialization, memory dep")        \
+  X(SEBL, "SEBL", "SEB Done")    \
   X(SEB,  "SEB", "???")                                 \
   X(SEBD, "SEBD", "Intra-SEB Data Dependence")                \
   X(SEBX, "SEBX", "Inter-SEB Data Dependence")                \
@@ -81,10 +86,23 @@
   X(DyEP,  "DyEP", "DySER Functional Execute to complete")      \
   X(DyPP,  "DyPP", "DySER Complete To Complete")                \
   X(DyCR,  "DyCR", "DySER Commit to ready")                     \
-  X(NPUPR, "NPUCR", "NPU Complete to ready")                    \
+  X(NPUPR, "NPUPR", "NPU Complete to ready")                    \
   X(NPUFE, "NPUFE", "NPU Fake Edges")                    \
+  X(NCFG,  "NCFG",  "NLA Config") \
+  X(NCPU,  "NCPU",  "NLA to CPU Time") \
+  X(NSER,  "NSER",  "NLA CFU Serialization") \
+  X(NCTL,  "NCTL",  "NLA CTRL Serialization") \
+  X(NSLP,  "NSLP",  "NLA Serialize Loop") \
+  X(NITR,  "NITR",  "NLA Iteration Limit") \
+  X(NNET,  "NNET",  "NLA Network Conflict") \
+  X(CFUR,  "CFUR",  "CFU Ready (operands ready)") \
+  X(CFUB,  "CFUB",  "CFU Begin to Execute") \
+  X(CFUE,  "CFUE",  "CFU Complete to End") \
+  X(NFWD,  "NFWD",  "NLA Forward") \
+  X(NDWR,  "NDWR",  "NLA Delay CFU Writes") \
+  X(NMTK,  "NMTK",  "NLA Memory Token") \
   X(HORZ,  "HORZ",  "The HORIZON")                    \
-  X(NUM,   "NUM",  "LAST (should not see)")                    \
+  X(NUM,   "NUM",  "LAST (should not see)")        \
 
 
 
@@ -96,11 +114,60 @@ enum EDGE_TYPE {
 
 #include "edge_table.hh"
 
-/*
-static const char* ename(uint8_t ind) {
-  return edge_name[ind];
-}
-*/
+enum AnalysisType {
+  Weighted=0,
+  Unweighted=1,
+  Offset=2
+};
+
+class CumWeights {
+public:
+  double edges_weighted[E_NUM]={0}; //acumulated edge weights
+  double edges_unweighted[E_NUM]={0}; //acumulated edge weights
+  double edges_offset[E_NUM]={0}; //acumulated edge weights
+
+  void countEdge(int i,int time,float weight) {
+    edges_weighted[i]+=time*weight;
+    edges_unweighted[i]+=weight; //time is the weight
+    edges_offset[i]+=(time+1)*weight; //some compromise to show 0-cycle edges
+  }
+
+  double weightOfEdge(int i, AnalysisType analType) {
+    if(analType == AnalysisType::Weighted) {
+      return edges_weighted[i];
+    } else if (analType == AnalysisType::Unweighted) {
+      return edges_unweighted[i];
+    } else if (analType == AnalysisType::Offset) {
+      return edges_offset[i];
+    } 
+    assert(0);
+    return 123456789.10;
+  }
+
+  void print_edge_weights(std::ostream& out, AnalysisType analType) {
+    double total_weight=0; //should roughly equal number of cycles in program
+    double* arr=0;
+    switch(analType) {
+      case AnalysisType::Weighted:   arr=edges_weighted;   break;
+      case AnalysisType::Unweighted: arr=edges_unweighted; break;
+      case AnalysisType::Offset:     arr=edges_offset;     break;
+    }
+  
+    for(int i = 0; i < E_NUM; ++i) {
+      double weight=arr[i];
+      total_weight+=weight;
+    }
+  
+    for(int i = 0; i < E_NUM; ++i) {
+      double weight = arr[i];
+      if(weight!=0.0) {
+        out << edge_name[i] << ":" << std::setprecision(3) << weight/total_weight << ",";
+      }
+    }
+    //out << " (total: " << total_weight << ")";
+  }
+};
+
 
 // single node
 class dg_event_base {
@@ -137,7 +204,7 @@ public:
 template<typename T, typename E>
 class dg_inst_base {
 public:
-  uint64_t _index;
+  uint64_t _index=-1;
   bool done = false;
   uint16_t _opclass = 0;
   bool _isload = false;
@@ -159,7 +226,7 @@ public:
   bool _floating = false;
   bool _iscall = false;
   uint16_t _st_lat = 0;
-  uint64_t _eff_addr;
+  uint64_t _eff_addr = 0;
   uint8_t _hit_level = 0, _miss_level = 0;
 
   virtual T &operator[](const unsigned i) =0;
@@ -190,8 +257,6 @@ protected:
   }
 
   dg_inst_base() : _index(0) {}
-
-
 public:
   virtual uint64_t finalCycle() {
     uint64_t max=0;
@@ -202,6 +267,14 @@ public:
     }
     return max;
   }
+  virtual void setCumWeights(CumWeights* cm) {
+    for(int i = 0; i < numStages(); ++i) {
+      (*this)[i]._cum_weights=cm;
+      (*this)[i]._index=_index; //fun?
+      (*this)[i]._op=_op; //fun?
+    }
+  }
+
   virtual uint64_t cycleOfStage(const unsigned i) = 0;
   virtual unsigned numStages() =0;
   virtual uint64_t index() {return _index;}
@@ -508,22 +581,6 @@ public:
     return events[i];
   }
 
-/*  void compute_cycle() {
-    for (int i = 0; i < 6; ++i) {
-      events[i]->compute_cycle_for_dep();
-    }
-  }
-
-  void compute_cycle_data_dep() {
-    for (int i = 0; i < 6; ++i) {
-      events[i]->compute_cycle_for_data_dep();
-    }
-  }*/
-
-/*  void remove() {
-    remove_edges();
-  }*/
-
   void reset_inst() {
     for (int i = 0; i < NumStages; ++i) {
       events[i].remove_all_edges();
@@ -545,63 +602,45 @@ public:
   typedef typename std::vector<EPtr>::iterator EdgeIterator;
   typedef typename std::vector<EPtr>::iterator PredEdgeIterator;
 
-  uint64_t _index;
   uint64_t _cycle;
-  //int _ty;
-  //EPtr ff_edge;
-  //bool _load, _store, _ctrl;
+  uint64_t _index=-2;
+  Op* _op = NULL;
+  dg_inst<NodeTy, E> *_inst;
+  CumWeights* _cum_weights;
   bool _dirty=false;
   bool _crit_path_counted=false;
   bool _crit_path_opened=false;
-
-
-  dg_inst<NodeTy, E> *_inst;
 
   std::vector<EPtr> _edges; //forward edges
   //std::map<dg_event_base*, EPtr> _pred_edge_map;
   std::vector<EPtr> _pred_edges; //predecessor edges
 
   dg_event_impl_t():// _index(0), 
-    _cycle(0),
-    //_ty(0), //ff_edge(0),
-    //                  _load(false), _store(0), _ctrl(false),
-                      _inst(0) 
-  {
-  }
-  dg_event_impl_t(uint64_t index, int ty): 
-                   //_index(index), 
-                    _cycle(0),
-                    //_ty(ty), //ff_edge(0),
-    //             _load(false), _store(0), _ctrl(false), 
-                   _inst(0)
-  {
-  }
+    _cycle(0), _inst(0), _cum_weights(0) { }
 
-  virtual int numPredEdges() {
+  dg_event_impl_t(uint64_t index, int ty,CumWeights* cw=NULL): 
+                    _cycle(0), _inst(0), _cum_weights(cw) { }
+
+  int numPredEdges() {
     return _pred_edges.size();
   }
 
-/*  virtual uint64_t index() {
-    return _index;
-  }*/
-
   virtual ~dg_event_impl_t() {
-    //std::cout << "deleting event" << _index << "\n";
     remove_all_edges();
     //_edges.clear();
   }
 
-  virtual void set_inst(dg_inst<NodeTy, E> *n){
-    _inst = n;
+  void set_inst(dg_inst<NodeTy, E> *n){
+    //_inst = n;
   }
 
-  virtual bool isLastArrivingEdge(EPtr edge) {
+  bool isLastArrivingEdge(EPtr edge) {
     return edge->src()->cycle()+edge->len() == cycle();
   }
 
   //return an edge that explains the arrival time
   //bias given to earlier edges in EDGE_TYPE enum
-  virtual EPtr lastArrivingEdge() {
+  EPtr lastArrivingEdge() {
     for (auto I = _pred_edges.begin(), e=_pred_edges.end(); I!=e; ++I) {
       if ((*I)->src()->cycle()+(*I)->len() == cycle()) {
         return *I;
@@ -610,7 +649,7 @@ public:
     return 0;
   }
 
-  virtual unsigned lastArrivingEdgeType() {
+  unsigned lastArrivingEdgeType() {
     EPtr edge = lastArrivingEdge();
     if(edge==0) {
       return E_NONE;
@@ -619,14 +658,12 @@ public:
     }
   }
 
-  virtual void reCalculate() {
+  void reCalculate() {
     _cycle=0;
     for (auto i = _pred_edges.begin(), e = _pred_edges.end(); i!=e; ++i) {
       compute_cycle(*i); 
     }
   }
-
-  virtual void prop_changed(){}
 
   typename std::vector<EPtr>::iterator pebegin() { return _pred_edges.begin(); }
   typename std::vector<EPtr>::iterator peend() { return _pred_edges.end(); }
@@ -641,7 +678,7 @@ public:
     return false;
   }
 
-  virtual void add_edge(EPtr e) {
+  void add_edge(EPtr e) {
     _edges.push_back(e);
     e->dest()->add_pred_edge(e);
     compute_cycle(e);
@@ -663,6 +700,7 @@ public:
     e->dest()->setCycle(e->src()->cycle() + e->length());
   }
 
+  /*
   virtual void compute_cycle_for_dep() {
     for (EdgeIterator I = _edges.begin(), e = _edges.end(); I != e; ++I) {
       compute_cycle(*I);
@@ -678,13 +716,14 @@ public:
       }
     }
   }
+*/
 
-  virtual void add_pred_edge(EPtr e) {
+  void add_pred_edge(EPtr e) {
     //dg_event_base *tmp = e->dest();
     _pred_edges.push_back(e);
   }
 
-  virtual void remove_pred_edge(EPtr rem_e) {
+  void remove_pred_edge(EPtr rem_e) {
     _dirty=true;
     for (PredEdgeIterator I = _pred_edges.begin(), e=_pred_edges.end(); I != e; ++I) {
       if ((*I) == rem_e) {
@@ -696,7 +735,7 @@ public:
     assert(0);
   }
 
-  virtual void remove_edge(EPtr rem_e) {
+  void remove_edge(EPtr rem_e) {
     _dirty=true;
     for (EdgeIterator I = _edges.begin(), e=_edges.end(); I != e; ++I) {
       if ((*I) == rem_e) {
@@ -708,7 +747,7 @@ public:
     assert(0);
   }
 
-  virtual void remove_all_edges() {
+  void remove_all_edges() {
     //remove predecessor edges
     for (auto I = _pred_edges.begin(), e = _pred_edges.end(); I != e; ++I) {
       EPtr edge = *I;
@@ -725,7 +764,7 @@ public:
     _edges.clear();
   }
 
-  virtual void print(const CP_NodeDiskImage &img) {
+  void print(const CP_NodeDiskImage &img) {
     std::cout << _cycle << " ";
   }
 
@@ -756,27 +795,12 @@ class dg_event: public dg_event_impl_t< dg_edge_impl_t<dg_event> >
 public:
   dg_event(): dg_event_impl_t< dg_edge_impl_t<dg_event> >() {}
 
-  dg_event(uint64_t index,
-            int ty): dg_event_impl_t< dg_edge_impl_t<dg_event> >(index, ty)
+  dg_event(uint64_t index, int ty, CumWeights* cw=NULL): dg_event_impl_t< dg_edge_impl_t<dg_event> >(index, ty, cw)
   {
   }
 
-/*
-  void create_pred_edge(EPtr e)
-  {
-    EPtr pred_edge = new dg_edge_impl_t<dg_event>(this, e->length(),
-                                                     e->type());
-    e->dest()->add_pred_edge(pred_edge);
-  }
-*/
-
 };
 
-enum AnalysisType {
-  Weighted=0,
-  Unweighted=1,
-  Offset=2
-};
 
 // The abstract type for the entire graph
 template<typename Inst_t, typename T, typename E>
@@ -819,7 +843,7 @@ public:
   virtual dg_inst_base<T,E>& queryNodes(uint64_t idx) = 0;
   virtual bool hasIdx(uint64_t idx) = 0;
 
-  virtual double weightOfEdge(int i, AnalysisType analType) =0;
+  virtual CumWeights* cumWeights() = 0;
 
   virtual std::shared_ptr< dg_inst_base<T, E> > queryInst(uint64_t idx) = 0;
   virtual uint64_t getMaxCycles() =0;
@@ -827,6 +851,8 @@ public:
 
   virtual uint64_t getPipeLoc() const = 0;
   virtual Inst_t* peekPipe(int offset) = 0;
+  virtual std::shared_ptr<Inst_t> peekPipe_sh(int offset) = 0;
+
   virtual void pushPipe(std::shared_ptr<Inst_t> dg) = 0;
   virtual void done(std::shared_ptr<Inst_t> dg) = 0;
 
@@ -837,10 +863,9 @@ public:
   virtual void cleanup() = 0;
 };
 
-
 // Implementation for the entire graph
-#define BSIZE 16384 //max number of insts to keep for data/mem dependence
-#define HSIZE  6356
+#define BSIZE 16384 //16384 //max number of insts to keep for data/mem dependence
+#define HSIZE  6356 //6356
 #define PSIZE   512 //max number in-flight instructions, biggest ROB size
 
 template<typename Inst_t, typename T, typename E>
@@ -863,10 +888,7 @@ protected:
   dg_inst_base_ptr  _vec[BSIZE];
   uint64_t _latestIdx;
 
-  double edges_weighted[E_NUM]={0}; //acumulated edge weights
-  double edges_unweighted[E_NUM]={0}; //acumulated edge weights
-  double edges_offset[E_NUM]={0}; //acumulated edge weights
-
+  CumWeights _cum_weights;
 
   // The "horizon" is the point beyond which no event may occur before, because
   // it is in the definite past.  This corresponds to a cycle number, and also
@@ -1031,28 +1053,14 @@ public:
      return event;
   }
 
-  virtual double weightOfEdge(int i, AnalysisType analType) {
-    if(analType == AnalysisType::Weighted) {
-      return edges_weighted[i];
-    } else if (analType == AnalysisType::Unweighted) {
-      return edges_unweighted[i];
-    } else if (analType == AnalysisType::Offset) {
-      return edges_offset[i];
-    } 
-    assert(0);
-    return 123456789.10;
-  }
+  virtual CumWeights* cumWeights() {return &_cum_weights;}
 
-  void countEdge(int i,int time,float weight) {
-    edges_weighted[i]+=time*weight;
-    edges_unweighted[i]+=weight; //time is the weight
-    edges_offset[i]+=(time+1)*weight; //some compromise to show 0-cycle edges
-  }
-
-  T* detectCycle(T* n, std::unordered_set<T*>& seen, 
-                       std::unordered_set<T*>& temp) {
+  //detect if there is a cycle in the depedencegraph
+  bool detectCycle(T* n, std::unordered_set<T*>& seen, 
+                       std::unordered_set<T*>& temp, T*& cycle_start) {
     if(temp.count(n)) {
-      return n;
+      cycle_start=n;
+      return true;
     }
 
     if(seen.count(n)==0) { //not seen n yet
@@ -1060,13 +1068,26 @@ public:
       for(auto i=n->pebegin(),e=n->peend();i!=e;++i) {
         E* edge = *i;
         T* src = edge->src();
-        T* cycle_node = detectCycle(src,seen,temp);
-        if(cycle_node) {
-          std::cout << "cycle edge: " << edge_name[edge->type()] << "\n";
-          if(src == cycle_node) {
-            return NULL;
+        bool is_cycling = detectCycle(src,seen,temp,cycle_start);
+        if(cycle_start) {
+          if(is_cycling) {
+            std::cout << "cycle edge: " << edge_name[edge->type()] << " "
+              << (uint64_t)src 
+              << " index:" << edge->src()->_index;
+              
+            if(edge->src()->_op) {
+              std::cout << " op:" << edge->src()->_op->id();
+            }
+            std::cout << "\n";
+
+            if(n==cycle_start) {
+              std::cout << "\n";
+              return false;
+            } else {
+              return true;
+            } 
           } else {
-            return cycle_node;
+            return false;
           }
         }
       }
@@ -1074,7 +1095,7 @@ public:
       seen.insert(n);
       temp.erase(n);
     }
-    return NULL;
+    return false;
   }
 
   virtual void critpath(T* first_node) {
@@ -1083,7 +1104,15 @@ public:
 
     std::unordered_set<T*> seen;
     std::unordered_set<T*> temp;
-    detectCycle(first_node,seen,temp); //ERROR CHECKING, TODO: Uncomment
+
+    T* cycle_start=NULL;
+    bool cycling = detectCycle(first_node,seen,temp,cycle_start); //ERROR CHECKING, TODO: Comment
+    if(cycling) {
+      std::cout << "CYCLEING!\n";
+    }
+    if(cycle_start) {
+      std::cout << "had a cycle!\n";
+    }
 
     std::map<uint64_t,std::set<T*>> worklist;
     worklist[first_node->cycle()].insert(first_node);
@@ -1131,7 +1160,10 @@ public:
             //if(node_done.count(src_node)) {
             //  std::cout << "Seen node with edge: " << edge_name[edge->type()] << "!\n";
             //}
-            countEdge(edge->type(),edge->len(),weight);
+            _cum_weights.countEdge(edge->type(),edge->len(),weight);
+            if(node->_cum_weights) {
+              node->_cum_weights->countEdge(edge->type(),edge->len(),weight);
+            }
             mini_worklist.insert(src_node);
           }
         }
@@ -1171,20 +1203,48 @@ public:
 
 #define RSIZE 1024
 
-  T* backtrack_from(T* node, uint64_t stop) {
+  T* backtrack_from(T* node, std::unordered_set<T*>& seen, 
+                       std::unordered_set<T*>& temp, uint64_t stop,
+                       T*& b_cycle_start, bool& is_cycling) {
+    if(temp.count(node)) {
+      b_cycle_start=node;
+      is_cycling=true;
+      return NULL;
+    }
+
     if(node->_crit_path_opened) { //found one
       return node;
     }
 
-    for(auto i=node->pebegin(),e=node->peend();i!=e;++i) {
-      E* edge = *i;
-      T* src_node = edge->src();
-      if(node->isLastArrivingEdge(edge)) {
-        T* new_node = backtrack_from(src_node,stop);
-        if(new_node) {
-          return new_node;
+    if(seen.count(node)==0) { //not seen n yet
+      temp.insert(node);
+
+      for(auto i=node->pebegin(),e=node->peend();i!=e;++i) {
+        E* edge = *i;
+        T* src_node = edge->src();
+        if(node->isLastArrivingEdge(edge)) {
+          T* new_node = backtrack_from(src_node,seen,temp,stop,b_cycle_start,is_cycling);
+
+          if(is_cycling) {
+            std::cout << "cycle edge: " << edge_name[edge->type()] << " "
+                      << (uint64_t)src_node << "\n";
+          }
+          if(node==b_cycle_start) {
+            is_cycling=false;
+            std::cout << "\n";
+          }
+          if(b_cycle_start) {
+            return NULL;
+          } 
+
+          if(new_node) {
+            return new_node;
+          }
         }
       }
+      //no cycle in children
+      seen.insert(node);
+      temp.erase(node);
     }
     return NULL;
   }
@@ -1196,7 +1256,6 @@ public:
     uint64_t stop_ind = stop%BSIZE; 
     uint64_t latest_ind = latest%BSIZE;
 
-
     T* node = NULL;
     
     //Two ways to get start node:
@@ -1204,10 +1263,10 @@ public:
     //2. Find last instruction between start and stop
     // Do 1 if vec[latest_ind] has instruction
     if(_vec[latest_ind] && _vec[latest_ind]->index() == latest) {
-     for(uint64_t i = reserve_ind; i!=stop_ind; ++i) {
-        if(i==BSIZE) {
-          i=0;
-        }
+     for(uint64_t i = reserve_ind; i!=stop_ind; ++i,i=(i==BSIZE?0:i)) {
+        //if(i==BSIZE) {
+        //  i=0;
+        //}
         if(!_vec[i]) {
           continue;
         }
@@ -1217,15 +1276,20 @@ public:
       }
 
       T* cur_node = & (*_vec[latest_ind])[_vec[latest_ind]->eventComplete()];
-      node = backtrack_from(cur_node,stop_ind);
+
+      T* cycle_start=NULL;
+      std::unordered_set<T*> seen;
+      std::unordered_set<T*> temp;
+      bool is_cycling=false;
+      node = backtrack_from(cur_node,seen,temp,stop_ind,cycle_start,is_cycling);
     }
      
     //Fall back on option 2 if it didn't work 
     if(!node) {
-      for(uint64_t i = start_ind; i!=stop_ind; ++i) {
-        if(i==BSIZE) {
-          i=0;
-        }
+      for(uint64_t i = start_ind; i!=stop_ind; ++i,i=(i==BSIZE?0:i)) {
+//        if(i==BSIZE) {
+//          i=0;
+//        }
   
         dg_inst_base_ptr inst = _vec[i];
        
@@ -1242,19 +1306,21 @@ public:
     critpath(node);
 
     //debug:
+    /*
     double total_weight=0; //should roughly equal number of cycles in program
     for(int i = 0; i < E_NUM; ++i) {
       double weight =weightOfEdge(i,Weighted);
       total_weight+=weight;
     }
+
     std::cout << "Range: " << start << "->" << stop << ", cycle: " << _vec[start_ind]->cycleOfStage(_vec[start_ind]->eventComplete()) << "->" << node->cycle() <<"; total_weight: " << total_weight <<"\n";
+    */
 
-
-
-    for(uint64_t i = start_ind; i!=reserve_ind; ++i) {
-      if(i==BSIZE) {
-        i=0;
-      }
+//    std::cout << "clearing: " << start << " " << stop-RSIZE << " " << latest << "\n";
+    for(uint64_t i = start_ind; i!=reserve_ind; ++i,i=(i==BSIZE?0:i)) {
+//      if(i==BSIZE) {
+//        i=0;
+//      }
 
       _vec[i]=0;      
     }
@@ -1298,6 +1364,15 @@ public:
   virtual void remove_instr(dg_inst_base<T, E>* ptr) { }
 
   virtual uint64_t getPipeLoc() const { return _pipeLoc; }
+
+  virtual std::shared_ptr<Inst_t> peekPipe_sh(int offset) {  
+    if(_pipeLoc+offset > (uint64_t)-1000) {
+      return NULL;  //base case -- no instructions yet
+    }
+    
+    return _pipe[(_pipeLoc+offset)%PSIZE];
+  }
+
 
   virtual Inst_t* peekPipe(int offset) {  
     if(_pipeLoc+offset > (uint64_t)-1000) {

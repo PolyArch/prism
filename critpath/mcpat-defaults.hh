@@ -25,7 +25,7 @@ static const char * xml_str = R"(
 		<param name="temperature" value="310"/> <!-- Kelvin -->
 		<param name="number_cache_levels" value="2"/>
 		<param name="interconnect_projection_type" value="1"/><!--0: aggressive wire technology; 1: conservative wire technology -->
-		<param name="device_type" value="2"/><!--0: HP(High Performance Type); 1: LSTP(Low standby power) 2: LOP (Low Operating Power)  -->
+		<param name="device_type" value="0"/><!--0: HP(High Performance Type); 1: LSTP(Low standby power) 2: LOP (Low Operating Power)  -->
 		<param name="longer_channel_device" value="1"/><!-- 0 no use; 1 use when aggressive -->
 		<param name="power_gating" value="1"/><!-- 0 not enabled; 1 enabled -->
 		<param name="machine_bits" value="64"/>
@@ -124,6 +124,10 @@ static const char * xml_str = R"(
 			as well as the ports of Dcache which is connected to LSU -->	
 			<!-- dual-pumped Dcache can be used to save the extra read/write ports -->
 			<param name="RAS_size" value="32"/>						
+			<param name="imu_width" value="4"/>
+			<param name="imu_entries" value="32"/>
+			<param name="num_nla_units" value="8"/>
+
 			<!-- general stats, defines simulation periods;require total, idle, and busy cycles for sanity check  -->
 			<!-- please note: if target architecture is X86, then all the instructions refer to (fused) micro-ops -->
 			<stat name="total_instructions" value="0"/>
@@ -216,7 +220,7 @@ static const char * xml_str = R"(
 				-->
 			</component>
 			<component id="system.core0.itlb" name="itlb">
-				<param name="number_entries" value="128"/>
+				<param name="number_entries" value="64"/>
 				<stat name="total_accesses" value="0"/>
 				<stat name="total_misses" value="0"/>
 				<stat name="conflicts" value="0"/>	
@@ -236,7 +240,7 @@ static const char * xml_str = R"(
 				<stat name="conflicts" value="0"/>				
 			</component>
 			<component id="system.core0.dtlb" name="dtlb">
-				<param name="number_entries" value="256"/><!--dual threads-->
+				<param name="number_entries" value="32"/>
 				<stat name="total_accesses" value="0"/>
 				<stat name="total_misses" value="0"/>
 				<stat name="conflicts" value="0"/>	
@@ -272,7 +276,7 @@ static const char * xml_str = R"(
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw search ports -->
-				<param name="device_type" value="2"/>
+				<param name="device_type" value="0"/>
 				<!-- although there are multiple access types, 
 				Performance simulator needs to cast them into reads or writes
 				e.g. the invalidates can be considered as writes -->
@@ -293,7 +297,7 @@ static const char * xml_str = R"(
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw search ports -->
-				<param name="device_type" value="2"/>
+				<param name="device_type" value="0"/>
 				<!-- altough there are multiple access types, 
 				Performance simulator needs to cast them into reads or writes
 				e.g. the invalidates can be considered as writes -->
@@ -313,7 +317,7 @@ static const char * xml_str = R"(
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw ports -->
-				<param name="device_type" value="2"/>
+				<param name="device_type" value="0"/>
 				<stat name="read_accesses" value="0"/>
 				<stat name="write_accesses" value="0"/>
 				<stat name="read_misses" value="0"/>
@@ -329,7 +333,7 @@ static const char * xml_str = R"(
 				<param name="clockrate" value="850"/>
 				<param name="ports" value="1,1,1"/>
 				<!-- number of r, w, and rw ports -->
-				<param name="device_type" value="2"/>
+				<param name="device_type" value="0"/>
 				<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 				<param name="buffer_sizes" value="16, 16, 16, 16"/>
 				<!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->	

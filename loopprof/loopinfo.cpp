@@ -99,9 +99,11 @@ void LoopInfo::initializePathInfo() {
 }
 
 //generic version that doesn't track path
-void LoopInfo::incIter() {
+void LoopInfo::incIter(bool profile) {
     _curIter++;
-    _totalIterCount++;
+    if(profile) {
+      _totalIterCount++;
+    }
 }
 
 //Called when a loop iteration completes
@@ -170,17 +172,21 @@ bool LoopInfo::dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op) {
 }
 
 //just clear this stuff when we start
-void LoopInfo::beginLoop() {
+void LoopInfo::beginLoop(bool profile) {
   _curIter=0;
-  _prevOpAddr.clear();
-  _prevOpIter.clear();
+  if(profile) {
+    _prevOpAddr.clear();
+    _prevOpIter.clear();
+  }
 }
 
-void LoopInfo::endLoop() {
-  _loopCount++;
+void LoopInfo::endLoop(bool profile) {
   _curIter=0;
-  _prevOpAddr.clear();
-  _prevOpIter.clear();
+  if(profile) {
+    _loopCount++;
+    _prevOpAddr.clear();
+    _prevOpIter.clear();
+  }
 }
 
 int LoopInfo::weightOf(BB* bb1, BB* bb2) {
@@ -401,6 +407,8 @@ void LoopInfo::printLoopDeps(std::ostream& out) {
 
     if(vl.hasVectorizableMemAccess(this,true)) {
       out << "Vectorizable Mem!\\n";
+    } else {
+      out << "Not Vectorizable Mem!\\n";
     }
     if(vl.old_loop_dep(this)) {
       out << "Vectorizable Accordng To Venkat!\\n";
@@ -962,9 +970,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     BB::OpVec::iterator oi,oe;
     for(oi=bb->op_begin(),oe=bb->op_end();oi!=oe;++oi)  {
       Op* op = *oi;
-      if((op->shouldIgnoreInAccel() || op->plainMove()) && !useOutsideLoop(op)) {
+//      if((op->shouldIgnoreInAccel() || op->plainMove()) && !useOutsideLoop(op)) {
+//        continue;
+//      }
+      if((op->shouldIgnoreInAccel() || op->plainMove())) {
         continue;
       }
+
 
       assert(op);
       opSet.insert(op);
@@ -1518,6 +1530,25 @@ std::string LoopInfo::nice_name_full() {
   nice_name_tree(ss);
   return func()->nice_name() + ss.str();
 }
+
+bool LoopInfo::is_revolverable() {
+  if(!isInnerLoop()) {
+    return false;
+  }
+  if(cantFullyInline()) {
+    return false; 
+  }
+
+  for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+    FunctionInfo* fi = i->first.second;
+    if(!fi->no_loops_in_inlined_callgraph()) {
+      return false;
+    }
+  }
+
+  return true; 
+}
+
 
 bool LoopInfo::callsRecursiveFunc() {
   // pair<pair<Op, FunctionInfo*>,int>

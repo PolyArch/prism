@@ -47,6 +47,11 @@ private:
   BB* _firstBB=0;
   CPC _loc;
 
+  //set by pin
+  std::string _name; 
+  std::string _filename;
+  int _lineno;
+
   //stats
   int _calls=0;
   uint64_t _instance_num=0;
@@ -66,7 +71,6 @@ private:
   BBFrontier _pdomFrontier;
   BBFrontier _pdomReverseFrontier;
 
-
   BBvec _rpo; //Reverse Post Order
   BB*   _unique_exit=NULL;
 
@@ -76,9 +80,9 @@ private:
   bool _callsRecursiveFunc=false;
 
   int _ninputs=0, _noutputs=-1;
+  
 
   std::set<BB*> _retBBs; //NOT SAVED
-
 
 friend class boost::serialization::access;
 template<class Archive>
@@ -109,6 +113,9 @@ template<class Archive>
     ar & _sym;
     ar & _canRecurse;
     ar & _callsRecursiveFunc;
+    ar & _name; 
+    ar & _filename;
+    ar & _lineno;
 
     for(auto i=_bbMap.begin(),e=_bbMap.end();i!=e;++i) {
       BB* bb = i->second;
@@ -157,14 +164,42 @@ public:
   BBPairList::iterator pdomR_end(BB* bb)   {return _pdomReverseFrontier[bb].end();}
   int pdomR_has(BB* bb){return _pdomReverseFrontier.count(bb);}
 
-
-
-
   uint32_t id() {return _id;}
   int nBBs() {return _bbMap.size();}
 
+  BB* bbOfCPC(CPC cpc) {
+    if(_bbMap.count(cpc)) {
+      return _bbMap[cpc];
+    } else {
+      return NULL;
+    }
+  }
+
+  std::string pin_name() { return _name; }
+  std::string filename() { return _filename; }
+  int         lineno()   { return _lineno; }
+
+  void setPinInfo(std::string name, std::string fname, int line) {
+    _name=name;
+    _filename=fname;
+    _lineno=line;
+  } 
+
   void setSymbol(prof_symbol* sym) { _sym=sym;}
   prof_symbol* symbol() {return _sym;}
+
+
+  std::string nice_filename() const {
+    std::string s = nice_name();
+    static const std::string legalChars = "-_.()abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+    for (auto it = s.begin() ; it < s.end() ; ++it){
+      bool found = legalChars.find(*it) != std::string::npos;
+      if(!found){
+        *it = '_';
+      }
+    }
+    return s;
+  }
 
   std::string nice_name() const {
     if (_sym != 0) {
@@ -354,7 +389,8 @@ public:
     int static_insts=0;
     for(auto i=_bbMap.begin(),e=_bbMap.end();i!=e;++i) {
       BB* bb = i->second;
-      static_insts+=bb->len();
+      //static_insts+=bb->len();
+      static_insts+=bb->static_estimate();
     }
     return static_insts;
   }
@@ -375,6 +411,9 @@ public:
     assert(static_insts>=0);
     return static_insts;
   }
+
+
+  bool no_loops_in_inlined_callgraph();
 
   bool cantFullyInline() {
     return (_insts==0 || _callsRecursiveFunc);
@@ -496,35 +535,19 @@ public:
 
 
   BB* getBB(CPC cpc);
-  BB* addBB(BB* prevBB, CPC headCPC, CPC tailCPC);
+  BB* addBB(BB* prevBB, CPC headCPC, CPC tailCPC, bool dynamic=true);
 
   BB* firstBB() {return _firstBB;}
   CPC loc() {return _loc;}
   void ascertainBBs();
 
-  void calculateRPO() {
-    //iterate over bbs, and find the ones with no predecessors
-    for(auto i=_bbMap.begin(),e=_bbMap.end();i!=e;++i) {
-      BB* bb = i->second;
-      if(bb->pred_size()==0) {
-        calculateRPO(bb);
-      }
-    }
-    if(_rpo.size()!=_bbMap.size()) {
-      if( _firstBB->rpoNum() == -1) {
-        calculateRPO(_firstBB);
-      }  else {
-        assert(0 && "rpo calc error: this should never happen");
-      }
-    }
+  void deleteBB(BB* bb);
 
-    std::reverse(_rpo.begin(), _rpo.end());
-    if(_bbMap.size() != _rpo.size()) {
-      std::cerr << "bbmapsize: " << _bbMap.size() 
-                << " rposize " << _rpo.size() << "\n";
-      assert(_bbMap.size() == _rpo.size()); //make sure we've got everyone once
-    }
-  }
+  bool findNonStaticOnlyBB(BB* bb, std::set<BB*>& seen_bbs);
+  void markReachable(BB* bb, std::set<BB*>& seen_bbs);
+  void deleteUnreachableStaticBBs();
+
+  void calculateRPO();
 
   void calculateDOM();
   void calculatePDOM();

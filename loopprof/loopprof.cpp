@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
   bool gams_details = false;
   bool no_gams = false;
   bool size_based_cfus = false;
-
+  bool extra_pass = false;
 
   //Parse the Options
   uint64_t max_inst= (uint64_t)-1;
@@ -42,6 +42,7 @@ int main(int argc, char *argv[])
     {"verbose",no_argument, 0, 'v'},
     {"gams-details",no_argument, 0, 'g'},
     {"no-gams",no_argument, 0, 'n'},
+    {"extra-pass",extra_pass, 0, 'e'},
     {"size-based-cfus",no_argument, 0, 's'},
     {"max-insts", required_argument, 0, 'm'},
     {"cfgdir", required_argument, 0, 'd'},
@@ -66,6 +67,7 @@ int main(int argc, char *argv[])
       cfgdir = optarg;
       print_cfgs=true;
       break;
+    case 'e': extra_pass = true; break;
     case 'h':
       std::cout << argv[0] << " [-v -m] file\n";
       return(0);
@@ -92,6 +94,7 @@ int main(int argc, char *argv[])
   PathProf pathProf;
   if(argc>optind+1) {
     pathProf.procSymTab(argv[optind+1]);
+    pathProf.procStaticCFG((string(argv[optind+1])+".cfg").c_str()); 
   }
 
    //prepare the output filename
@@ -116,7 +119,7 @@ int main(int argc, char *argv[])
   }
   pathProf.procStackFile(stackfile.c_str());
 
-  //Process Stack File
+  //Process Config File
   string configfile;
   if(start_pos != string::npos) {
     string dir = filename.substr(0, start_pos);
@@ -137,7 +140,7 @@ int main(int argc, char *argv[])
                           max_inst, winsize, verbose,
                           size_based_cfus,
                           no_gams, gams_details,
-                          count, pathProf))
+                          count, extra_pass, pathProf))
     return 1;
 
   if(print_cfgs) {
@@ -154,6 +157,8 @@ int main(int argc, char *argv[])
 
   std::cout << "Num of records              :" << count << "\n";
   
+  uint64_t all_insts = pathProf.stopInst-pathProf.skipInsts;
+
   std::cout << "Loop/Rec Info: "
             << pathProf.insts_in_beret << " Beretized, "
             << pathProf.insts_in_simple_inner_loop << " Flat-Inner, "
@@ -161,7 +166,42 @@ int main(int argc, char *argv[])
             << pathProf.insts_in_all_loops << " All-Loop, "
             << pathProf.non_loop_insts_direct_recursion << " Direct-Rec, "
             << pathProf.non_loop_insts_any_recursion << " Any Rec, "
-            << pathProf.stopInst-pathProf.skipInsts << " All\n";
+            << all_insts << " All\n";
+
+  if(extra_pass) {
+
+
+    //We have to fix up everything!
+    for(auto i=pathProf.cs_begin(),e=pathProf.cs_end();i!=e;++i) {
+      StackFrame& sf = *i;
+      sf.returning(all_insts,&pathProf);
+    }
+
+    cout << "Durations\n";
+    for(int i=0;i<PathProf::ST_NUM;++i) {
+//      cout << i << ": ";
+      pathProf._gran_duration[i].printCDF(cout,i,1.0/(all_insts));
+//      cout << "\n";
+    }
+    for(auto i : pathProf.longer_loops_d16384_s256) {
+      if(((double)i.second)/(all_insts) < 0.005) {
+        continue;
+      }
+      cout << "d16384_s256:   " << i.first->nice_name_full() << " " << ((double)i.second)/(all_insts) << " src: ";
+      pathProf.print_loop_loc(cout,i.first);  
+      cout << "\n";
+    }
+
+    for(auto i : pathProf.longer_loops_d16384_s256_i) {
+      if(((double)i.second)/(all_insts) < 0.005) {
+        continue;
+      }
+      cout << "d16384_s256_i: " << i.first->nice_name_full() << " " << ((double)i.second)/(all_insts) << " src: ";
+      pathProf.print_loop_loc(cout,i.first);  
+      cout << "\n";
+    }
+
+  }
 
   //prepare output filename ... continued
   size_t lp_start_pos=start_pos;

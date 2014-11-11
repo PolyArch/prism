@@ -851,7 +851,7 @@ namespace simd {
                              isLastInstAReturn,
                              StackLoop);
   
-      if(StackLoop || shouldVectorize(li)) {
+      if(li && (StackLoop || shouldVectorize(li))) {
         return li->id();
       } else {
         return 0;
@@ -869,8 +869,9 @@ namespace simd {
 
 
       if (getenv("MAFIA_DEBUG_SIMD_LOOP")) {
-        if (li)
+        if (li) {
           printLoop(li);
+        }
       }
 
       if (CurLoop != li) {

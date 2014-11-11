@@ -108,6 +108,8 @@ public:
   std::string kindName() {
     return kindName(_type);
   }
+  CFU_type type() {return _type;}
+
   std::set<CFU_node*>::iterator ins_begin()  {return _ins.begin();}
   std::set<CFU_node*>::iterator ins_end()    {return _ins.end();}
   std::set<CFU_node*>::iterator outs_begin() {return _outs.begin();}

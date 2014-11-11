@@ -17,6 +17,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
                         bool no_gams,
                         bool gams_details,
                         uint64_t &count,
+                        bool extra_pass,
                         PathProf &pathProf)
 {
 
@@ -26,7 +27,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
   CP_NodeDiskImage* cp_array = new CP_NodeDiskImage[winsize];
 
   //Two Passes
-  for (int pass = 1; pass <= 2; ++pass) {
+  for (int pass = 1; pass <= 2+extra_pass; ++pass) {
     igzstream inf(trace_fname, std::ios::in | std::ios::binary);
 
     if (!inf.is_open()) {
@@ -79,7 +80,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
       if (pass == 1) {
         static int skipInsts = 0;
         //This condition determines whether we start a new bb
-        if(prevCtrl && cp_array[ind]._upc==0) { 
+        if(cp_array[ind]._upc==0 && (prevCtrl || pathProf.isBB(cpc))) { 
         //old way: if (prevCtrl) {
           if (skipInsts > 0) {
             //cout << "------------------skip ---------" << skipInsts << "\n";
@@ -100,7 +101,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
       } else if (pass == 3) {
         //Pass all instructions to phase 3 -- this is what will be
 	//used in the transform pass, used for debugging purposes only
-        pathProf.processOpPhase3(cpc, prevCall, prevRet);
+        pathProf.processOpPhaseExtra(cpc, prevCall, prevRet);
       }
 
       prevCPC = cpc;

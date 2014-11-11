@@ -65,6 +65,23 @@ protected:
   int _max_ex_lat=1073741824;
   int _nm=22;
 
+  unsigned _cpu_wakeup_cycles=20;  //impose pipeline constraints on CFU use
+
+  //Revolver Stuff
+  bool _enable_revolver=false;
+  bool _prev_cycle_revolver_active=false;
+  bool _revolver_active=false;
+
+
+  //  std::map<LoopInfo*,std::pair<std::vector<BB*>,int> > revolver_prof_map;
+  std::unordered_map<LoopInfo*,int> _revolver_profit;
+  std::unordered_map<LoopInfo*,std::set<BB*>> _revolver_bbs;
+  std::set<BB*> _revolver_prev_trace;
+  LoopInfo* _cur_revolver_li=NULL;
+
+  //Runtime CPU States
+  bool _cpu_power_gated=false;
+
   //------- energy events -----------
   uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
   uint64_t committed_branch_insts=0, mispeculatedInstructions=0;
@@ -123,64 +140,135 @@ protected:
 
   virtual void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) = 0;
 
-
   //cur_fi will always be on
   //cur_li will either be null or have a loop
   FunctionInfo* cur_fi;
   LoopInfo* cur_li;
   int cur_is_acc;
 
-
-  class RegionEnergy {
+  class RegionStats {
   public:
     uint64_t cycles=0;
+    uint64_t insts=0;
+
     double total=0;
     bool in_accel=false;
     int on_id=0;
+    CumWeights cum_weights;
 
-    //breakdown, for fun
-    double core=0, icache=0, dcache=0, l2=0, tot_static=0, accel=0;
+    static double get_leakage(Component* comp, bool long_channel) {
+      return (long_channel?comp->power.readOp.longer_channel_leakage:
+              comp->power.readOp.leakage) + comp->power.readOp.gate_leakage;
+    }
 
-    void fill(uint64_t cycle_diff, PrismProcessor* mc_proc, double accel_en, int is_on) {
+    //breakdown
+    double core=0, icache=0, dcache=0, l2=0, itlb=0, dtlb=0,
+           stateful_core_static=0, nonstateful_core_static=0, cache_static=0, 
+           accel=0, accel_static=0;
+
+    void fill(uint64_t cycle_diff, uint64_t inst_diff, PrismProcessor* mc_proc, 
+              double accel_en, double accel_leakage_power,
+              int is_on, bool cpu_power_gated, bool revolver_active) {
       cycles+=cycle_diff;
+      insts+=inst_diff;
 
-      double dcache_en = mc_proc->cores[0]->lsu->dcache.rt_power.readOp.dynamic; //still energy
-      double icache_en = mc_proc->cores[0]->ifu->icache.rt_power.readOp.dynamic; //still energy
-      double core_en = (mc_proc->core.rt_power.readOp.dynamic - dcache_en -icache_en);
+      double dcache_en = mc_proc->cores[0]->lsu->dcache.rt_power.readOp.dynamic; //energy
+      double icache_en = mc_proc->cores[0]->ifu->icache.rt_power.readOp.dynamic; //energy
+
+      double dtlb_en = mc_proc->cores[0]->mmu->dtlb->rt_power.readOp.dynamic; //energy
+      double itlb_en = mc_proc->cores[0]->mmu->itlb->rt_power.readOp.dynamic; //energy
+
+      double core_en = mc_proc->core.rt_power.readOp.dynamic; //energy
+
+      //this contains the icache_en
+      double ifu_en = mc_proc->cores[0]->ifu->rt_power.readOp.dynamic; //energy
+
+      core_en = core_en - dcache_en - itlb_en - dtlb_en; //add back later
+
+      //adujust differently depending on whether core is active
+      if(revolver_active) {
+        icache_en = 0; //set to zero b/c we add it back later
+        core_en = core_en - ifu_en; //ifu is superset of icache
+      } else {
+        core_en = core_en - icache_en; //add back the icache_en later
+      }
+
       double l2_en =mc_proc->l2.rt_power.readOp.dynamic;
-
       double ex_freq = mc_proc->XML->sys.target_core_clockrate*1e6;
+      bool long_channel = mc_proc->XML->sys.longer_channel_device;
+      
+      double total_leakage_power = get_leakage(mc_proc,long_channel);
+//      double icache_leakage = get_leakage(&mc_proc->cores[0]->ifu->icache,long_channel);
+      double dcache_leakage = get_leakage(&mc_proc->cores[0]->lsu->dcache,long_channel);
+      double l2_leakage     = get_leakage(&mc_proc->l2,long_channel);
 
-    bool long_channel = mc_proc->XML->sys.longer_channel_device;
-      double leakage_power = ((long_channel?mc_proc->power.readOp.longer_channel_leakage:mc_proc->power.readOp.leakage) + mc_proc->power.readOp.gate_leakage);
-      double leakage_en = leakage_power*(cycle_diff/ex_freq);
+      double itlb_leakage    = get_leakage(mc_proc->cores[0]->mmu->itlb,long_channel);
+      double dtlb_leakage    = get_leakage(mc_proc->cores[0]->mmu->dtlb,long_channel);
+      double mmu_leakage     = itlb_leakage+dtlb_leakage;
 
+      double reg_leakage    = get_leakage(mc_proc->cores[0]->exu->rfu,long_channel);
+
+      double cache_leakage_power=dcache_leakage+l2_leakage;
+      double stateful_core_leakage_power=mmu_leakage+reg_leakage;
+
+      double nonstateful_core_leakage_power=total_leakage_power
+                                  -cache_leakage_power-stateful_core_leakage_power;
+
+      if(cpu_power_gated) {
+        nonstateful_core_leakage_power*=0.00; //TODO: WHAT IS THE RIGHT FACTOR TO KEEP?
+      } else {
+        nonstateful_core_leakage_power*=0.9; //TODO: WHAT IS THE RIGHT fudge factor?
+      }
+
+      double nonstateful_core_leakage_en = nonstateful_core_leakage_power*(cycle_diff/ex_freq);
+      double stateful_core_leakage_en = stateful_core_leakage_power*(cycle_diff/ex_freq);
+      double cache_leakage_en = cache_leakage_power*(cycle_diff/ex_freq);
+
+      double accel_leakage_en = 0;
       if(is_on!=0) {
         on_id=is_on;
+        accel_leakage_en = accel_leakage_power*(cycle_diff/ex_freq); //same freq
+      } else {
+        accel_en=0;
       }
 
       core+=core_en;
       icache+=icache_en;
       dcache+=dcache_en;
+      itlb+=itlb_en;
+      dtlb+=dtlb_en;
       l2+=l2_en;
       accel+=accel_en;
-      tot_static+=leakage_en;
+      accel_static+=accel_leakage_en;
+      stateful_core_static+=stateful_core_leakage_en;
+      nonstateful_core_static+=nonstateful_core_leakage_en;
+      cache_static+=cache_leakage_en;
 
-      total += core_en + icache_en + dcache_en+ l2_en+leakage_en+accel_en;
+      total += core_en + icache_en + dcache_en + itlb_en + dtlb_en + l2_en+
+        stateful_core_leakage_en+nonstateful_core_leakage_en+cache_leakage_en+
+        accel_en+accel_leakage_en;
     }
 
     static const int pc=8;
 
     static void printHeader(std::ostream& out) {
       out << std::setw(45) << "Func Name";
-      out << std::setw(9) << "Cycles" << " ";
-      out << std::setw(pc) << "Total"  << " ";
-      out << std::setw(pc) << "Static" << " ";
-      out << std::setw(pc) << "Core"   << " ";
-      out << std::setw(pc) << "Icache" << " ";
-      out << std::setw(pc) << "DCache" << " ";
-      out << std::setw(pc) << "Accel"  << " ";
-      out << std::setw(5) << "Acc?"  << " ";
+      out << std::setw(9)  << "Cycles"   << " ";
+      out << std::setw(10) << "O-Insts"  << " ";
+      out << std::setw(pc) << "O-IPC"    << " ";
+      out << std::setw(pc) << "Total"    << " ";
+      out << std::setw(pc) << "Lk_sCore" << " ";
+      out << std::setw(pc) << "Lk_oCore" << " ";
+      out << std::setw(pc) << "Lk_Cache" << " ";
+      out << std::setw(pc) << "Core"     << " ";
+      out << std::setw(pc) << "itlb"     << " ";
+      out << std::setw(pc) << "dtlb"     << " ";
+      out << std::setw(pc) << "Icache"   << " ";
+      out << std::setw(pc) << "DCache"   << " ";
+      out << std::setw(pc) << "L2"       << " ";
+      out << std::setw(pc) << "Accel"    << " ";
+      out << std::setw(pc) << "Lk_Accel" << " ";
+      out << std::setw(5)  << "Acc?"     << " ";
     }
 
     void printPower(double en, std::ostream& out, double ex_freq) {
@@ -195,34 +283,54 @@ protected:
 
     void print(std::string name, std::ostream& out, double ex_freq) {
       out << std::setw(45) << name << " ";
-      out << std::setw(9) << cycles  << " ";
+      out << std::setw(9)  << cycles  << " ";
+      out << std::setw(10) << insts  << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) 
+          << ((double)insts)/((double)cycles) << " ";
       printPower(total,out,ex_freq);
-      printPower(tot_static,out,ex_freq);
+      printPower(stateful_core_static,out,ex_freq);
+      printPower(nonstateful_core_static,out,ex_freq);
+      printPower(cache_static,out,ex_freq);
       printPower(core,out,ex_freq);
+      printPower(itlb,out,ex_freq);
+      printPower(dtlb,out,ex_freq);
       printPower(icache,out,ex_freq);
       printPower(dcache,out,ex_freq);
+      printPower(l2,out,ex_freq);
       printPower(accel,out,ex_freq);
+      printPower(accel_static,out,ex_freq);
       out << std::setw(5) << on_id << " ";
     }
 
-
-
   };
 
-  std::map<FunctionInfo*,RegionEnergy> cycleMapFunc;
-  std::map<LoopInfo*,    RegionEnergy> cycleMapLoop;
+  std::map<FunctionInfo*,RegionStats> cycleMapFunc;
+  std::map<LoopInfo*,    RegionStats> cycleMapLoop;
   BB* cur_bb;
 
-  uint64_t  cur_cycles=0;
+  CumWeights* curWeights() {
+    if(cur_li) {
+      return &cycleMapLoop[cur_li].cum_weights;
+    } else if(cur_fi) {
+      return &cycleMapFunc[cur_fi].cum_weights;
+    }
+    return NULL;
+  }
+
+  uint64_t  cur_cycles=0, cur_insts=0;
   //Update cycles spent in this config
 public:
-  virtual double accel_region_en() {return 0;}
+  virtual double accel_leakage()    {return 0;}
+  virtual double accel_region_en()  {return 0;}
 
   //Region Breakdown Thing
   virtual void update_cycles() {
     //get the current cycle
     uint64_t cycles=this->numCycles();
+    uint64_t insts =Prof::get().dId();
+
     uint64_t cycle_diff = cycles - cur_cycles;
+    uint64_t insts_diff = insts  - cur_insts;
 
     if(cycles < cur_cycles || cycles     >= cur_cycles+ ((uint64_t)-1)/2 
                            || cycle_diff >= ((uint64_t)-1)/2 ) {
@@ -235,12 +343,17 @@ public:
     pumpMcPAT(); // pump both models
 
     if(cur_li) {
-      cycleMapLoop[cur_li].fill(cycle_diff,mc_proc,accel_region_en(),cur_is_acc);
+      cycleMapLoop[cur_li].fill(cycle_diff,insts_diff,
+                                mc_proc,accel_region_en(),accel_leakage(),
+                                cur_is_acc,_cpu_power_gated,_prev_cycle_revolver_active);
     } else {
-      cycleMapFunc[cur_fi].fill(cycle_diff,mc_proc,accel_region_en(),cur_is_acc);
+      cycleMapFunc[cur_fi].fill(cycle_diff,insts_diff,
+                                mc_proc,accel_region_en(),accel_leakage(),
+                                cur_is_acc,_cpu_power_gated,_prev_cycle_revolver_active);
     }
 
     cur_cycles=cycles; //update cur cycles for next time
+    cur_insts=insts;
   }
 
   virtual void print_edge_weights(std::ostream& out, AnalysisType analType) { } 
@@ -274,7 +387,21 @@ public:
     return false;
   }
 
-  virtual void printAccelHeader(std::ostream& outs) {}
+  virtual void printAccelHeader(std::ostream& outs,bool hole) {}
+
+  void printCritAnal(CumWeights* cw, ostream& out) {
+    out << "Weighted:(";
+    cw->print_edge_weights(out,AnalysisType::Weighted);
+    out << ")";
+
+    out << "Unweighted:(";
+    cw->print_edge_weights(out,AnalysisType::Unweighted);
+    out << ")";
+    
+    out << "Offset:(";
+    cw->print_edge_weights(out,AnalysisType::Offset);
+    out << ")";
+  }
 
   virtual void printAccelRegionStats(int id, std::ostream& outs) {}
 
@@ -284,6 +411,8 @@ public:
 
     cycleMapLoop[li].print(quote_name,outf,ex_freq);
     printAccelRegionStats(cycleMapLoop[li].on_id,outf);
+    printCritAnal(&cycleMapLoop[li].cum_weights,outf);
+    outf << " "; Prof::get().print_loop_loc(outf,li);
     outf << "\n";
 
     for(auto i=li->iloop_begin(),e=li->iloop_end();i!=e;++i) {
@@ -293,8 +422,8 @@ public:
   }
 
   void printRegionBreakdown(std::ostream& outf) {
-    RegionEnergy::printHeader(outf);
-    printAccelHeader(outf);
+    RegionStats::printHeader(outf);
+    printAccelHeader(outf,false);
     outf<<"\n";
 
     double ex_freq = mc_proc->XML->sys.target_core_clockrate*1e6;  
@@ -304,6 +433,9 @@ public:
       FunctionInfo* fi = i->second;
       std::string quote_name = std::string("\"") + fi->nice_name() + std::string("\"");
       cycleMapFunc[fi].print(quote_name,outf,ex_freq);
+      printAccelHeader(outf,true);  //fills gap
+      printCritAnal(&cycleMapFunc[fi].cum_weights,outf);
+
       outf << "\n";
 
       /*
@@ -485,7 +617,7 @@ public:
 
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
 
-  virtual void setWidth(int i,bool scale_freq) {
+  virtual void setWidth(int i,bool scale_freq, bool revolver) {
     return;
   }
 

@@ -45,6 +45,7 @@ npu:
 
 clean_simple:
 	+make -C 
+	+make -C loopprof clean
 	+make -C critpath clean
 	+make -C critpath/simd clean
 	+make -C critpath/base clean
@@ -52,6 +53,9 @@ clean_simple:
 	+make -C critpath/ccores clean
 	+make -C critpath/beret clean
 	+make -C critpath/super clean
+	+make -C critpath/npu clean
+	+make -C critpath/nla clean
+	+make -C critpath -f Makefile.static clean
 
 clean:
 	+make -C critpath/mcpat clean

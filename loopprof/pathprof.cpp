@@ -4,9 +4,12 @@
 #include <unordered_set>
 using namespace std;
 
+// --------------------------------- Dur Histo -------------------------------
+std::vector<int> DurationHisto::sizes = {8,16,32,64,128,256,512,1024,2048,4096,8192,2147483647};
+
 // -------------------------------- StackFrame ---------------------------------
 
-Op* StackFrame::processOp_phase3(uint32_t dId, CPC cpc) {
+Op* StackFrame::processOp_phase3(uint32_t dId, CPC cpc,PathProf* prof, bool extra) {
   BB* newBB = _funcInfo->getBB(cpc);
 
   if(newBB==NULL && _prevBB==NULL) {
@@ -14,11 +17,12 @@ Op* StackFrame::processOp_phase3(uint32_t dId, CPC cpc) {
   }
 
   if(newBB!=NULL) {
-    processBB_phase2(dId, newBB,false); 
+    processBB_phase2(dId, newBB,(extra?2:0)/*which one?*/,prof); 
     //intentionally using phase 2, but do not profile again,
     //b/c this info is already saved.
     _prevBB=newBB;
   }
+
   Op* op = _prevBB->getOp(cpc);
   return op;
 }
@@ -85,7 +89,7 @@ Op* StackFrame::processOp_phase2(uint32_t dId, CPC cpc,
 
         if(error_pairs.count(pair)==0) {
           error_pairs.insert(pair);
-          cout << "HUGE PROBLEM -- EDGE NOT FOUND   (";
+          cout << "HUGE PROBLEM -- EDGE NOT FOUND in func: \"" << _funcInfo->nice_name() << "\"   (";
           if(!succfound) {
             cout << "no succ, ";
           }
@@ -213,33 +217,112 @@ void StackFrame::check_for_stack(Op* op, uint64_t dId, uint64_t addr, uint8_t ac
   }
 }
 
+void StackFrame::hot_trace_gran(uint64_t dId,PathProf* prof,bool loop_changed) {
+  if(_trace_duration &&
+      (loop_changed || _pathIndex!=_loopStack.back()->getHotPathIndex()) ) {
+    prof->_gran_duration[PathProf::ST_TRACE].addHist(_trace_duration, 
+                                                     _prev_trace_interval,
+                                                     false /*not considering inlining*/);
+    _trace_duration=0;
+  }
+  
+  if(!loop_changed && _loopStack.size() >0 && 
+     _pathIndex==_loopStack.back()->getHotPathIndex() && 
+     !_loopStack.back()->containsCallReturn() ) {
+    uint64_t trace_interval = dId-_trace_start;
+    assert(trace_interval < 100000);
+    _trace_duration += trace_interval;
+    _prev_trace_interval = trace_interval;
+  }
+
+  _trace_start=dId;
+}
+
+void StackFrame::checkLoopGranBegin(uint64_t dId, LoopInfo* li, PathProf* prof) {
+  if(_cur_i_iloop==NULL && li->is_revolverable() && li->isInnerLoop()  ) {
+    _cur_i_iloop=li;
+    _cur_i_iloop_start=dId;
+  }
+
+  for(int i : DurationHisto::sizes) {
+    //No-inlining case
+    {HistoItem& item = prof->_gran_duration[PathProf::ST_OLOOP].histo_map[i];
+    if(item.li==NULL && !li->containsCallReturn() && li->staticInsts() < item.size) {
+      item.li=li;
+      item.start=dId;
+    }}
+    //inline-away!
+    {HistoItem& itemi = prof->_gran_duration[PathProf::ST_OLOOP].histo_map_i[i];
+    if(itemi.li==NULL&& !li->cantFullyInline() && li->inlinedStaticInsts() < itemi.size){
+      itemi.li=li;
+      itemi.start=dId;
+    }}
+  }
+}
+
+void StackFrame::checkLoopGranComplete(uint64_t dId, LoopInfo* li, PathProf* prof) {
+  if(_cur_i_iloop==li) {
+    uint64_t duration = dId-_cur_i_iloop_start;
+    prof->_gran_duration[PathProf::ST_ILOOP].addHist(duration,li->inlinedStaticInsts(),li->containsCallReturn());
+    _cur_i_iloop=NULL;
+  }
+  for(int i : DurationHisto::sizes) {
+    {HistoItem& item = prof->_gran_duration[PathProf::ST_OLOOP].histo_map[i];
+    if(item.li == li) {
+      uint64_t duration = dId-item.start;
+      prof->_gran_duration[PathProf::ST_OLOOP].addSpecificHist(duration,item);
+      item.li=NULL;
+
+      if(item.size==256 && duration >= 16384) {
+        prof->longer_loops_d16384_s256[li]+=duration;
+      }
+    }}
+    {HistoItem& itemi = prof->_gran_duration[PathProf::ST_OLOOP].histo_map_i[i];
+    if(itemi.li == li) {
+      uint64_t duration = dId-itemi.start;
+      prof->_gran_duration[PathProf::ST_OLOOP].addSpecificHist(duration,itemi);
+      itemi.li=NULL;
+
+      if(itemi.size==256 && duration >= 16384) {
+        prof->longer_loops_d16384_s256_i[li]+=duration;
+      }
+    }}
+  }
+}
 
 //Determines current loop nests, and can profile iterations
-void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
-  bool stackChanged = false;
+void StackFrame::processBB_phase2(uint32_t dId, BB* bb, int profile, PathProf* prof) {
+  bool stackChanged = false, loopChanged=false;
 
   //check if we need to iter complete
   if(profile) {
     //only track paths for inner loops
     if(_loopStack.size() > 0 && _loopStack.back()->loop_head() == bb) {
-      _loopStack.back()->iterComplete(_pathIndex,_loopPath);
-    } 
-    for(auto i =_loopStack.begin(), e=_loopStack.end(); i!=e; ++i) {
-      LoopInfo* li = *i;
-      if(li->loop_head() == bb) {
-        li->incIter();
+      if(profile==1) {
+        _loopStack.back()->iterComplete(_pathIndex,_loopPath);
+      } else if(profile==2) {
+        hot_trace_gran(dId,prof,false);
       }
+    } 
+  }
+
+  for(auto i =_loopStack.begin(), e=_loopStack.end(); i!=e; ++i) {
+    LoopInfo* li = *i;
+    if(li->loop_head() == bb) {
+      li->incIter(profile==1);
     }
   }
  
   //now update the loop stack
   while(_loopStack.size()>0&&!_loopStack.back()->inLoop(bb)) {
-    if(profile) {
-      _loopStack.back()->endLoop();
+    _loopStack.back()->endLoop(profile==1);
+    if(profile==2) {
+      checkLoopGranComplete(dId,_loopStack.back(),prof);
     }
     _loopStack.pop_back();
     _iterStack.pop_back();  //get rid of iter too
     stackChanged=true;
+    loopChanged=true;
   }
  
   //now check if we need to push a loop
@@ -248,24 +331,33 @@ void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
     if(_loopStack.size() != 0 && _loopStack.back() == li) {
       _iterStack.pop_back();
     } else {
+      loopChanged=true;
       _loopStack.push_back(li);
-      if(profile) {
-        li->beginLoop();
+      li->beginLoop(profile==1);
+      if(profile==2) {
+        checkLoopGranBegin(dId,_loopStack.back(),prof);
       }
     }
     _iterStack.emplace_back(new LoopIter(_loopStack,_funcInfo->instance_num())); //this gets deconstructed in itermap, don't worry!
-    stackChanged=true;   
+    stackChanged=true; 
   }
 
   if(stackChanged) {
     //these aren't stack-ified yet because they don't work on non-inner loops anyways
     _loopPath.clear();
     _pathIndex=0; //going inside the loop should clear the path index
-    if(profile) {
+    if(profile==1) {
       _iterMap.emplace(std::piecewise_construct,
                        forward_as_tuple(dId),
                        forward_as_tuple(_iterStack.back())); 
     }
+    if(profile==2)
+     if(loopChanged) {
+      //_cur_trace_id=-1; //reset trace
+      hot_trace_gran(dId,prof,true);
+    }
+    _trace_start=dId;
+
   } else if( _loopStack.size() > 0) { //loop stack didn't change
     _pathIndex+=_loopStack.back()->weightOf(_loopPath.back(),bb);
   }
@@ -282,123 +374,6 @@ void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
   }
   
 }
-
-
-
-#if 0
-//Determines current loop nests, and can profile iterations
-void StackFrame::processBB_phase2(uint32_t dId, BB* bb, bool profile) {
-  LoopInfo* curLoop = NULL;
-  if(_loopStack.size() > 0) {
-    curLoop = _loopStack.back();
-  }
-
-  /*cout << bb->func()->nice_name() << ":  ";
-  cout << bb->rpoNum();
-  cout << " (" << _iterStack.size() << " " << _loopStack.size() << ")\n";*/
-
-
-  //Did we get a new loop head?
-  if(LoopInfo* li = _funcInfo->getLoop(bb)) {
-    //Different Loop?
-    if(curLoop!=li) { 
-      //cout << curLoop << " " << li << "\n";
-      if(curLoop && li->parentLoop()!=curLoop) {
-         //cout << "back to back ";
-
-        //when loops are butted up next to eachother, this shoud happen rarely
-        if(profile) {
-          _loopStack.back()->iterComplete(_pathIndex,_loopPath);
-          curLoop->endLoop();
-        }
-        _loopStack.pop_back();
-        _iterStack.pop_back();
-
-        assert(li->parentLoop()==NULL || 
-               li->parentLoop()==_loopStack.back()); //make sure we have right loop
-      }
-      /*cout << "inner loop! (";
-      cout << li->loop_head()->rpoNum() << ": ";
-      for(auto i = li->body_begin(), e = li->body_end();i!=e;++i) {
-        cout << (*i)->rpoNum() << " " ;
-      }
-      cout << ")\n";*/
-
-      //starting new loop, push it onto our stack
-      
-      _loopStack.push_back(li);
-      _iterStack.emplace_back(new LoopIter(_loopStack)); //this gets deconstructed in itermap, don't worry!
-      if(profile) {
-        li->beginLoop();
-      }
-
-
-      _iterMap.emplace(std::piecewise_construct,
-                       forward_as_tuple(dId),
-                       forward_as_tuple(_iterStack.back())); 
-                       //shared ptr now owns loopiter object
-      _loopPath.clear();
-      _pathIndex=0; //going inside the loop should clear the path index
-
-    } else {
-      //cout << " same loop! \n";
-      //Same Loop as top of stack, so all is good, but need to make new iter marker
-      if(profile) {
-        _loopStack.back()->iterComplete(_pathIndex,_loopPath);
-      }
-      _loopPath.clear();
-      _pathIndex=0;
-      _iterStack.pop_back();
-      _iterStack.emplace_back(new LoopIter(_loopStack)); 
-      _iterMap.emplace(std::piecewise_construct,
-                       forward_as_tuple(dId),
-                       forward_as_tuple(_iterStack.back()));
-    }
-
-  } else if(curLoop!=NULL) {
-    //_pathIndex+=//_loopPath.back()->weightOf(bb);
-
-    //If we are no longer in our loop, roll back stack
-    if(!curLoop->inLoop(bb)) {
-      //cout << "exit loop! \n";
-      //KNOWN_HOLE -- does not count loop exit paths
-
-      while(_loopStack.size()>0&&!_loopStack.back()->inLoop(bb)) {
-        if(profile) {
-          _loopStack.back()->endLoop();
-        }
-        _loopStack.pop_back();
-        _iterStack.pop_back();  //get rid of iter too
-      }
-      //place new marker
-      _iterMap.emplace(std::piecewise_construct,
-                         forward_as_tuple(dId),
-                         forward_as_tuple(_iterStack.back()));
-      _loopPath.clear();
-      _pathIndex=0;
-    }
-
-    if(_loopStack.size()>0) {
-      if(_loopPath.size()>0) {
-        _pathIndex+=_loopStack.back()->weightOf(_loopPath.back(),bb);
-      }
-    }
-  }
-
-  assert(_loopStack.size() < 20); // never seen any loop depths this big -- relax if not true
-
-  if(_loopStack.size()>0) {
-    _loopPath.push_back(bb);
-/*    if(_loopStack.back()->isLatch(bb)) {
-       _loopStack.back()->iterComplete(_pathIndex,_loopPath);
-       _loopPath.clear();
-       _pathIndex=0;
-       return;
-     }*/
-  }
-
-}
-#endif
 
 void StackFrame::dyn_dep(Op* dep_op, Op* op, 
                          uint64_t dep_dId, uint64_t dId, bool isMem) {
@@ -452,8 +427,10 @@ void StackFrame::dyn_dep(Op* dep_op, Op* op,
 FunctionInfo*  PathProf::getOrAddFunc(CPC newCPC) {
     FuncMap::iterator funcInfoIter = _funcMap.find(newCPC);
 
+
     if(funcInfoIter == _funcMap.end()) {
-      funcInfoIter = _funcMap.emplace(newCPC,new FunctionInfo(newCPC)).first;
+      FunctionInfo* func = new FunctionInfo(newCPC);
+      funcInfoIter = _funcMap.emplace(newCPC,func).first;
 
       if(sym_tab.size() > 0) {
         prof_symbol* sym= &((--sym_tab.upper_bound(newCPC.first))->second);//.get()
@@ -461,7 +438,50 @@ FunctionInfo*  PathProf::getOrAddFunc(CPC newCPC) {
           funcInfoIter->second->setSymbol(sym);
         }
       }
+
+      StaticFunction* sfunc = NULL;
+      if(static_cfg.static_funcs.count(newCPC.first)) {
+        sfunc = static_cfg.static_funcs[newCPC.first];
+      }
+      if(sfunc) {
+        //cout << func->nice_name() << " found!\n";
+        func->setPinInfo(sfunc->name, sfunc->filename, sfunc->line);
+
+        //Iterate through static function, and do build the initial BBs!
+        for(auto i=sfunc->static_bbs.begin(),e=sfunc->static_bbs.end();i!=e;++i) {
+          StaticBB* sbb = i->second;
+          CPC sbb_cpc = std::make_pair(sbb->head,0);
+          CPC sbb_cpc_t = std::make_pair(sbb->tail,0);
+   
+          BB* bb = func->addBB(NULL,sbb_cpc,sbb_cpc_t,false);
+          bb->set_line_number(sbb->line,sbb->srcno); 
+        }
+
+        for(auto i=sfunc->static_bbs.begin(),e=sfunc->static_bbs.end();i!=e;++i) {
+          StaticBB* sbb = i->second;
+          CPC sbb_cpc = std::make_pair(sbb->head,0);
+
+          //get this BB if we have it
+          BB* bb = func->bbOfCPC(sbb_cpc);
+          assert(bb);
+
+          //Iterate through next pointers, hook up BBs
+          for(auto ii=sbb->next_static_bb.begin(),
+                   ee=sbb->next_static_bb.end();ii!=ee;++ii) {
+            uint64_t next_bb_head = ii->first;
+            uint64_t next_bb_tail = ii->second;
+            CPC headCPC = std::make_pair(next_bb_head,0);
+            CPC tailCPC = std::make_pair(next_bb_tail,0);
+            func->addBB(bb,headCPC,tailCPC,false/*not dynamic*/);
+            //cout << "added bb\n";
+          }
+        }
+      } else {
+        //cout << func->nice_name() << " not found!\n";
+      }
+
     }
+
     return funcInfoIter->second;
 }
 
@@ -524,6 +544,7 @@ bool PathProf::adjustStack(CPC newCPC, bool isCall, bool isRet ) {
   }
 
   if(isRet) {
+    _callStack.back().returning(_dId,this);
     _callStack.pop_back();
     assert(_callStack.size()>0);
     return true;
@@ -549,6 +570,14 @@ void PathProf::processAddr(CPC cpc, uint64_t addr, bool is_load, bool is_store) 
       //cout << "const load candidate:" << cpc.first << "." << cpc.second << "\n";
     }
   }
+}
+
+bool PathProf::isBB(CPC cpc) {
+  FunctionInfo* fi = _callStack.back().funcInfo();
+  if(fi) {
+    return fi->bbOfCPC(cpc)!=0;
+  }
+  return false;
 }
 
 void PathProf::processOpPhase1(CPC prevCPC, CPC newCPC, bool isCall, bool isRet)
@@ -712,13 +741,13 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     }
 
     //NLA Scheduling
-//    if(!loopInfo->cantFullyInline()) {
+//    if(!loopInfo->cantFullyInline()) 
     if(!loopInfo->containsCallReturn()) {
-       if(size_based_cfus) {
-         worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams);
-       } else {
-         worked = loopInfo->scheduleNLA(&_beret_cfus, gams_details, no_gams);
-       }
+      if(size_based_cfus) {
+        worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams);
+      } else {
+        worked = loopInfo->scheduleNLA(&_beret_cfus, gams_details, no_gams);
+      }
 
       if(worked) {
         sched_stats << " -- NLA'D\n";
@@ -731,17 +760,18 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     } else {
       sched_stats << "\n";
     }
-
+  
     if(loopInfo->isInnerLoop() && !loopInfo->containsCallReturn()) {
       insts_in_simple_inner_loop += loopInfo->numInsts();
     }
     if(loopInfo->isInnerLoop()) {
       insts_in_inner_loop += loopInfo->numInsts();
     }
-
+  
     insts_in_all_loops += loopInfo->numInsts(); 
   }
-
+  cout << "\n";
+  
   std::multimap<uint64_t,FunctionInfo*> funcs;
   for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
@@ -751,7 +781,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     non_loop_insts_any_recursion += fi.nonLoopAnyRecInsts();
   }
   
-
+  
   std::ofstream func_stats;
   func_stats.open("stats/func-stats.out", std::ofstream::out | std::ofstream::trunc);
   func_stats << "Funcs by non-loop insts:\n";
@@ -759,7 +789,6 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     FunctionInfo* fi = I->second;
     func_stats << fi->nice_name() << " (" << fi->id() << "): " << fi->nonLoopInsts() << "\n";
   }
-
 }
 
 
@@ -882,7 +911,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
 Op* PathProf::processOpPhase3(CPC newCPC, bool wasCalled, bool wasReturned){
   adjustStack(newCPC,wasCalled,wasReturned);
   StackFrame& sf = _callStack.back();
-  Op* op = sf.processOp_phase3(_dId,newCPC);
+  Op* op = sf.processOp_phase3(_dId,newCPC,this,false/*don't do any extra profiling*/);
 
   if(op==NULL) {
     return NULL;
@@ -892,6 +921,21 @@ Op* PathProf::processOpPhase3(CPC newCPC, bool wasCalled, bool wasReturned){
   _dId++;
   return op;
 }
+
+Op* PathProf::processOpPhaseExtra(CPC newCPC, bool wasCalled, bool wasReturned){
+  adjustStack(newCPC,wasCalled,wasReturned);
+  StackFrame& sf = _callStack.back();
+  Op* op = sf.processOp_phase3(_dId,newCPC,this,true/*profile regions*/);
+
+  if(op==NULL) {
+    return NULL;
+  }
+
+  //  _op_buf[_dId%MAX_OPS]=op;
+  _dId++;
+  return op;
+}
+
 
 
 void PathProf::printInfo() {
@@ -905,18 +949,93 @@ void PathProf::printInfo() {
       BB& bb= *(ib->second);
       cout << "\tbasic block\t" << bb.head().first << " " << bb.head().second 
            << "(" << bb.freq() << ")\n";
-      
     }
-  } 
+  }
 }
 
+void PathProf::procStaticCFG(const char* filename) {
+  std::string line,tag,val,val2,val3,val4,garbage;
+  std::ifstream ifs(filename);
+
+  if(!ifs.good()) {
+    std::cerr << filename << " doesn't look good\n";
+    return;
+  }
+
+  std::unordered_map<uint64_t,StaticFunction*>& fmap = static_cfg.static_funcs;
+  StaticFunction* sfunc = NULL;
+
+  while(std::getline(ifs, line)) {
+
+    if(line.find("Section:") == 0 || line.empty()) {
+      continue; //do nothing
+    } else if(line.find("FNAME:")== 0) {
+      std::istringstream iss(line);
+      if( getToken(iss, tag,' ') && getToken(iss,val,'"') ) {
+        static_func_names.push_back(val);
+      } else {
+        cout << "fname line not parsable" << line << "\n";
+      }
+    } else if(line.find("Function:")== 0) {
+      std::istringstream iss(line);
+      uint64_t func_addr;
+      if( getToken(iss, tag,' ') && getToken(iss,val) && getToken(iss,val2,'"')
+          && getToken(iss,garbage,'"') 
+          && getToken(iss,val3,'"') && getToken(iss,val4)) {
+         func_addr = stoul(val,0,16);
+         sfunc=new StaticFunction();
+         sfunc->name=val2;
+         sfunc->filename=val3;
+         sfunc->line=stoul(val4);
+
+         fmap[func_addr]=sfunc;
+      } else {
+         cout << "line not parsable" << line << "\n";
+ //        cout << "got" << tag << "-" << val << "-" << val2 << "-" << garbage 
+ //                             << "-" << val3<< "-" << val4 << ";\n";
+         assert(0);
+      }
+
+    } else if(sfunc!=NULL) {
+      std::istringstream iss(line);
+      uint64_t bb_begin, bb_end;
+      int lineno,srcno;
+      getToken(iss, val2,',');
+      getToken(iss, val3,':');
+      getToken(iss, tag,'.');
+      getToken(iss, val,' ');
+
+      lineno    = std::stoul(val2);
+      srcno     = std::stoul(val3);
+      bb_begin = std::stoul(tag,0,16);
+      bb_end   = std::stoul(val,0,16);
+
+      StaticBB* sbb = new StaticBB(bb_begin,bb_end,lineno,srcno);
+      sfunc->static_bbs[bb_begin]=sbb;
+
+      //cout << "got BB: \"" << tag << " " << val << "\"\n";
+      getToken(iss, val2,'>');
+      //cout << "junk" << val2 << "\n";
+      
+      //iterate through rest of line to find BB successors    
+      while(getToken(iss, tag, '.') && getToken(iss, val, ',') ) {
+        //cout << tag << "|" << val << "\n";
+        uint64_t next_bb_begin = stoul(tag,0,16);
+        uint64_t next_bb_end =   stoul(val,0,16);
+        sbb->next_static_bb.insert(std::make_pair(next_bb_begin,next_bb_end));
+      } 
+    }
+  }
+
+
+}
 
 void PathProf::procConfigFile(const char* filename) {
   std::string line,tag,val;
   std::ifstream ifs(filename);
 
   if(!ifs.good()) {
-    std::cerr << filename << " doesn't look good";
+    std::cerr << filename << " doesn't look good\n";
     return;
   }
 
@@ -927,7 +1046,7 @@ void PathProf::procConfigFile(const char* filename) {
         if( getToken(iss, tag,'=') && getToken(iss,val) ) {
           getStat("cache_line_size",tag,val,cache_line_size);
         }
-      } 
+      }
     } else if(line.find("[system.cpu.dcache]")!= string::npos) {
       while(std::getline(ifs, line) && !line.empty()) {
         std::istringstream iss(line);
@@ -1170,7 +1289,7 @@ void PathProf::procStatsFile(const char* filename) {
   std::ifstream ifs(filename);
 
   if(!ifs.good()) {
-    std::cerr << filename << " doesn't look good";
+    std::cerr << filename << " doesn't look good\n";
     return;
   }
 
@@ -1290,7 +1409,7 @@ void PathProf::procStackFile(const char* filename) {
   std::ifstream ifs(filename);
 
   if(!ifs.good()) {
-    std::cerr << filename << " doesn't look good";
+    std::cerr << filename << " doesn't look good\n";
     return;
   }
 

@@ -429,9 +429,9 @@ private:
       int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod,true);
       getCPDG()->insert_edge(*inst, SuperInst::Complete,
                              *inst, SuperInst::Writeback, st_lat,true);
-      if(inst->_isload) {
-        checkNumMSHRs(inst);
-      }
+      //if(inst->_isload) { wtf
+      checkNumMSHRs(inst);
+      //}
     }
   }
 

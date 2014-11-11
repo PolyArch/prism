@@ -12,5 +12,6 @@ bool doLoopProfAnalysis(const char *fname,
                         bool no_gams,
                         bool gams_details,
                         uint64_t &count,
+                        bool extra_pass,
                         PathProf &pathProf);
 #endif

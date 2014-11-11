@@ -69,6 +69,7 @@ void Prof::init_from_trace(const char *trace_fname,
                           false, // no_gams
                           false, //gams_details
                           count,
+                          false, //extra pass
                           pathProf)) {
     std::cerr << "Error Opening file: " << trace_fname << "\n";
     exit(-1);
