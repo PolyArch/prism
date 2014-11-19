@@ -566,7 +566,8 @@ public:
   void processAddr(CPC cpc, uint64_t addr, bool is_load, bool is_store);
 
   void runAnalysis();
-  void runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus);
+  void runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus,
+                    uint64_t total_dyn_insts);
 
   void processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
                        CP_NodeDiskImage& img);

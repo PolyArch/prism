@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
   string binary_name;
 
   bool isStdOutTerminal = (ttyname(1) != 0);
-
+  int mem_ports=-1;
 
   //This needs to be here
   system("mkdir -p mcpat/");
@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
       {"mc-no-load", no_argument, 0,    11},
 
       {"revolver", no_argument, 0, 12},
-
+      {"memports", required_argument, 0, 14},
 
       {0,0,0,0}
     };
@@ -151,6 +151,9 @@ int main(int argc, char *argv[])
       break;
     case 12:
       revolver=true;
+      break;
+    case 14:
+      mem_ports=atoi(optarg);
       break;
     case 'b': binary_name = std::string(optarg); break;
     case 'e': elide_mem = true; break;
@@ -253,10 +256,10 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setDefaults();
 
   if(inorderWidth > 0) {
-    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,revolver);
+    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,revolver,mem_ports);
   }
   if(oooWidth > 0) {
-    CPRegistry::get()->setWidth(oooWidth, false,scale_freq,revolver);
+    CPRegistry::get()->setWidth(oooWidth, false,scale_freq,revolver,mem_ports);
   }
   CPRegistry::get()->setTraceOutputs(traceOutputs);
   CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat,elide_mem);

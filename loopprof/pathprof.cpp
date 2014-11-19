@@ -647,7 +647,8 @@ void PathProf::runAnalysis() {
   }
 }
 
-void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus) {
+void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfus,
+                            uint64_t total_dyn_insts) {
   for(auto i=_funcMap.begin(),e=_funcMap.end();i!=e;++i) {
     FunctionInfo& fi = *i->second;
     fi.calculatePDOM();
@@ -710,18 +711,20 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
        && hpi != -2 //no hot path
        && loopInfo->getLoopBackRatio(hpi) >= 0.7
        && loopInfo->getTotalIters() >= 10
+       && !loopInfo->containsCallReturn()
        ) {
       stringstream part_gams_str;
       part_gams_str << "partition." << loopInfo->id();
 
+      worked = false;
       if(size_based_cfus) {
-        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
-                   NULL,
-                   gams_details,no_gams);
+//        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+//                   NULL,
+//                   gams_details,no_gams);
       } else {
-        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
-                   &_beret_cfus,
-                   gams_details,no_gams);
+//        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+//                   &_beret_cfus,
+//                   gams_details,no_gams);
       }
       if(worked) {
         sched_stats << " -- Beretized";
@@ -741,17 +744,23 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     }
 
     //NLA Scheduling
-//    if(!loopInfo->cantFullyInline()) 
-    if(!loopInfo->containsCallReturn()) {
+    if(!loopInfo->cantFullyInline()) {
+//    if(!loopInfo->containsCallReturn()) {
+      bool attempted=false;
       if(size_based_cfus) {
-        worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams);
+        worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams, 
+                                       attempted, total_dyn_insts);
       } else {
-        worked = loopInfo->scheduleNLA(&_beret_cfus, gams_details, no_gams);
+        worked = loopInfo->scheduleNLA(&_beret_cfus, gams_details, no_gams,
+                                       attempted, total_dyn_insts);
       }
 
       if(worked) {
         sched_stats << " -- NLA'D\n";
-        cout << ",";
+        cout << loopInfo->id() << ",";
+      } else if(!attempted) {
+        sched_stats << " -- Skip NLAt\n";
+        cout << "s";      
       } else {
         sched_stats << " -- NOT NLA'd\n";
         cout << "z";

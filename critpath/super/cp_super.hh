@@ -376,7 +376,7 @@ private:
 
     if(n->_isload) {
       Op* op = n->_op; //break out if stack
-      if(op && _optimistic_stack && op->isStack()) {
+      if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
         //do nothing
       } else {
         checkNumMSHRs(n);
@@ -427,7 +427,7 @@ private:
 
 
     Op* op = inst->_op; //break out if stack
-    if(op && _optimistic_stack && op->isStack()) {
+    if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
       lat=0;
     }
 
@@ -499,14 +499,14 @@ private:
       int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod,true);
 
       Op* op = inst->_op; //break out if stack
-      if(op && _optimistic_stack && op->isStack()) {
+      if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
         st_lat=0;
       }
 
       getCPDG()->insert_edge(*inst, SuperInst::Complete,
                              *inst, SuperInst::Writeback, st_lat, E_WB);
 
-      if(op && _optimistic_stack && op->isStack()) {
+      if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
        //do nothing
       } else {
         checkNumMSHRs(inst);

@@ -169,6 +169,9 @@ public:
   uint32_t id() {return _id;}
   int nBBs() {return _bbMap.size();}
 
+  void inlinedBBs(std::set<FunctionInfo*>& funcsSeen, std::vector<BB*>& bbs);
+
+
   BB* bbOfCPC(CPC cpc) {
     if(_bbMap.count(cpc)) {
       return _bbMap[cpc];

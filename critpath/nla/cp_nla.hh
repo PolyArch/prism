@@ -338,6 +338,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
            (running_avg_cycles[li] > _power_gating_factor * _cpu_wakeup_cycles);
   } 
  
+//  LoopInfo* debug_old_li=NULL;
 
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
@@ -346,6 +347,17 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     FunctionInfo* f = bb->func();        
 
     unsigned old_nla_state=nla_state; 
+
+
+//    LoopInfo* debug_new_li = f->innermostLoopFor(op->bb());
+//    if(debug_new_li!=debug_old_li) {
+//      if(debug_new_li) {
+//        cout << debug_new_li->id() << "\n";
+//      } else {
+//        cout << f->nice_name() << "\n";
+//      }
+//    }
+//    debug_old_li=debug_new_li;
 
     // --------------------------------------------------------------------------
     // --------------------------- Decide whether to NLA? -----------------------
@@ -360,6 +372,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           std::shared_ptr<Inst_t> prevInst = getCPDG()->peekPipe_sh(-1);
 
           if(li &&  li->hasSubgraphs(true) && prevInst) {
+            //cout << "entering: " << li->nice_name_full() 
+            //  << " " << li->sgSchedNLA().numSubgraphs() << "\n";
+
             setupCFUs(li->sgSchedNLA().cfu_set());
             nla_state=NLA;
 
@@ -435,8 +450,17 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             }
           }
 
+          FunctionInfo* program_fi = op->func();
+          bool transitioned=false;
+
+          if(program_fi==li->func()) {       //if in original function
+            transitioned = !li->inLoop(bb);  //transition out if not in loop
+          } else {                                                //else, transition
+            transitioned = !li->sgSchedNLA().inFuncs(program_fi); //if not in funcs
+          }
+
           Op* prev_op = _prev_op; //cp_dg_builder manages
-          if(bb->pred_size()==0 || fall_through==false || !li->inLoop(bb)
+          if(bb->pred_size()==0 || fall_through==false || transitioned
              ||   (prev_op && (
              prev_op->isCondCtrl() || prev_op->isIndirectCtrl() || 
              prev_op->isCall() || prev_op->isReturn() || 
@@ -452,7 +476,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             }
           }
 
-          if(!li->inLoop(bb)) {
+          if(transitioned) {
+            //cout << "leaving: " << li->nice_name_full()  << "\n";
             //need to connect bb up
             nla_state=CPU;
             nlaEndEv=prevNLAInst->endCFU();
@@ -540,14 +565,14 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         //cout << "                   iter " << iter << "\n";
         nla_inst->iter=iter;
 
-        //find loop lateches
-        
-        if(op->bb()->lastOp() == op) {
-          LoopInfo* li = op->func()->innermostLoopFor(op->bb());
-          if(li->isLatch(op->bb())) {
-            
-          }
-        }
+        //find loop lateches -- this currently segfaults!
+        // innermostLoopFor can't be gauranteed not to fail
+        //if(op->bb()->lastOp() == op) {
+        //  LoopInfo* li = op->func()->innermostLoopFor(op->bb());
+        //  if(li->isLatch(op->bb())) {
+        //    
+        //  }
+        //}
 
         //figure out which BBs this triggers.
         if(prevNLAInst) {
@@ -596,7 +621,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         int st_lat=stLat(img._xc-img._wc,img._cache_prod,
                          img._true_cache_prod,true/*is accelerated*/);
 
-        if(op && _optimistic_stack && op->isStack()) {
+        if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
           lat=0;
           st_lat=0;
         }
@@ -769,6 +794,8 @@ private:
           if(ctrl_inst_map.count(bb)) {
             getCPDG()->insert_edge(*ctrl_inst_map[bb], NLAInst::Complete,
                                                  *sg->startCFU, 0,E_NCTL);
+          } else if(ctrl_event) {
+             getCPDG()->insert_edge(*ctrl_event, *sg->startCFU, 0, E_NCTL);
           }
         } else {
           if(ctrl_event) {
@@ -791,7 +818,7 @@ private:
         std::shared_ptr<NLAInst> nla_inst = sg->insts.begin()->lock();
         LoopInfo* new_li = nla_inst->_op->func()->innermostLoopFor(nla_inst->_op->bb());
 
-        if(old_li!=new_li) {                     //TODO: change to fwd
+        if(old_li && new_li && old_li!=new_li) {                     //TODO: change to fwd
           getCPDG()->insert_edge(*prev_ctrl_inst,NLAInst::Complete,
                                  *sg->startCFU, 0, E_NSLP);  
          
@@ -816,14 +843,16 @@ private:
       LoopInfo* cur_li = 
         begin_nla_inst->_op->func()->innermostLoopFor(begin_nla_inst->_op->bb());
 
-      if(iter>=iter_dist) {
-        std::shared_ptr<DynSubgraph> holdup_sg = 
-          _lastOp[cur_li][ (iter-iter_dist+1)%(iter_dist) ];
-        
-        getCPDG()->insert_edge(*holdup_sg->endCFU,
-                               *sg->startCFU, 0, E_NITR);   
+      if(cur_li) {
+        if(iter>=iter_dist) {
+          std::shared_ptr<DynSubgraph> holdup_sg = 
+            _lastOp[cur_li][ (iter-iter_dist+1)%(iter_dist) ];
+          
+          getCPDG()->insert_edge(*holdup_sg->endCFU,
+                                 *sg->startCFU, 0, E_NITR);   
+        }
       }
-
+  
       //Check LSQ Size
       for(auto &inst : sg->insts) {
         std::shared_ptr<NLAInst> nla_inst = inst.lock();
@@ -1043,8 +1072,8 @@ private:
   virtual void checkNumMSHRs(std::shared_ptr<NLAInst>& n, uint64_t minT=0) {
     int ep_lat=n->ex_lat();
    
-    Op* op = n->_op; //break out if stack
-    if(op && _optimistic_stack && op->isStack()) {
+    Op* op = n->_op; //break out if stack -- don't count in energy
+    if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
       return;
     }
 

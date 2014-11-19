@@ -37,7 +37,7 @@ void Subgraph::checkVec() {
 uint32_t LoopInfo::_idcounter=1;
 
 #define MAX_GAMS_SIZE 100
-#define DONT_EVEN_TRY_GAMS_SIZE 500
+#define DONT_EVEN_TRY_GAMS_SIZE 1024
 
 void LoopInfo::build_rpo() {
   BB* bb=_head;
@@ -892,10 +892,12 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename, CFU_set* cfu_set,
 
 
 bool LoopInfo::scheduleNLA(CFU_set* cfu_set,   
-                 bool gams_details, bool no_gams) { 
+                 bool gams_details, bool no_gams,
+                 bool& attempted, uint64_t max_insts) { 
    _sgSchedNLA.reset();
    _sgSchedNLA.setCFUSet(cfu_set);
-  return scheduleNLA(cfu_set, _sgSchedNLA, gams_details, no_gams);
+  return scheduleNLA(cfu_set, _sgSchedNLA, gams_details, no_gams,
+                     attempted, max_insts);
 }
 
 
@@ -903,15 +905,53 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
 /* This algo Searches chunks up the outer loop into peices, and and schedules
  * each one at a time.  This will create a bunch of BBs
  */
-bool LoopInfo::scheduleNLA(CFU_set* cfu_set,   
-                 SGSched& sgSched,
-                 bool gams_details,
-                 bool no_gams) { 
+bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
+                 bool gams_details, bool no_gams, 
+                 bool& attempted, uint64_t max_insts) { 
   //Find successive basic blocks, throw those at the gams scheduler
-  BBvec curVec;
+  BBvec curVec,totalVec;
   int piece=0;
 
+  uint64_t total_dyn = totalDynamicInlinedInsts();
+  uint64_t total_static = inlinedStaticInsts();
+
+  if(total_dyn <1024 || ((double)total_dyn)/((double)max_insts) < 0.00005 ||
+     total_static *20 > total_dyn) {
+    sgSched.reset();
+    return false; //skip if any are true
+  }
+
   for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii, ++piece) {
+    BB* bb = *ii;  
+    totalVec.push_back(bb);
+  }
+
+  std::set<FunctionInfo*> funcsSeen;
+  //funcsSeen.insert(func()); hopefully shouldn't see myself
+
+  if(containsCallReturn()) {
+    if(inlinedStaticInsts() < 1536) { //little more than we want, fudge for removed ops
+//      uint64_t my_dyn = numInsts();
+//      if(((double)my_dyn)/((double)total_dyn) < 0.1 ){
+//        sgSched.reset();
+//        return false; //skip if adding outer loop doesn't matter much
+//      }
+  
+      std::cout << "b";
+      for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+        FunctionInfo* fi = i->first.second;
+        fi->inlinedBBs(funcsSeen,totalVec);
+      }
+    } else {
+      sgSched.reset();
+      return false;
+    }
+  }
+
+  sgSched.setFuncs(funcsSeen);
+  attempted=true;
+  //for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii, ++piece) {
+  for(auto ii=totalVec.begin(),ee=totalVec.end();ii!=ee;++ii, ++piece) {
     BB* bb = *ii;  
 
     curVec.push_back(bb);
@@ -954,7 +994,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     //check max size of bb()
     for(auto const& bb : bbVec) {
       if(bb->len() > DONT_EVEN_TRY_GAMS_SIZE) {
-        //std::cerr << "bb too big for cfu scheduling!\n";
+        std::cerr << "bb too big for cfu scheduling!\n";
         return false;
       }
     }
@@ -978,6 +1018,11 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
           //std::cout << "aux scheduling, len:" << cursize << "\n";
           worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
                              gams_details, no_gams, max_beret_size, max_mem_ops);
+
+          if(!worked) {
+            std::cerr << "failed 1!\n";
+          }
+
           cursize=0;
           newBBVec.clear();
         }
@@ -990,6 +1035,10 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       //std::cout << "aux scheduling, len:" << cursize << "\n";
       worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
                                           gams_details, no_gams, max_beret_size, max_mem_ops);
+
+          if(!worked) {
+            std::cerr << "failed 2!\n";
+          }
 
       return worked; //recursively done!  (cheap hack, but w/e)
     }
@@ -1048,10 +1097,10 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     return true; //nothing to schedule
   }
 
-  if(setContainsCallReturn(opSet)) {
+/*  if(setContainsCallReturn(opSet)) {
     //if loop contains call, don't perform subgraph matching...
     return false;
-  }
+  }*/
 
   std::ofstream out((string("gams/") + filename).c_str()); 
   out << ss.str();

@@ -450,7 +450,7 @@ public:
       } else if (sh_inst->_opclass==2) {
         _ccores_mult_ops++;
       } else {
-        _ccores_int_ops++;
+        _ccores_int_ops++; //TODO: FIX!
       }
 
       //final stage add here

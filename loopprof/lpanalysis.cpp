@@ -122,7 +122,7 @@ bool doLoopProfAnalysis(const char *trace_fname,
     if (pass == 1) {
       pathProf.runAnalysis();
     } else if (pass == 2) {
-      pathProf.runAnalysis2(no_gams, gams_details, size_based_cfus);
+      pathProf.runAnalysis2(no_gams, gams_details, size_based_cfus, count);
     }
     inf.close();
   }

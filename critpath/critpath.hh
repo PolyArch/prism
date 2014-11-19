@@ -146,10 +146,24 @@ protected:
   LoopInfo* cur_li;
   int cur_is_acc;
 
+  uint64_t n_br=0;
+  uint64_t n_br_miss=0;
+  uint64_t n_mem=0;
+  uint64_t n_flt=0;
+  uint64_t n_l1_miss=0;
+  uint64_t n_l2_miss=0; 
+
   class RegionStats {
   public:
     uint64_t cycles=0;
     uint64_t insts=0;
+
+    uint64_t m_br=0;
+    uint64_t m_br_miss=0;
+    uint64_t m_mem=0;
+    uint64_t m_flt=0;
+    uint64_t m_l1_miss=0;
+    uint64_t m_l2_miss=0; 
 
     double total=0;
     bool in_accel=false;
@@ -167,10 +181,19 @@ protected:
            accel=0, accel_static=0;
 
     void fill(uint64_t cycle_diff, uint64_t inst_diff, PrismProcessor* mc_proc, 
+              uint64_t br, uint64_t br_miss, uint64_t flt,
+              uint64_t mem, uint64_t l1_miss, uint64_t l2_miss,
               double accel_en, double accel_leakage_power,
               int is_on, bool cpu_power_gated, bool revolver_active) {
       cycles+=cycle_diff;
       insts+=inst_diff;
+
+      m_br+=br;
+      m_br_miss+=br_miss;
+      m_mem+=mem;
+      m_flt+=flt;
+      m_l1_miss+=l1_miss;
+      m_l2_miss+=l2_miss;
 
       double dcache_en = mc_proc->cores[0]->lsu->dcache.rt_power.readOp.dynamic; //energy
       double icache_en = mc_proc->cores[0]->ifu->icache.rt_power.readOp.dynamic; //energy
@@ -256,6 +279,14 @@ protected:
       out << std::setw(9)  << "Cycles"   << " ";
       out << std::setw(10) << "O-Insts"  << " ";
       out << std::setw(pc) << "O-IPC"    << " ";
+
+      out << std::setw(pc) << "perBr"    << " ";
+      out << std::setw(pc) << "perBrMs"  << " ";
+      out << std::setw(pc) << "perFlt"   << " ";
+      out << std::setw(pc) << "perMem"   << " ";
+      out << std::setw(pc) << "perL1Ms"  << " ";
+      out << std::setw(pc) << "perL2Ms"  << " ";
+
       out << std::setw(pc) << "Total"    << " ";
       out << std::setw(pc) << "Lk_sCore" << " ";
       out << std::setw(pc) << "Lk_oCore" << " ";
@@ -281,12 +312,27 @@ protected:
       }
     }
 
+    //safe ration
+    static double sr(double d1, double d2) {
+      double value =d1/d2;
+      if(value!=value) {
+        return 0;
+      }
+      return value;
+    }
+
     void print(std::string name, std::ostream& out, double ex_freq) {
       out << std::setw(45) << name << " ";
       out << std::setw(9)  << cycles  << " ";
       out << std::setw(10) << insts  << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) 
-          << ((double)insts)/((double)cycles) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(insts,cycles) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_br,insts) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_br_miss,m_br) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_flt,insts) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_mem,insts) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_l1_miss,m_mem) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_l2_miss,m_mem) << " ";
+
       printPower(total,out,ex_freq);
       printPower(stateful_core_static,out,ex_freq);
       printPower(nonstateful_core_static,out,ex_freq);
@@ -343,15 +389,23 @@ public:
     pumpMcPAT(); // pump both models
 
     if(cur_li) {
-      cycleMapLoop[cur_li].fill(cycle_diff,insts_diff,
-                                mc_proc,accel_region_en(),accel_leakage(),
+      cycleMapLoop[cur_li].fill(cycle_diff,insts_diff,mc_proc,
+                                n_br,  n_br_miss, n_flt, n_mem, n_l1_miss, n_l2_miss,
+                                accel_region_en(),accel_leakage(),
                                 cur_is_acc,_cpu_power_gated,_prev_cycle_revolver_active);
     } else {
-      cycleMapFunc[cur_fi].fill(cycle_diff,insts_diff,
-                                mc_proc,accel_region_en(),accel_leakage(),
+      cycleMapFunc[cur_fi].fill(cycle_diff,insts_diff,mc_proc,
+                                n_br,  n_br_miss, n_flt, n_mem, n_l1_miss, n_l2_miss,
+                                accel_region_en(),accel_leakage(),
                                 cur_is_acc,_cpu_power_gated,_prev_cycle_revolver_active);
     }
 
+    n_br=0;
+    n_br_miss=0;
+    n_mem=0;
+    n_flt=0;
+    n_l1_miss=0;
+    n_l2_miss=0;
     cur_cycles=cycles; //update cur cycles for next time
     cur_insts=insts;
   }
@@ -617,13 +671,25 @@ public:
 
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
 
-  virtual void setWidth(int i,bool scale_freq, bool revolver) {
+  virtual void setWidth(int i,bool scale_freq, bool revolver, int mem_ports) {
     return;
   }
 
   virtual void insert(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     insert_inst(img,index,op);
     _last_index=index;
+    
+    n_br+=img._isctrl;
+    n_br_miss+=img._ctrl_miss;
+    n_flt+=img._floating;
+    n_mem += img._isload;
+    n_mem += img._isstore;
+    if(img._miss_level>=1) {
+      n_l1_miss++;
+    } 
+    if(img._miss_level>=2) {
+      n_l2_miss++;
+    } 
     if(out.good()) {
       traceOut(index, img, op);
     }
@@ -746,7 +812,6 @@ public:
 
     sa(system_node,"core_tech_node",nm);
     sa(system_node,"target_core_clockrate",CORE_CLOCK);
-
 
     //base stuff
     sa(system_node,"total_cycles",Prof::get().numCycles);

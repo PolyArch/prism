@@ -48,7 +48,7 @@ public:
 
   virtual ~CP_DG_Builder() {}
 
-  virtual void setWidth(int i,bool scale_freq,bool revolver) {
+  virtual void setWidth(int i,bool scale_freq,bool revolver,int mem_ports) {
     _enable_revolver=revolver;
 
     FETCH_WIDTH = i;
@@ -193,6 +193,10 @@ public:
       PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
     }
 
+    if(mem_ports!=-1) {
+      RW_PORTS=mem_ports;
+      cout << "Override RW_PORTS: " << mem_ports << "\n";
+    }
     //IBUF_SIZE=FETCH_TO_DISPATCH_STAGES * ISSUE_WIDTH;
   }
 
@@ -1919,7 +1923,7 @@ protected:
       int_ops++;
       return;
     case 2: //IntMult
-      int_ops++;
+      int_ops++; //TODO: FIXME: delete
       mult_ops++;
       return;
     case 3: //IntDiv
@@ -2831,16 +2835,48 @@ protected:
     //sa(icache_node,"conflicts",Prof::get().icacheReplacements);
   }
 
+//    if(op->isFloating()) {
+//      fp_ops++;
+//    } else if (op->opclass()==2) {
+//      int_ops++; //TODO:FIXME: DELETE
+//      mult_ops++;
+//    } else {
+//      int_ops++; 
+//    }
+
   virtual void countOpEnergy(Op*op,
       uint64_t& fp_ops, uint64_t& mult_ops, uint64_t& int_ops) {
-    if(op->isFloating()) {
-      fp_ops++;
-    } else if (op->opclass()==2) {
-      int_ops++;
-      mult_ops++;
-    } else {
-      int_ops++;
+    if(op->isCtrl()) {
+      return;
+    } 
+
+    switch(op->opclass()) {
+      case 0: //No_OpClass
+        return;
+      case 1: //IntALU
+        int_ops++;
+        return;
+      case 2: //IntMult
+        mult_ops++;
+        return;
+      case 3: //IntDiv
+        int_ops++;
+        return;
+  
+      case 4: //FloatAdd
+      case 5: //FloatCmp
+      case 6: //FloatCvt
+      case 7: //FloatMult
+      case 8: //FloatDiv
+      case 9: //FloatSqrt
+        fp_ops++;
+        return;
+  
+      default:
+        return;
     }
+    assert(0);
+    //TODO: Div operations?
   }
 
   virtual void countAccelSGRegEnergy(Op* op, Subgraph* sg, std::set<Op*>& opset,

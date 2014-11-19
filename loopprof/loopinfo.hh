@@ -86,6 +86,7 @@ public:
   std::map<Op*,Subgraph*> _opSubgraphMap;
   CFU_set* _cfu_set = NULL;
   std::set<Op*> _opset;
+  std::set<FunctionInfo*> _funcs;
 
   std::vector<int> _cfu_util;
   int _total_util=0;
@@ -117,6 +118,7 @@ template<class Archive>
     ar & _opSubgraphMap;
     ar & _opset;
     ar & _cfu_set;
+    ar & _funcs;
     calc_set();
   }
 
@@ -131,9 +133,13 @@ template<class Archive>
   int maxUtil()     {return _total_util;}
   int utilOf(int i) {return _cfu_util[i];}
 
+  void setFuncs(std::set<FunctionInfo*> funcs) {_funcs=funcs;}
+  bool inFuncs(FunctionInfo* func) {return _funcs.count(func);}
+
   void reset() {
     _subgraphSet.clear();
     _subgraphVec.clear();
+    _funcs.clear();
   }
 
   Subgraph* subgraphOfOp(Op* op) {
@@ -516,8 +522,10 @@ public:
   }
 
 
-  bool scheduleNLA(CFU_set* cfu_set, bool gams_details, bool no_gams); 
-  bool scheduleNLA(CFU_set* cfu_set, SGSched& sg, bool gams_details, bool no_gams);
+  bool scheduleNLA(CFU_set* cfu_set, bool gams_details, bool no_gams,
+                   bool& attempted, uint64_t max_insts=10000); 
+  bool scheduleNLA(CFU_set* cfu_set, SGSched& sg, bool gams_details, 
+                   bool no_gams, bool& attempted, uint64_t max_insts=10000);
 
 
   void printSubgraphDot(std::ostream& out, 

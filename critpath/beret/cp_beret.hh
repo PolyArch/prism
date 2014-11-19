@@ -225,6 +225,7 @@ public:
          && loopInfo->getLoopBackRatio(hpi) >= 0.7
          && loopInfo->getTotalIters() >= 2
          && loopInfo->instsOnPath(hpi) <= (int)_beret_max_ops
+         && !loopInfo->containsCallReturn()
          ) {
         std::stringstream part_gams_str;
         part_gams_str << _run_name << "partition." << loopInfo->id();

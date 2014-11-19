@@ -8,6 +8,22 @@ using namespace std;
 
 uint32_t FunctionInfo::_idcounter=1;
 
+void FunctionInfo::inlinedBBs(std::set<FunctionInfo*>& funcsSeen,
+                              std::vector<BB*>& bbs) {
+  if(funcsSeen.count(this)) {
+    return;
+  }
+  funcsSeen.insert(this);
+  for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii) {
+    BB* bb = *ii;
+    bbs.push_back(bb);
+  }
+  for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+    FunctionInfo* fi = i->first.second;
+    fi->inlinedBBs(funcsSeen,bbs);
+  }
+}
+
 bool FunctionInfo::no_loops_in_inlined_callgraph() {
   if(cantFullyInline()) {
     return false; //zero means recursive
