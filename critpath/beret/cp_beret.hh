@@ -702,7 +702,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     switch(beret_state) {
       case CPU: {
         //base cpu model
-        InstPtr sh_inst = createInst(img,index,op);
+        InstPtr sh_inst = createInst(img,index,op,false);
         getCPDG()->addInst(sh_inst,index);
         if(beretEndEv) {
           getCPDG()->insert_edge(*beretEndEv,

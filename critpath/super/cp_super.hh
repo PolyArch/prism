@@ -157,9 +157,17 @@ public:
   }
 
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
+    if(op &&( op->shouldIgnoreInAccel() || op->plainMove())) {
+//      getCPDG()->insert_edge(*inst, SuperInst::Execute,
+ //                          *inst, SuperInst::Complete, 0, E_EP);
+      createDummy(img,index,op);
+      return;      
+    }
+
     SuperInst* inst = new SuperInst(img,index,op);
     std::shared_ptr<SuperInst> sh_inst(inst);
     getCPDG()->addInst(sh_inst,index);
+
   /*  
     if(op->isBBHead() || op->isMem()) {
       //only one memory instruction per basic block
@@ -177,6 +185,8 @@ public:
     if(max_cycle < last_cycle) {
       max_cycle = last_cycle;
     }
+
+    keepTrackOfInstOpMap(sh_inst,op); 
   }
 
 private:
@@ -185,6 +195,7 @@ private:
 
   uint64_t _super_int_ops=0,    _super_fp_ops=0,    _super_mult_ops=0;
   uint64_t _super_int_ops_acc=0,_super_fp_ops_acc=0,_super_mult_ops_acc=0;
+  bool  _optimistic_stack=true;      //optimistic stack
 
   std::shared_ptr<SuperInst> ctrl_inst;
   std::shared_ptr<SuperInst> prev_inst;
@@ -192,11 +203,11 @@ private:
   std::unordered_map<BB*, std::shared_ptr<SuperInst>> ctrl_inst_map;
 
 
-  virtual void addDeps(std::shared_ptr<SuperInst>& inst,const CP_NodeDiskImage &img) { 
-    //setBBReadyCycle_cc(inst,img);
+  virtual void addDeps(std::shared_ptr<SuperInst>& inst,const CP_NodeDiskImage &img) {     
     setExecuteCycle_s(inst);
     setCompleteCycle_s(inst);
     setWritebackCycle_s(inst);
+    
   }
 
 #if 0
@@ -225,8 +236,53 @@ private:
       if (prod <= 0 || prod >= n->index()) {
         continue;
       }
-      getCPDG()->insert_edge(n->index()-prod, SuperInst::Complete,
-                             *n, SuperInst::Execute, 0, true);
+
+      dg_inst_base<T,E>* orig_depInst=&(getCPDG()->queryNodes(n->index()-prod));
+
+      bool out_of_bounds=false, error=false;
+      dg_inst_base<T,E>* depInst = fixDummyInstruction(orig_depInst,out_of_bounds,error); //FTFY! : )
+//      if(error && error_with_dummy_inst==false) {
+ //       error_with_dummy_inst=true;
+  //      std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << op->id() << "\n";
+  //    }
+      if(out_of_bounds) {
+        continue;
+      }
+
+
+      //BaseInst_t& depInst = getCPDG()->queryNodes(n->index()-prod);
+      unsigned dep_lat=0;
+
+      Op*  op  = n->_op;
+      Op* dop = depInst->_op;
+      if(op && dop) {
+        FunctionInfo* fi=op->func();
+        if(_dataflow_no_spec) {
+          if(fi != dop->func()) {
+            dep_lat=1;
+          } else if((op->bb() == dop->bb() &&
+                     op->bb_pos() > dop->bb_pos()) || 
+                    (op->numDepOpsAtIndex(i) <= 1 &&  
+                    fi->dominates(op->bb(),dop->bb())) ) {
+            dep_lat=0;
+          } else {
+            dep_lat=1;
+          }
+        } else if (_no_speculation) {
+          if(fi != dop->func()) {
+            dep_lat=1;
+          } else if(op->bb() == dop->bb() &&
+                    op->bb_pos() > dop->bb_pos()) { 
+  
+            dep_lat=0;
+          } else {
+            dep_lat=1;
+          }
+        }
+      }
+
+      getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
+                             *n, SuperInst::Execute, dep_lat, E_RDep);
     }
     //memory dependence
     if (n->_mem_prod > 0 && n->_mem_prod < n->index()) {
@@ -236,15 +292,15 @@ private:
       if (prev_node._isstore && n->_isload) {
         //data dependence
         getCPDG()->insert_edge(prev_node.index(), SuperInst::Complete,
-                                  *n, SuperInst::Execute, 0, true);
+                                  *n, SuperInst::Execute, 0, E_MDep);
       } else if (prev_node._isstore && n->_isstore) {
         //anti dependence (output-dep)
         getCPDG()->insert_edge(prev_node.index(), SuperInst::Complete,
-                                  *n, SuperInst::Execute, 0, true);
+                                  *n, SuperInst::Execute, 0, E_MDep);
       } else if (prev_node._isload && n->_isstore) {
         //anti dependence (load-store)
         getCPDG()->insert_edge(prev_node.index(), SuperInst::Complete,
-                                  *n, SuperInst::Execute, 0, true);
+                                  *n, SuperInst::Execute, 0, E_MDep);
       }
     }
 
@@ -318,9 +374,13 @@ private:
       checkFuncUnits(n);
     }
 
-    //memory dependence
     if(n->_isload) {
-      checkNumMSHRs(n);
+      Op* op = n->_op; //break out if stack
+      if(op && _optimistic_stack && op->isStack()) {
+        //do nothing
+      } else {
+        checkNumMSHRs(n);
+      }
     }
   }
 
@@ -365,8 +425,14 @@ private:
     int lat=epLat(inst->_ex_lat,inst.get(),inst->_isload,
                   inst->_isstore,inst->_cache_prod,inst->_true_cache_prod,true);
 
+
+    Op* op = inst->_op; //break out if stack
+    if(op && _optimistic_stack && op->isStack()) {
+      lat=0;
+    }
+
     getCPDG()->insert_edge(*inst, SuperInst::Execute,
-                           *inst, SuperInst::Complete, lat);
+                           *inst, SuperInst::Complete, lat, E_EP);
 
     if(_no_speculation) {
       Op* op = inst->_op;
@@ -414,6 +480,10 @@ private:
               BB* trigger_bb = ii->second;
               if(cond_bb == bb) { //if we went in this direction
                 ctrl_inst_map[trigger_bb]=prev_inst;
+//                std::cout << inst->_index << " " << prev_op->id() 
+//                          << "@BB" << prev_bb->rpoNum()
+//                          << "-> BB"  << trigger_bb->rpoNum() << "\n";
+
               }
             }
           }
@@ -427,11 +497,20 @@ private:
   virtual void setWritebackCycle_s(std::shared_ptr<SuperInst>& inst) {
     if(inst->_isstore) {
       int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod,true);
+
+      Op* op = inst->_op; //break out if stack
+      if(op && _optimistic_stack && op->isStack()) {
+        st_lat=0;
+      }
+
       getCPDG()->insert_edge(*inst, SuperInst::Complete,
-                             *inst, SuperInst::Writeback, st_lat,true);
-      //if(inst->_isload) { wtf
-      checkNumMSHRs(inst);
-      //}
+                             *inst, SuperInst::Writeback, st_lat, E_WB);
+
+      if(op && _optimistic_stack && op->isStack()) {
+       //do nothing
+      } else {
+        checkNumMSHRs(inst);
+      }
     }
   }
 

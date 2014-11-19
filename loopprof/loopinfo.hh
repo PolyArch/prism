@@ -462,6 +462,20 @@ public:
   bool dependenceInPath(Op* dop, Op* op); 
   bool dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op);
 
+  bool dataDepBT(std::set<Op*>& relevantOps,Op* dop, Op* op, std::set<Op*>& seenOps);
+  bool dataDepBT(std::set<Op*>& relevantOps,Op* dop, Op* op);
+
+  void compatUse(Op* uop, std::set<Op*>& ops,
+                 std::set<std::pair<Op*,Op*>>& closeSet, 
+                 Op* orig_op, Op* cur_op, CFU_node* cur_fu,
+                 std::set<Op*>& doneOps, std::set<CFU_node*>& doneCFUs);
+
+  void compatDep(Op* dop, std::set<Op*>& ops,
+                 std::set<std::pair<Op*,Op*>>& closeSet, 
+                 Op* orig_op, Op* cur_op, CFU_node* cur_fu,
+                 std::set<Op*>& doneOps, std::set<CFU_node*>& doneCFUs);
+
+
   void checkCompatible(std::set<Op*>& ops,
                      std::set<std::pair<Op*,Op*>>& closeSet, 
                      Op* orig_op, 

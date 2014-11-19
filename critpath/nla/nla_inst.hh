@@ -32,35 +32,8 @@ public:
   }
 
   static void addDep(std::shared_ptr<DynSubgraph> a, 
-                     std::shared_ptr<DynSubgraph> b, bool ignore_if_cycle=false) {
-    assert(a!=b);
+                     std::shared_ptr<DynSubgraph> b, bool ignore_if_cycle=false);
 
-    bool bs_use_has_a=false,as_dep_has_b=false;
-    for(auto& i : b->use_subgraphs) {
-      if(i.lock() == a) {
-        bs_use_has_a=true;
-        break;
-      }
-    }
-    for(auto& i : a->dep_subgraphs) {
-      if(i.lock() == b) {
-        as_dep_has_b=true;
-        break;
-      }
-    }
-
-    if(bs_use_has_a && as_dep_has_b) {
-      if(ignore_if_cycle) {
-        return;
-      } else {
-        assert(0&& "cycle created\n");
-      }
-    }
-
-    b->dep_subgraphs.push_back(a);
-    a->use_subgraphs.push_back(b);
-    //std::cout << "dep " << a->static_sg->id() << "->" << b->static_sg->id() << "\n";
-  }
 
   void setCumWeights(CumWeights* cum_weights) {
     startCFU->_cum_weights=cum_weights;

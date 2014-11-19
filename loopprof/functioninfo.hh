@@ -130,7 +130,6 @@ template<class Archive>
   void calculateRPO(BB* bb);
 
   int intersectDOM(int finger1,int finger2);  
-  bool dominates(BB* bb1,BB* bb2);
   void calculateDOM_Frontier();
 
   void hookupExitBB(std::set<BB*>& exitBBs);
@@ -138,7 +137,6 @@ template<class Archive>
   bool addUniqueExitBB();
 
   int intersectPDOM(int finger1,int finger2);  
-  bool post_dominates(BB* bb1,BB* bb2);
   void calculatePDOM_Frontier();
 
   void getLoopBody(BB* latch_bb, std::set<BB*>& loopBody);
@@ -146,6 +144,10 @@ template<class Archive>
 
 
 public:
+  bool dominates(BB* bb1,BB* bb2);
+  bool post_dominates(BB* bb1,BB* bb2);
+
+
   FunctionInfo(CPC cpc) : _id(_idcounter++), _firstBB(NULL), _calls(0), _sym(NULL)
                            {_loc=cpc;}
   FunctionInfo() : _id(_idcounter++), _firstBB(NULL), _calls(0),_sym(NULL)

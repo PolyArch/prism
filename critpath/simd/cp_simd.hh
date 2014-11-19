@@ -863,7 +863,6 @@ namespace simd {
     //
     void insert_inst(const CP_NodeDiskImage &img, uint64_t index,
                      Op *op) {
-
       bool insertSIMDInst = false;
       LoopInfo *li = getLoop(op, isLastInstAReturn, StackLoop);
 
@@ -968,7 +967,7 @@ namespace simd {
         insert_inst_to_default_pipe(img, index, op);
 
         // Create the instruction
-        InstPtr inst = createInst(img, index, op);
+        InstPtr inst = createInst(img, index, op,false);
 
         // Add to the graph to do memory management
         // and get static dependence from original dependence graph...

@@ -410,7 +410,6 @@ public:
 
       CCoresInst* cc_inst = new CCoresInst(img,index,op);
       std::shared_ptr<CCoresInst> sh_inst(cc_inst);
-      keepTrackOfInstOpMap(sh_inst,op);
 
       getCPDG()->addInst(sh_inst,index);
 
@@ -454,13 +453,15 @@ public:
         _ccores_int_ops++;
       }
 
+      //final stage add here
+      keepTrackOfInstOpMap(sh_inst,op);
 
 /*      prevRet = op->isReturn();
       if(prevRet) {
         inCCore=false;
       }*/
     } else {
-      InstPtr sh_inst = createInst(img,index,op);
+      InstPtr sh_inst = createInst(img,index,op,false);
       getCPDG()->addInst(sh_inst,index);
       if(transitioned) { 
         if(cur_bb_end) {
@@ -595,19 +596,31 @@ private:
      //memory dependence
     if (inst->_mem_prod > 0 && inst->_mem_prod < inst->index()) {
       BaseInst_t& prev_node = getCPDG()->queryNodes(inst->index()-inst->_mem_prod);
+       
+      if(&prev_node != &(*inst)) {
 
-      if (prev_node._isstore && inst->_isload) {
-        //data dependence
-        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                                  *inst, CCoresInst::Execute, 0, E_MDep);
-      } else if (prev_node._isstore && inst->_isstore) {
-        //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                                  *inst, CCoresInst::Execute, 0, E_MDep);
-      } else if (prev_node._isload && inst->_isstore) {
-        //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                                  *inst, CCoresInst::Execute, 0, E_MDep);
+        if (prev_node._isstore && inst->_isload) {
+          //data dependence
+          getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                    *inst, CCoresInst::Execute, 0, E_MDep);
+        } else if (prev_node._isstore && inst->_isstore) {
+          //anti dependence (output-dep)
+          getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                    *inst, CCoresInst::Execute, 0, E_MDep);
+        } else if (prev_node._isload && inst->_isstore) {
+          //anti dependence (load-store)
+          getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                    *inst, CCoresInst::Execute, 0, E_MDep);
+        }
+      } else {
+        //TODO: why would this ever happen
+        static bool fail=false;
+        if(!fail) {
+          fail=true;
+          std::cout << "ERROR: Why MDep b/t same node?\n";
+          std::cout << "ind:" << inst->index();
+          std::cout << " mem_prod:" << inst->_mem_prod << "\n";
+        }
       }
     }
 

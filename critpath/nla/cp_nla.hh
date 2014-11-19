@@ -20,6 +20,7 @@ class NLARegionStats {
     uint64_t network_activity[16]={0}; //histogram
     uint64_t cfu_used[16]={0};
     //CumWeights cum_weights;
+    uint64_t unroll_factor=1;
 };
 
 // CP_NLA
@@ -104,6 +105,9 @@ public:
   bool _nla_ser_loops=false;         //impose pipeline constraints on CFU use
   int  _nla_loop_iter_dist=4;       //number of allowable loops in parallel
   int  _wb_networks=2;              //writeback networks total
+  int  _target_cinsts=256;            //writeback networks total
+
+  bool  _optimistic_stack=true;      //optimistic stack
 
   bool _predict_power_gating=true;  //predict time and shut off core?
   bool _optim_power_gating=false;   //don't charge for power gating
@@ -364,6 +368,12 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             _timesStarted+=1;
             _regionStats[li].times_started+=1;
 
+            int numSGs = li->sgSchedNLA().numSubgraphs();
+            if(numSGs < _target_cinsts && numSGs != 0) {
+              _regionStats[li].unroll_factor=std::min(16,_target_cinsts/numSGs);
+              assert(_regionStats[li].unroll_factor>=1);
+            }
+
             _curNLAStartCycle=prevInst->cycleOfStage(prevInst->eventComplete());
             nla_start_inst=prevInst;
             assert(nla_start_inst);
@@ -424,7 +434,14 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
               break;
             }
           }
-          if(bb->pred_size()==0 || fall_through==false) {
+
+          Op* prev_op = _prev_op; //cp_dg_builder manages
+          if(bb->pred_size()==0 || fall_through==false || !li->inLoop(bb)
+             ||   (prev_op && (
+             prev_op->isCondCtrl() || prev_op->isIndirectCtrl() || 
+             prev_op->isCall() || prev_op->isReturn() || 
+             (prev_op->isCtrl()&&prev_op->bb_pos()!=0)) 
+              ) ) {
             schedule_cfus();  
 
             T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
@@ -439,6 +456,11 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             //need to connect bb up
             nla_state=CPU;
             nlaEndEv=prevNLAInst->endCFU();
+            if(curNLAInsts.size() != 0) {
+              for(auto i : curNLAInsts) {
+                std::cout << "unop: " << i->_op->id() << "\n";
+              }
+            }
             assert(curNLAInsts.size()==0);
             doneNLA(nlaEndEv->cycle());
             cleanUp(nlaEndEv->cycle()-1);
@@ -530,17 +552,30 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         //figure out which BBs this triggers.
         if(prevNLAInst) {
           Op* prev_op = prevNLAInst->_op;
-          if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl()) {
+          if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl() ||
+            (prev_op->isCtrl() && op->bb_pos()!=0) ) {
             BB* bb = op->bb();
-            FunctionInfo* f = bb->func();
-  
-            BB* prev_bb = prev_op->bb();
-            if(f->pdomR_has(prev_bb)) {
-              for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
-                BB* cond_bb = ii->first;
-                BB* trigger_bb = ii->second;
-                if(cond_bb == bb) { //if we went in this direction
-                  ctrl_inst_map[trigger_bb]=prevNLAInst;
+
+            if(prev_op->isCtrl() && op->bb_pos()!=0) {
+               /*TODO: FIXME: micro-op branches?*/ 
+              //ctrl_inst_map[bb]=prevNLAInst;
+              //do nothing for now.
+            } else {
+              FunctionInfo* f = bb->func();
+              BB* prev_bb = prev_op->bb();
+              if(f->pdomR_has(prev_bb)) {
+                for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
+                  BB* cond_bb = ii->first;
+                  BB* trigger_bb = ii->second;
+                  if(cond_bb == bb) { //if we went in this direction
+                    ctrl_inst_map[trigger_bb]=prevNLAInst;
+//                    std::cout << index << " " << prev_op->id() 
+//                                   << "@BB" << prev_bb->rpoNum()
+//                                   << "-> BB"  << trigger_bb->rpoNum() << "\n";
+                                              
+                                               
+                   
+                  }
                 }
               }
             }
@@ -558,9 +593,15 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
         int lat=epLat(img._cc-img._ec,nla_inst.get(),img._isload,
                       img._isstore,img._cache_prod,img._true_cache_prod,true);
-        nla_inst->updateLat(lat);
         int st_lat=stLat(img._xc-img._wc,img._cache_prod,
                          img._true_cache_prod,true/*is accelerated*/);
+
+        if(op && _optimistic_stack && op->isStack()) {
+          lat=0;
+          st_lat=0;
+        }
+
+        nla_inst->updateLat(lat);
         nla_inst->updateStLat(st_lat);
 
         prevNLAInst=nla_inst;
@@ -668,7 +709,8 @@ private:
   std::shared_ptr<T> prev_end_cfu;
   std::shared_ptr<DynSubgraph> prev_sg;
 
-  // ----------------------------------Schedule CFUs------------------------------
+  // -------------------------------------------------------------------------------
+  // ----------------------------------Schedule CFUs--------------------------------
   void schedule_cfus() {
     top_sort_subgraphs();
 
@@ -726,7 +768,7 @@ private:
 
           if(ctrl_inst_map.count(bb)) {
             getCPDG()->insert_edge(*ctrl_inst_map[bb], NLAInst::Complete,
-                                                 *sg->startCFU,  0,E_NCTL);
+                                                 *sg->startCFU, 0,E_NCTL);
           }
         } else {
           if(ctrl_event) {
@@ -767,13 +809,16 @@ private:
 
       std::shared_ptr<NLAInst> begin_nla_inst = sg->insts.begin()->lock();
       int iter = begin_nla_inst->iter;
-      int mod_iter = iter % _nla_loop_iter_dist;
+
+      int iter_dist = _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+
+      int mod_iter = iter % iter_dist;
       LoopInfo* cur_li = 
         begin_nla_inst->_op->func()->innermostLoopFor(begin_nla_inst->_op->bb());
 
-      if(iter>=_nla_loop_iter_dist) {
+      if(iter>=iter_dist) {
         std::shared_ptr<DynSubgraph> holdup_sg = 
-          _lastOp[cur_li][ (iter-_nla_loop_iter_dist+1)%(_nla_loop_iter_dist) ];
+          _lastOp[cur_li][ (iter-iter_dist+1)%(iter_dist) ];
         
         getCPDG()->insert_edge(*holdup_sg->endCFU,
                                *sg->startCFU, 0, E_NITR);   
@@ -860,10 +905,12 @@ private:
           }
         }
 
+
+
         if(nla_inst->_isload) {
           //get the MSHR resource here!
           checkNumMSHRs(nla_inst); 
-        } else {
+        } else { //TODO: WHAT IS THIS?
           insertLSQ(nla_inst);
         }
         (*nla_inst)[NLAInst::Complete].reCalculate();
@@ -894,8 +941,8 @@ private:
                    1/*latency*/, _wb_networks/*maxunits*/, nla_inst));
   
             if (dep_inst) {
-              getCPDG()->insert_edge(*nla_inst, NLAInst::Forward,
-                                     *dep_inst, NLAInst::Forward, 
+              getCPDG()->insert_edge(*dep_inst, NLAInst::Forward,
+                                     *nla_inst, NLAInst::Forward, 
                                      1,E_NNET);
             }
           }
@@ -951,8 +998,9 @@ private:
 
       //see if last op
       std::vector<std::shared_ptr<DynSubgraph>>& last_sgs = _lastOp[cur_li];
-      if(last_sgs.size() < (unsigned)_nla_loop_iter_dist) {
-        last_sgs.resize(_nla_loop_iter_dist);
+      
+      if(last_sgs.size() < (unsigned)iter_dist) {
+        last_sgs.resize(iter_dist);
       }
       if(!last_sgs[mod_iter] || 
           last_sgs[mod_iter]->endCFU->cycle() < sg->endCFU->cycle()) {
@@ -988,12 +1036,18 @@ private:
     curNLAInsts.clear();
     _curSubgraphs.clear();
     _vecSubgraphs.clear();
+//    std::cout << "-----------------------------------------------------------------------\n";
   //  std::cout << "clear\n";
   }
 
   virtual void checkNumMSHRs(std::shared_ptr<NLAInst>& n, uint64_t minT=0) {
     int ep_lat=n->ex_lat();
    
+    Op* op = n->_op; //break out if stack
+    if(op && _optimistic_stack && op->isStack()) {
+      return;
+    }
+
     if(n->_isload || n->_isstore) {
       calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
                       n->_cache_prod, n->_true_cache_prod,
@@ -1082,7 +1136,7 @@ private:
     getCPDG()->insert_edge(*n, NLAInst::Complete,*n->endCFU(),   0, E_CFUE);
 
     getCPDG()->insert_edge(*n, NLAInst::Complete,
-                           *n, NLAInst::Forward, 0, E_NFWD);
+                           *n, NLAInst::Forward, 1, E_NFWD);
 
     n->st_edge = getCPDG()->insert_edge(*n, NLAInst::Forward,
                                         *n, NLAInst::Writeback, 0, E_WB);
@@ -1127,6 +1181,10 @@ private:
             data_ready_event = NLAInst::Forward;
             getCPDG()->insert_edge(*depInst, data_ready_event,
                                    *n->startCFU(), 0, E_CFUR);
+          } else {
+            data_ready_event = NLAInst::Forward;
+            getCPDG()->insert_edge(*depInst, data_ready_event,
+                                   *n->startCFU(), 0, E_CFUR);
           }
           //assert(!SGSched::depFromTo(prior_nla_inst->dynSubgraph->static_sg,
           //                           n->dynSubgraph->static_sg));
@@ -1149,6 +1207,11 @@ private:
       //iterate through potential memory deps
       for(auto mdi = op->m_begin(), mde = op->m_end(); mdi!=mde; ++mdi) {
         Op* md_op = *mdi;
+
+        if(op->isLoad() && md_op->isLoad()) {
+          continue;
+        }
+
         std::shared_ptr<BaseInst_t> sh_inst = getInstForOp(md_op);
         if(sh_inst && !sh_inst->isPipelineInst()) {
           NLAInst* mem_dep_inst = dynamic_cast<NLAInst*>(sh_inst.get());

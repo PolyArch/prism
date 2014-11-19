@@ -85,7 +85,7 @@ public:
 
   void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
-    InstPtr sh_inst = this->createInst(img, index, op);
+    InstPtr sh_inst = this->createInst(img, index, op, false);
     getCPDG()->addInst(sh_inst, index);
     this->addDeps(sh_inst, op);
     this->pushPipe(sh_inst);

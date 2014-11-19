@@ -1,4 +1,7 @@
 #include "nla_inst.hh"
+#include "functioninfo.hh"
+
+using namespace std;
 
 std::shared_ptr<NLAInst> DynSubgraph::calcCritCycles() {
   
@@ -20,4 +23,45 @@ std::shared_ptr<NLAInst> DynSubgraph::calcCritCycles() {
   critCycles=max_cycle-min_cycle;
   return max_inst;
 }
+
+void DynSubgraph::addDep(std::shared_ptr<DynSubgraph> a, 
+                   std::shared_ptr<DynSubgraph> b, bool ignore_if_cycle) {
+  assert(a!=b);
+
+  bool bs_use_has_a=false,as_dep_has_b=false;
+  for(auto& i : b->use_subgraphs) {
+    if(i.lock() == a) {
+      bs_use_has_a=true;
+      break;
+    }
+  }
+  for(auto& i : a->dep_subgraphs) {
+    if(i.lock() == b) {
+      as_dep_has_b=true;
+      break;
+    }
+  }
+
+  static int num_errors=1000;
+
+  if(bs_use_has_a && as_dep_has_b) {
+    if(ignore_if_cycle) {
+      return;
+    } else {
+      if(num_errors>0) {
+        num_errors-=1;
+        cout << "ERROR/HUGE PROBLEM: cycle created\n"; //cycle created
+        cout << a->insts.begin()->lock()->_op->func()->nice_name();
+        cout << a->insts.begin()->lock()->_index << " " << a->insts.begin()->lock()->_op->id() << "\n";
+        cout << b->insts.begin()->lock()->_index << " " << b->insts.begin()->lock()->_op->id() << "\n";
+        //assert(0&& "cycle created\n");
+      }
+    }
+  }
+  b->dep_subgraphs.push_back(a);
+  a->use_subgraphs.push_back(b);
+  //std::cout << "dep " << a->static_sg->id() << "->" << b->static_sg->id() << "\n";
+}
+
+
 

@@ -203,8 +203,7 @@ public:
   }
 
 
-  virtual void track_revolver(const CP_NodeDiskImage &img,
-                   uint64_t index, Op* op) {
+  virtual void track_revolver(uint64_t index, Op* op) {
     FunctionInfo* fi = op->func();
     BB* bb = op->bb();
     _prev_cycle_revolver_active=_revolver_active; //record this for energy accounting
@@ -329,12 +328,8 @@ public:
   //Public function which inserts functions from the trace
   virtual void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
-
-    if(_enable_revolver) { 
-      track_revolver(img,index,op);
-    }
     //The Important Stuff
-    InstPtr sh_inst = createInst(img,index,op);
+    InstPtr sh_inst = createInst(img,index,op,false);
     getCPDG()->addInst(sh_inst,index);
     addDeps(sh_inst,op);
     pushPipe(sh_inst);
@@ -464,10 +459,10 @@ protected:
   //std::map<Inst_t *, Op*> _inst2Op;
 
   virtual InstPtr createInst(const CP_NodeDiskImage &img, 
-                             uint64_t index, Op *op)
+                             uint64_t index, Op *op, bool track=true)
   {
     InstPtr ret = InstPtr(new Inst_t(img, index, op));
-    if (op) {
+    if (track && op) {
       keepTrackOfInstOpMap(ret, op);
     }
     return ret;
@@ -477,7 +472,6 @@ protected:
       int dtype = dg_inst_dummy<T,E>::DUMMY_MOVE) {
     std::shared_ptr<dg_inst_dummy<T,E>> dummy_inst
                 = std::make_shared<dg_inst_dummy<T,E>>(img,index,op,dtype); 
-    keepTrackOfInstOpMap(dummy_inst,op);
     getCPDG()->addInst(dummy_inst,index);
 
     unsigned dummy_prod=0;
@@ -491,6 +485,8 @@ protected:
       getCPDG()->insert_edge(*retInst, retInst->eventComplete(),
                              *dummy_inst, dummy_inst->beginExecute(), 0, E_RDep);
     }
+
+    keepTrackOfInstOpMap(dummy_inst,op);
   }
 
   std::unordered_set<Op*> dummy_cycles;
@@ -818,6 +814,15 @@ protected:
 
 
   virtual void inserted(std::shared_ptr<Inst_t>& inst) {
+    if(inst->_op) {
+      keepTrackOfInstOpMap(inst,inst->_op);
+      if(_enable_revolver&&inst->_index!=0) { 
+        track_revolver(inst->_index,inst->_op);
+      }
+    }
+
+
+
     maxIndex = inst->index();
     _curCycle = inst->cycleOfStage(Inst_t::Fetch);
 

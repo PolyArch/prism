@@ -312,14 +312,71 @@ void LoopInfo::opAddr(Op* op, uint64_t addr, uint8_t acc_size) {
 
 
 
+bool LoopInfo::dataDepBT(std::set<Op*>& relevantOps,Op* cur_op, Op* search_op,
+                                     std::set<Op*>& seenOps) {
+  if(seenOps.count(cur_op) || relevantOps.count(cur_op) ==0) {
+    return false;
+  }
+  seenOps.insert(cur_op);
+  for(auto ui=cur_op->adj_u_begin(),ue=cur_op->adj_u_end();ui!=ue;++ui) {
+     Op* look_op = *ui;
+     if(!dependenceInPath(relevantOps,cur_op,look_op)) {
+       continue; //keep searching if this isn't a good dependence
+     }
+
+     if(look_op==search_op) {
+       return true; //found directly
+     }
+     if(dataDepBT(relevantOps,look_op,search_op,seenOps)) {
+       return true; //found inside some other use
+     }
+  }
+  return false; //couldn't find anywhere
+}
+
+bool LoopInfo::dataDepBT(std::set<Op*>& relevantOps,Op* dop, Op* op) {
+  std::set<Op*> seenOps;
+  return dataDepBT(relevantOps,dop,op,seenOps);
+}
+
+
+void LoopInfo::compatUse(Op* uop,
+                     std::set<Op*>& ops, std::set<std::pair<Op*,Op*>>& closeSet, 
+                     Op* orig_op, Op* cur_op, CFU_node* cur_fu,
+                     std::set<Op*>& doneOps, std::set<CFU_node*>& doneFUs) {
+  if(doneOps.count(uop)!=0 || !dependenceInPath(ops,cur_op,uop)) {
+    return;
+  }
+  for(auto ii=cur_fu->outs_begin(), ee=cur_fu->outs_end(); ii!=ee; ++ii) {
+    CFU_node* ufu = *ii;
+    if(doneFUs.count(ufu) != 0) {
+      return;
+    }
+    checkCompatible(ops,closeSet,orig_op,uop,ufu,doneOps,doneFUs);
+  }
+}
+
+void LoopInfo::compatDep(Op* dop,
+                     std::set<Op*>& ops, std::set<std::pair<Op*,Op*>>& closeSet, 
+                     Op* orig_op, Op* cur_op, CFU_node* cur_fu,
+                     std::set<Op*>& doneOps, std::set<CFU_node*>& doneFUs) {
+  if(doneOps.count(dop)!=0 || !dependenceInPath(ops,dop,cur_op)) {
+    return;
+  }
+  for(auto ii=cur_fu->ins_begin(), ee=cur_fu->ins_end(); ii!=ee; ++ii) {
+    CFU_node* dfu = *ii;
+    if(doneFUs.count(dfu) != 0) {
+      return;
+    }
+    checkCompatible(ops,closeSet,orig_op,dop,dfu,doneOps,doneFUs);
+  }
+}
+
+
 void LoopInfo::checkCompatible(std::set<Op*>& ops,
                      std::set<std::pair<Op*,Op*>>& closeSet, 
-                     Op* orig_op, 
-                     Op* cur_op,
-                     CFU_node* cur_fu,
-                     std::set<Op*> doneOps,
-                     std::set<CFU_node*> doneFUs) {
-  
+                     Op* orig_op, Op* cur_op, CFU_node* cur_fu,
+                     std::set<Op*> doneOps, std::set<CFU_node*> doneFUs) {
 
   if(!CFU_node::kind_match(cur_op,cur_fu)) {
     return; //didn't match, bail out
@@ -341,32 +398,24 @@ void LoopInfo::checkCompatible(std::set<Op*>& ops,
   doneFUs.insert(cur_fu);
 
   for(auto ui=cur_op->adj_u_begin(),ue=cur_op->adj_u_end();ui!=ue;++ui) {
-    Op* uop = *ui;   //forwards
-    if(doneOps.count(uop)!=0 || !dependenceInPath(ops,cur_op,uop)) {
-      continue;
-    }
-    for(auto ii=cur_fu->outs_begin(), ee=cur_fu->outs_end(); ii!=ee; ++ii) {
-      CFU_node* ufu = *ii;
-      if(doneFUs.count(ufu) != 0) {
-        continue;
-      }
-      checkCompatible(ops,closeSet,orig_op,uop,ufu,doneOps,doneFUs);
+    compatUse(*ui,ops,closeSet,orig_op,cur_op,cur_fu,doneOps,doneFUs);
+  }
+
+  for(auto ui=cur_op->m_use_begin(),ue=cur_op->m_use_end();ui!=ue;++ui) {
+    if(!dataDepBT(ops,cur_op,*ui)) {
+      compatUse(*ui,ops,closeSet,orig_op,cur_op,cur_fu,doneOps,doneFUs);
     }
   }
 
   for(auto di=cur_op->adj_d_begin(),de=cur_op->adj_d_end();di!=de;++di) {
-    Op* dop = *di;   //backwards
-    if(doneOps.count(dop)!=0 || !dependenceInPath(ops,dop,cur_op)) {
-      continue;
-    }
-    for(auto ii=cur_fu->ins_begin(), ee=cur_fu->ins_end(); ii!=ee; ++ii) {
-      CFU_node* dfu = *ii;
-      if(doneFUs.count(dfu) != 0) {
-        continue;
-      }
-      checkCompatible(ops,closeSet,orig_op,dop,dfu,doneOps,doneFUs);
+    compatDep(*di,ops,closeSet,orig_op,cur_op,cur_fu,doneOps,doneFUs);
+  }
+  for(auto di=cur_op->m_begin(),de=cur_op->m_end();di!=de;++di) {
+    if(!dataDepBT(ops,*di,cur_op)) {
+      compatDep(*di,ops,closeSet,orig_op,cur_op,cur_fu,doneOps,doneFUs);
     }
   }
+
 }
 
 
@@ -475,6 +524,8 @@ alias(s,s1,s2);
 * if v1 is close to v2
 set close_dep(v1,v2);
 set iter_close(v1,v2);
+
+A(v1,v2)$(D(v1,v2))=YES;
 
 close_dep(v1,v2)$(ORD(v1) eq ORD(v2)) = YES;
 scalar depth;
@@ -1053,7 +1104,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
       for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
         Op* mop = *di;
-        if(dependenceInPath(opSet,mop,op)) {
+        if(dependenceInPath(opSet,mop,op) && !dataDepBT(opSet,mop,op)) {
           if(countElementsD++ != 0) {
             streamD <<",";
           }
@@ -1062,7 +1113,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         }
       }
 
-      if(op->numUses()==0) {
+      if(op->numUses()==0 && op->numMemUses()==0) {
         fixes << "x.fx('" << op->id() << "')=0;\n"; //inst does not write reg
         fixes2 << "Mvn.fx('" << op->id() << "','nreg')=0;\n"; //inst does not write reg
       }

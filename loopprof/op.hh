@@ -69,6 +69,7 @@ private:
 
   CPC _cpc;
   Deps _deps, _uses;
+  Deps _memUses /*not saved*/;
   Deps _memDeps,_cacheDeps,_ctrlDeps;
   Deps _adjDeps, _adjUses;
   Deps _stackDeps;
@@ -141,6 +142,12 @@ private:
       dep_op->addUse(this);
     }
 
+    for(auto i=_memDeps.begin(),e=_memDeps.end();i!=e;++i) {
+      Op* m_dep_op = *i;
+      m_dep_op->addMemUse(this);
+    }
+
+
     for(const auto& i : _indOfDep) {
       for(int j : i.second) {
         _depsOfInd[j].insert(i.first); //restore the _depOfInd, if loading
@@ -200,6 +207,11 @@ public:
     assert(isLoad());
     assert(_stackDeps.size()==1);
     return *(_stackDeps.begin());
+  }
+
+  //number of possible dependent operands at operand_index i
+  unsigned numDepOpsAtIndex(int i) {
+    return _depsOfInd[i].size();
   }
 
   void setIsConstLoad() { 
@@ -435,6 +447,14 @@ public:
     updated();
   }
 
+  void addMemUse(Op* op) {
+     //assert(op!=this);
+     assert(op);
+    _memUses.insert(op);
+    updated();
+  }
+
+
   void addJustDep(Op* op) {
     assert(op);
     _deps.insert(op);
@@ -458,6 +478,8 @@ public:
   void addMemDep(Op* op) {
     assert(op->isLoad() || op->isStore());
     _memDeps.insert(op);
+
+    op->addMemUse(this);
     updated();
   }
 
@@ -620,12 +642,15 @@ public:
 
   Deps::iterator m_begin() { return _memDeps.begin(); }
   Deps::iterator m_end() { return _memDeps.end(); }
+  Deps::iterator m_use_begin() { return _memUses.begin(); }
+  Deps::iterator m_use_end() { return _memUses.end(); }
+
   Deps::iterator d_begin() {return _deps.begin();}
   Deps::iterator d_end() {return _deps.end();}
 
   void uSet(Deps& uses,Deps& skipped) {
     //std::cout << "touch" << _id << "\n";
-    for(auto& uop : _uses) {
+    for(Op* uop : _uses) {
       //std::cout << "use" << _id << " ";
       if(skipped.count(uop) || uses.count(uop)) {
         //std::cout << skipped.count(uop) << "," << uses.count(uop) << _id << "\n";
@@ -657,7 +682,7 @@ public:
   Deps::iterator adj_u_end() {return _adjUses.end();}
 
   void dSet(Deps& deps,Deps& skipped) {
-    for(auto& dop : _deps) {
+    for(Op* dop : _deps) {
       if(skipped.count(dop) || deps.count(dop)) {
         return;
       }
@@ -687,6 +712,7 @@ public:
   Deps::iterator u_end() {return _uses.end();}
   unsigned numDeps()  { return _deps.size(); }
   unsigned numMemDeps()  { return _memDeps.size(); }
+  unsigned numMemUses()  { return _memUses.size(); }
   unsigned numUses() {return _uses.size();}
   uint32_t avg_lat() {return _totLat / _times;}
 

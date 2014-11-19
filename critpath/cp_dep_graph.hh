@@ -1076,7 +1076,9 @@ public:
               << " index:" << edge->src()->_index;
               
             if(edge->src()->_op) {
-              std::cout << " op:" << edge->src()->_op->id();
+              std::cout << "\top:" << edge->src()->_op->id();
+              std::cout << "\t" 
+                        << edge->src()->_op->func()->nice_name();
             }
             std::cout << "\n";
 
