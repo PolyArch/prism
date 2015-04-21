@@ -14,7 +14,6 @@ static void init()
     CPRegistry::get()->register_argument("nla-issue-inorder",       true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-cfus-delay-writes",   true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-cfus-delay-reads",    true,&model->cp_obj);
-    CPRegistry::get()->register_argument("nla-inorder-address-calc",true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-mem-dep-predictor",   true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-software-mem-alias",  true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-no-exec-speculation", true,&model->cp_obj);
@@ -26,6 +25,10 @@ static void init()
 
     CPRegistry::get()->register_argument("nla-ser-loops",           true,&model->cp_obj);
     CPRegistry::get()->register_argument("nla-loop-iter-dist",      true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-fwd-lat",             true,&model->cp_obj);
+
+    CPRegistry::get()->register_argument("nla-agg-mem-dep",         true,&model->cp_obj);
+    CPRegistry::get()->register_argument("nla-allow-store-fwd",     true,&model->cp_obj);
 
     CPRegistry::get()->register_argument("no-gams",                false,&model->cp_obj);
   }

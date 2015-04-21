@@ -19,13 +19,12 @@ class NLARegionStats {
     uint64_t total_cinsts=0;    
     uint64_t network_activity[16]={0}; //histogram
     uint64_t cfu_used[16]={0};
-    //CumWeights cum_weights;
     uint64_t unroll_factor=1;
 };
 
 // CP_NLA
 class cp_nla : public ArgumentHandler,
-      public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
+      public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>>  {
   typedef dg_event T;
   typedef dg_edge_impl_t<T> E;  
 
@@ -39,11 +38,13 @@ enum NLA_STATE {
 public:
   cp_nla() : CP_DG_Builder<T,E>() {
     nla_state=CPU;
+    getCPDG()->setCritListener(this);
   }
 
   virtual ~cp_nla() { 
   }
 
+  virtual bool removes_uops() {return true;}
   virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
     return &cpdg;
   };
@@ -53,6 +54,7 @@ public:
   //std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
 
   LoopInfo* _prevLoop=NULL;
+  int n_index=1; //for debugging new instruction ordering
 
   //This map tracks the BBs which will be "readied" by the particular instruction
   std::unordered_map<BB*, std::shared_ptr<NLAInst>> ctrl_inst_map;
@@ -67,6 +69,9 @@ public:
   uint64_t _nla_operand_fwrites=0, _nla_operand_writes=0; //regfile is window acc
   uint64_t _nla_operand_freads=0,  _nla_operand_reads=0;
 
+  uint64_t _nla_loads=0;
+  uint64_t _nla_stores=0;
+
   //Acc stats
   uint64_t _nla_int_ops_acc=0, _nla_fp_ops_acc=0, _nla_mult_ops_acc=0;
   uint64_t _nla_regfile_fwrites_acc=0, _nla_regfile_writes_acc=0;
@@ -76,6 +81,9 @@ public:
   uint64_t _nla_network_reads_acc=0;
   uint64_t _nla_operand_fwrites_acc=0, _nla_operand_writes_acc=0; 
   uint64_t  _nla_operand_freads_acc=0,  _nla_operand_reads_acc=0;
+
+  uint64_t _nla_loads_acc=0;
+  uint64_t _nla_stores_acc=0;
 
   uint64_t _timesStarted=0;
   std::map<int,int> accelLogHisto;
@@ -94,7 +102,6 @@ public:
   bool _issue_inorder=false;        //Subgraphs are issued in dependence order
   bool _cfus_delay_writes=false;    //Reg and Forwarding happens at end of region
   bool _cfus_delay_reads=false;     //CFUs don't execute untill all inputs ready
-  bool _inorder_address_calc=false; //mem issued in program order
   bool _mem_dep_predictor=false;    //should I predict memory?
   bool _software_mem_alias=true;    //software calculates mem deps
   bool _no_exec_speculation=true;   //no execution speculation
@@ -102,7 +109,7 @@ public:
   bool _pipelined_cfus=true;        //impose pipeline constraints on CFU use
   bool _inorder_per_sg=true;        //no execution speculation
 
-  bool _nla_ser_loops=false;         //impose pipeline constraints on CFU use
+  bool _nla_ser_loops=false;         //serialize loop entry/exit
   int  _nla_loop_iter_dist=4;       //number of allowable loops in parallel
   int  _wb_networks=2;              //writeback networks total
   int  _target_cinsts=256;            //writeback networks total
@@ -112,18 +119,23 @@ public:
   bool _predict_power_gating=true;  //predict time and shut off core?
   bool _optim_power_gating=false;   //don't charge for power gating
   unsigned _power_gating_factor=100; //how much longer than overhead factor?
+  int  _nla_fwd_lat=1; //nla forward latency
 
+  uint64_t _dyn_cfu_size[10000]; //should only be 6, but you never know
+
+  bool _agg_mem_dep    =false; //agressive memory dependence for inner loops
+  bool _allow_store_fwd=false; //allow stores to forward to dests (req. agg_mem_dep)
 
   std::map<LoopInfo*, uint64_t> running_avg_cycles;
+  std::map<LoopInfo*, uint64_t> iter_li_map;
 
   void handle_argument(const char *name, const char *arg) {
     ArgumentHandler::parse("nla-serialize-sgs",        name,arg,_serialize_sgs       );
     ArgumentHandler::parse("nla-issue-inorder",        name,arg,_issue_inorder       );
     ArgumentHandler::parse("nla-cfus-delay-writes",    name,arg,_cfus_delay_writes   );
     ArgumentHandler::parse("nla-cfus-delay-reads",     name,arg,_cfus_delay_reads    );
-    ArgumentHandler::parse("nla-inorder-address-calc", name,arg,_inorder_address_calc);
     ArgumentHandler::parse("nla-mem-dep-predictor",    name,arg,_mem_dep_predictor   );
-    ArgumentHandler::parse("nla-software-mem-alias",   name,arg,_mem_dep_predictor   );
+    ArgumentHandler::parse("nla-software-mem-alias",   name,arg,_software_mem_alias   );
     ArgumentHandler::parse("nla-no-exec-speculation",  name,arg,_no_exec_speculation );
     ArgumentHandler::parse("nla-exclusive-cfus",       name,arg,_exclusive_cfus      );
     ArgumentHandler::parse("nla-pipelined-cfus",       name,arg,_pipelined_cfus      );
@@ -133,6 +145,10 @@ public:
 
     ArgumentHandler::parse("nla-ser-loops",            name,arg,_nla_ser_loops       );
     ArgumentHandler::parse("nla-loop-iter-dist",       name,arg,_nla_loop_iter_dist  );
+    ArgumentHandler::parse("nla-fwd-lat",              name,arg,_nla_fwd_lat         );
+
+    ArgumentHandler::parse("nla-agg-mem-dep",          name,arg,_agg_mem_dep         );
+    ArgumentHandler::parse("nla-allow-store-fwd",      name,arg,_allow_store_fwd     );
 
     ArgumentHandler::parse("no-gams",name,_no_gams);
   }
@@ -204,33 +220,16 @@ public:
   }
 #endif
 
-virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
-                    unsigned default_type1, unsigned default_type2 = E_NONE)
-  {
-    if (!getTraceOutputs())
-      return;
-    E* laEdge = inst[ind].lastArrivingEdge();
-    unsigned lae;
-    if (laEdge) {
-      lae = laEdge->type();
-      if ((lae != default_type1 && lae!=default_type2) || laEdge->len()>1) {
-        outs << edge_name[lae];
-        /*int idiff=-laEdge->src()->_index + inst._index;
-        if(idiff != 0) {
-          outs << idiff;
-        }*/
-        if(laEdge->len()!=0) {
-          outs << laEdge->len();
-        }
-      }
-    }
-    outs << ",";
-  }
-
+  uint64_t skip_insts=5000;
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (!getTraceOutputs())
       return;
+
+    if(index < skip_insts) {
+      return;
+    }
+    index=index-skip_insts;
 
     outs() << index + Prof::get().skipInsts << ": ";
 
@@ -244,29 +243,32 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     for (unsigned i = 0; i < inst.numStages(); ++i) {
       outs() << inst.cycleOfStage(i) << " ";
       printEdgeDep(outs(),inst,i,E_FF);
-
     }
-    CriticalPath::traceOut(index,img,op);
+    CriticalPath::traceOut(index,inst._op->img,inst._op);
     outs() << "\n";
   }
-  
-
-
-
-  virtual void accelSpecificStats(std::ostream& out, std::string& name) {
+ 
+  virtual void accelSpecificStats(std::ostream& out, std::string& name) override {
 //out << "NLA Cycles = " << _totalNLACycles << "\n";
     out << " (nla-only " << _totalNLACycles 
         << " nla-insts " << _totalNLAInsts
         << " times " << _timesStarted;
 
-    out << " hist ";
+    out << " hist_cfu ";
+    for(int i = 0; i < 7; ++i) {
+      out << _dyn_cfu_size[i] << " ";
+    }
+
+    out << " hist_dur ";
     for(auto const& p : accelLogHisto) {
       out << p.first << ":" << p.second << " ";
     }
 
+
 //        << " idle-cycles " << idleCycles
 //        << " non-pipeline-cycles" << nonPipelineCycles
     out   << ")";
+
   }
 
 
@@ -373,7 +375,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
           if(li &&  li->hasSubgraphs(true) && prevInst) {
             //cout << "entering: " << li->nice_name_full() 
-            //  << " " << li->sgSchedNLA().numSubgraphs() << "\n";
+            //     << " " << li->sgSchedNLA().numSubgraphs() << "\n";
 
             setupCFUs(li->sgSchedNLA().cfu_set());
             nla_state=NLA;
@@ -384,8 +386,22 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             _regionStats[li].times_started+=1;
 
             int numSGs = li->sgSchedNLA().numSubgraphs();
+
+            int numInstsInInner = li->innerLoopStaticInsts(); //conservative
+            int numInstsTotal = li->inlinedStaticInsts();
+
             if(numSGs < _target_cinsts && numSGs != 0) {
-              _regionStats[li].unroll_factor=std::min(16,_target_cinsts/numSGs);
+              int opt1 = _target_cinsts/numSGs;
+
+              int op_target = _target_cinsts*4 - numInstsTotal;
+              int opt2 = 0;
+              if(op_target>0) {
+                opt2 = op_target/numInstsInInner;
+              }
+
+              int max_opt = std::max(opt1,opt2);
+              _regionStats[li].unroll_factor=std::min(32,max_opt);
+
               assert(_regionStats[li].unroll_factor>=1);
             }
 
@@ -420,7 +436,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
             //Manage Controling Instructions
             Op* prev_op = prevInst->_op;
             if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl()) {
-      
+     
+
+              
               BB* prev_bb = prev_op->bb();
               if(f->pdomR_has(prev_bb)) {
                 for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
@@ -438,9 +456,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         break;
       case NLA:
 
-        if(op->bb_pos()==0) {
+        if(op->bb_pos()==0 || (_prev_op && _prev_op->isCtrl())) {
           BB* bb = op->bb();
           
+
           //TODO: is this the right condition?
           bool fall_through=true;
           for(auto i=bb->pred_begin(), e=bb->pred_end();i!=e;++i) {
@@ -455,18 +474,38 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
 
           if(program_fi==li->func()) {       //if in original function
             transitioned = !li->inLoop(bb);  //transition out if not in loop
+//            cout << "same_func: " << "transition b/c BB" << bb->rpoNum() 
+//                 << " was not in loop " << li->nice_name() << "\n";
           } else {                                                //else, transition
             transitioned = !li->sgSchedNLA().inFuncs(program_fi); //if not in funcs
+//            cout << "diff_func: " << "transition func " << program_fi->nice_name()
+//                 << " was not in loop " << li->nice_name() << "\n";
           }
 
+
           Op* prev_op = _prev_op; //cp_dg_builder manages
-          if(bb->pred_size()==0 || fall_through==false || transitioned
+          if(_curSubgraphs.size() > 0 &&
+              (bb->pred_size()==0 || fall_through==false || transitioned
              ||   (prev_op && (
              prev_op->isCondCtrl() || prev_op->isIndirectCtrl() || 
              prev_op->isCall() || prev_op->isReturn() || 
-             (prev_op->isCtrl()&&prev_op->bb_pos()!=0)) 
-              ) ) {
-            schedule_cfus();  
+             (prev_op->isCtrl()&&op->bb_pos()!=0)) 
+              ) )) {
+
+            schedule_cfus(prevNLAInst);  
+
+            /*cout << "\n";
+            if(bb->pred_size()==0)  cout << "BB Pred ==0\n";
+            //if(fall_through==false) cout << "fall_through==false\n";
+            if(transitioned) cout << "transitioned==0\n";
+            if(prev_op && prev_op->isCondCtrl()) cout << "prev_op->isCondCtrl\n";
+            if(prev_op && prev_op->isIndirectCtrl()) cout << "prev_op isIndirect\n";
+            if(prev_op && prev_op->isCall()) cout << "prev_op IsCall\n";
+            cout << "prev_id:" << prev_op->id();
+            if(prevNLAInst) {
+              cout << " ind:" << prevNLAInst->_index << "\n";
+            }
+            cout << "sg-size:" << _sgMap.size() << "  -----------------------\n"; */
 
             T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
             if(clean_event) {
@@ -502,7 +541,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     switch(nla_state) {
       case CPU: {
         //base cpu model
-        InstPtr sh_inst = createInst(img,index,op);
+        InstPtr sh_inst = createInst(img,index,op,false);
         getCPDG()->addInst(sh_inst,index);
 
         if(nlaEndEv) { //First instruction
@@ -536,6 +575,54 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         inserted(sh_inst);
         break;
       } case NLA: {
+
+        //setup iter number
+        //LoopInfo* cur_li = Prof::get().curFrame()->curLoop();
+        int iter = -1;
+        //bool iter_changed=false;
+        LoopInfo* iter_li = op->func()->innermostLoopFor(op->bb());
+        if(iter_li) {
+          if(op->bb_pos()==0 && iter_li->loop_head() == op->bb()) {
+            iter_li_map[iter_li]+=1;
+
+            //debug
+            //iter_changed=true;
+          }
+          iter = iter_li_map[iter_li];//Prof::get().curFrame()->getLoopIterNum();
+        }
+
+        //figure out which BBs this triggers.
+        if(prevNLAInst) {
+          Op* prev_op = prevNLAInst->_op;
+          if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl() ||
+            (prev_op->isCtrl() && op->bb_pos()!=0) ) {
+            BB* bb = op->bb();
+
+            if(prev_op->isCtrl() && op->bb_pos()!=0) {
+              /*TODO: FIXME: micro-op branches?*/ 
+              //ctrl_inst_map[bb]=prevNLAInst;
+              //do nothing for now.
+            } else {
+              FunctionInfo* f = bb->func();
+              BB* prev_bb = prev_op->bb();
+              if(f->pdomR_has(prev_bb)) {
+                for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
+                  BB* cond_bb = ii->first;
+                  BB* trigger_bb = ii->second;
+                  if(cond_bb == bb) { //if we went in this direction
+                    ctrl_inst_map[trigger_bb]=prevNLAInst;
+//                    std::cout << index << " " << prev_op->id() 
+//                                   << "@BB" << prev_bb->rpoNum()
+//                                   << "-> BB"  << trigger_bb->rpoNum() << "\n";
+                                               
+                  }
+                }
+              }
+            }
+          }
+        }
+
+
         if(!li->sgSchedNLA().opScheduled(op)) {
           //if(op->plainMove()) {
           createDummy(img,index,op);
@@ -553,17 +640,43 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           prev_transition=false;
         }
 
-
         //make nla instruction
         //NLAInst* inst = new NLAInst(img,index,op);
         //std::shared_ptr<NLAInst> nla_inst = std::shared_ptr<NLAInst>(inst);
         auto nla_inst = std::make_shared<NLAInst>(img,index,op); 
-
-        //setup iter number
-        //LoopInfo* cur_li = Prof::get().curFrame()->curLoop();
-        int iter = Prof::get().curFrame()->getLoopIterNum();
-        //cout << "                   iter " << iter << "\n";
         nla_inst->iter=iter;
+
+        //I can also now keep track of this in recent instructions.
+        unsigned iter_dist =  _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+        int mod_iter = -1;  
+        if(iter!=-1) {
+          mod_iter  = iter % iter_dist;
+          
+          if(_recentInsts[op].size() < iter_dist) {
+            _recentInsts[op].resize(iter_dist);
+          }
+          
+          _recentInsts[op][mod_iter]=nla_inst;
+        }
+
+        //if(iter_changed) {
+        //  cout << iter_li->id() << ": " << "iter: " << iter << " mod_iter: " << mod_iter << "\t";
+
+        //  int i = 0;
+        //  if(_lastOp.count(iter_li)) {
+        //    for(const auto& last_sg : _lastOp[iter_li]) {
+        //      cout << setw(7);
+        //      if(last_sg && last_sg->endCFU) {
+        //        cout << last_sg->endCFU->cycle() << " ";
+        //      } else {
+        //        cout << 0 << " ";
+        //      }
+        //      ++i;
+        //    }
+        //  }
+        //  cout << "\n";
+        //}
+
 
         //find loop lateches -- this currently segfaults!
         // innermostLoopFor can't be gauranteed not to fail
@@ -574,39 +687,6 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         //  }
         //}
 
-        //figure out which BBs this triggers.
-        if(prevNLAInst) {
-          Op* prev_op = prevNLAInst->_op;
-          if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl() ||
-            (prev_op->isCtrl() && op->bb_pos()!=0) ) {
-            BB* bb = op->bb();
-
-            if(prev_op->isCtrl() && op->bb_pos()!=0) {
-               /*TODO: FIXME: micro-op branches?*/ 
-              //ctrl_inst_map[bb]=prevNLAInst;
-              //do nothing for now.
-            } else {
-              FunctionInfo* f = bb->func();
-              BB* prev_bb = prev_op->bb();
-              if(f->pdomR_has(prev_bb)) {
-                for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
-                  BB* cond_bb = ii->first;
-                  BB* trigger_bb = ii->second;
-                  if(cond_bb == bb) { //if we went in this direction
-                    ctrl_inst_map[trigger_bb]=prevNLAInst;
-//                    std::cout << index << " " << prev_op->id() 
-//                                   << "@BB" << prev_bb->rpoNum()
-//                                   << "-> BB"  << trigger_bb->rpoNum() << "\n";
-                                              
-                                               
-                   
-                  }
-                }
-              }
-            }
-          }
-        }
-
         getCPDG()->addInst(nla_inst,index);
         curNLAInsts.push_back(nla_inst);               
         addNLADeps(nla_inst,op,li);
@@ -616,23 +696,38 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           prevMemSubgraph=nla_inst->dynSubgraph;
         }
 
+        //Save the original cache producer for a line.  Assumptions:
+        //1. only one cache_producer_for_a_line per basic block (should be fair)
+        //2. first to access in program order was the first to access in the
+        //original simulation.  (same assumption as OOO model)
+        if(nla_inst->_isload) {
+          uint64_t cache_line1 = cache_mask(nla_inst->_eff_addr);
+          uint64_t cache_line2 = cache_mask(nla_inst->_eff_addr+nla_inst->_acc_size);
+          _cache_reorder_map[cache_line1].add_orig1(nla_inst);
+          if(cache_line1 != cache_line2) {
+            _cache_reorder_map[cache_line2].add_orig2(nla_inst);
+            nla_inst->double_line=true;
+          }
+        }
+
         int lat=epLat(img._cc-img._ec,nla_inst.get(),img._isload,
                       img._isstore,img._cache_prod,img._true_cache_prod,true);
         int st_lat=stLat(img._xc-img._wc,img._cache_prod,
                          img._true_cache_prod,true/*is accelerated*/);
 
-        if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
+        if(op && (ignoreMem(*nla_inst) || op->ctrlMove() ) ) {
           lat=0;
           st_lat=0;
         }
 
-        nla_inst->updateLat(lat);
+        nla_inst->updateLat(lat); //initial mem lat -- can change later
         nla_inst->updateStLat(st_lat);
 
         prevNLAInst=nla_inst;
 
         // delay to enable access prev instance of op
         keepTrackOfInstOpMap(nla_inst,op); 
+        _prev_op=op; 
 
         break;
       } default:
@@ -643,6 +738,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
     prev_bb=op->bb();
     prev_bb_pos=op->bb_pos();
   }
+
+
 
   void doneNLA(uint64_t curCycle) {
     uint64_t cycle_diff = curCycle-_curNLAStartCycle;
@@ -681,6 +778,10 @@ private:
   std::map<Subgraph*,std::shared_ptr<DynSubgraph>> _prevSGMap;
   std::map<LoopInfo*,std::shared_ptr<NLAInst>> _latchOp;
   std::map<LoopInfo*,std::vector<std::shared_ptr<DynSubgraph>>> _lastOp;
+
+  std::unordered_map<Op*,std::vector<std::shared_ptr<NLAInst>>> _recentInsts;
+  //std::vector<std::map<Op*,std::shared_ptr<NLAInst>>> _
+
   std::set<std::shared_ptr<DynSubgraph>> _curSubgraphs;
   std::vector<std::shared_ptr<DynSubgraph>> _vecSubgraphs;
 
@@ -729,16 +830,133 @@ private:
   std::shared_ptr<NLAInst> ctrl_inst;
 
   std::shared_ptr<NLAInst> prev_ctrl_inst;
-  std::shared_ptr<T> ctrl_event;
   std::shared_ptr<T> prev_begin_cfu;
   std::shared_ptr<T> prev_end_cfu;
   std::shared_ptr<DynSubgraph> prev_sg;
 
-  // -------------------------------------------------------------------------------
-  // ----------------------------------Schedule CFUs--------------------------------
-  void schedule_cfus() {
-    top_sort_subgraphs();
+  struct cache_reorder_buffer {
+    //std::set<NLAInst*> nla_insts;
+    std::shared_ptr<NLAInst> orig_cache_prod;
+    std::shared_ptr<NLAInst> chosen_cache_prod;
+    int max_lat=0;
 
+    void add_orig1(std::shared_ptr<NLAInst>& nla_inst) { //first cache line
+      max_lat=std::max(max_lat,(int)nla_inst->_ex_lat);
+      if(orig_cache_prod) {
+        return;
+      } else {
+        orig_cache_prod=nla_inst;
+      }
+    }
+
+    void add_orig2(std::shared_ptr<NLAInst>& nla_inst) { //second cache line
+      add_orig1(nla_inst); // do the same thing for now
+    } 
+  };
+
+  std::map<uint64_t,cache_reorder_buffer> _cache_reorder_map;
+  uint64_t cache_mask(uint64_t eff_addr) {return eff_addr >>6;}
+
+
+  void reorder_cache_prod(std::shared_ptr<NLAInst>& n) {
+    /*if(!n._isload) {
+      continue; //get out if not load?
+    }*/
+
+    uint64_t cache_line1 = cache_mask(n->_eff_addr);
+    uint64_t cache_line2 = cache_mask(n->_eff_addr+n->_acc_size);
+    
+    reorder_cache_prod_helper(n,cache_line1,false);
+    if(cache_line1!=cache_line2) {
+      reorder_cache_prod_helper(n,cache_line2,true);
+    }
+  }
+
+  void reorder_cache_prod_helper(std::shared_ptr<NLAInst>& n, 
+                                 uint64_t cache_line, bool line2) {
+
+    //Reorder the cache producer based on the original producer
+
+    std::map<uint64_t,cache_reorder_buffer>::iterator it;
+    it =_cache_reorder_map.find(cache_line);
+
+    if(it==_cache_reorder_map.end()) { //no match
+      checkPP(*n,E_PPO); //Todo:make this more advanced
+    } else {
+      cache_reorder_buffer& buf = it->second;
+      if(buf.chosen_cache_prod) { //I am not the first to access
+        
+        //chosen_dep_inst is currently always a load
+        add_cache_dep(*buf.chosen_cache_prod, *n, 1, E_PPN);
+        //assert(buf.chosen_cache_prod._n_index!=0);
+
+      } else { //I am the first to access
+        if(n->_isstore) { //if store, don't count
+          checkPP(*n,E_PPS);
+        } else { //first to access, and I'm a Load!
+          if(buf.orig_cache_prod == n) { //i was original anyways
+            buf.chosen_cache_prod=n;
+            
+            if(n->_cache_prod > 0 && n->_cache_prod > n->_index) {
+              BaseInst_t* depInst=cache_dep_at(*n,n->_index-n->_cache_prod);
+              if(depInst) {
+                uint64_t cache_line1 = cache_mask(depInst->_eff_addr);
+                uint64_t cache_line2 = cache_mask(depInst->_eff_addr+depInst->_acc_size);
+                if(cache_line1 == cache_line || cache_line2 == cache_line) { 
+                  //don't enforce this if not related
+                  checkPP(*n,E_PP_,depInst);
+                }
+              }
+            }
+
+            return;
+          } else { //swap latencies
+            //Why?  Because they are independent of eachother, but one of
+            //them happened to get to memory first.
+            //(if they weren't independent, then the earier one in program
+            //order would have gotten here first, hence no need to swap)
+            buf.chosen_cache_prod=n; 
+                        
+#if 0
+            //swap load latency
+            uint16_t buf_mem_ex_lat = buf.orig_cache_prod->ex_lat();
+            buf.orig_cache_prod->updateLat(n->ex_lat());
+            n->updateLat(buf_mem_ex_lat);
+
+            //swap "true cache prod"  (this is probably not necessary)
+            bool buf_true_cache_prod = buf.orig_cache_prod->_true_cache_prod;
+            buf.orig_cache_prod->_true_cache_prod=n->_true_cache_prod;
+            n->_true_cache_prod=buf_true_cache_prod;
+#endif
+
+            buf.orig_cache_prod->lines_swapped++;
+
+            int my_lat = n->ex_lat();
+            n->updateLat(buf.max_lat);
+            
+            if(buf.orig_cache_prod->lines_swapped ==
+                 1 + buf.orig_cache_prod->double_line) {
+              buf.orig_cache_prod->updateLat(my_lat);
+            }
+            
+            uint64_t cache_prod = buf.orig_cache_prod->_cache_prod;
+            if(cache_prod > 0 && cache_prod > buf.orig_cache_prod->_index) {
+              BaseInst_t* depInst=cache_dep_at(*n,buf.orig_cache_prod->_index-cache_prod);
+              if(depInst) {
+                checkPP(*n,E_PPW,depInst);
+              }
+            }
+          }      
+        }
+      }
+    }
+  }
+
+
+  //Apply remaining static constraints.
+  //cur_li is innermost loop for this group of instructions
+  void apply_base_static_constraints(LoopInfo* cur_li, 
+                                     int iter, int mod_iter, int  iter_dist) {
     T* horizon_event = getCPDG()->getHorizon(); 
     uint64_t horizon_cycle = 0;
     if(horizon_event) {
@@ -746,6 +964,28 @@ private:
     }
 
     for(const auto &sg : _vecSubgraphs) { //-----------------FOR EACH SG------------
+      sg->startCFU->reCalculate(); 
+
+      if(sg->insts.size()==1) {
+       Op* op = sg->insts.begin()->lock()->_op;       
+       if(op) {
+         if(! (_optimistic_stack && (op->isConstLoad() || op->isStack())) &&
+            ! op->ctrlMove() && ! op->plainMove() && ! op->isCtrl() && ! op->opclass()==0) 
+         {
+           _dyn_cfu_size[sg->insts.size()]++;
+         }
+       }
+      } else {        
+        _dyn_cfu_size[sg->insts.size()]++;
+      }
+//      std::cout << "  sgind:" << sg->static_sg->id() << " insts:" << sg->insts.size() << " ops:" << sg->ops_in_subgraph.size() << " static:" << sg->static_sg->size() << "li" << li->id() << "\n";
+
+      //for tracking
+      sg->startCFU->_op = sg->insts.begin()->lock()->_op;
+      sg->endCFU->_op = sg->insts.rbegin()->lock()->_op;
+      sg->startCFU->_index = sg->insts.begin()->lock()->_index;
+      sg->endCFU->_index = sg->insts.rbegin()->lock()->_index;
+
 
       assert(nla_start_inst); //have to have some start point
       if(nla_start_inst) {
@@ -759,24 +999,7 @@ private:
         getCPDG()->insert_edge(*nla_config_inst, Inst_t::Complete,
                                *sg->startCFU, /*8/_nla_iops*/ 
                                li->sgSchedNLA().numSubgraphs(),
-                               E_NCFG); //TODO fix xfer
-      }
-
-
-      if(_serialize_sgs) {
-        if(prev_end_cfu) { // completely serial subgraphs
-          getCPDG()->insert_edge(*prev_end_cfu,
-                                 *sg->startCFU, 0, E_NSER);
-        }
-      }
-
-      if(_issue_inorder) { // issue CFUs in order
-        if(prev_begin_cfu) {
-           getCPDG()->insert_edge(*prev_begin_cfu,
-                                  *sg->startCFU, 0, E_NSER);
-//            cout << "NSER  " << prev_sg->static_sg->id() << "->" 
-//                 << sg->static_sg->id() << "\n";
-        }
+                               E_NCFG);
       }
 
       if(_inorder_per_sg) {
@@ -791,21 +1014,37 @@ private:
           std::shared_ptr<NLAInst> nla_inst = sg->insts.begin()->lock();
           BB* bb = nla_inst->_op->bb();
 
-          if(ctrl_inst_map.count(bb)) {
+          if(ctrl_inst_map.count(bb) ) {
             getCPDG()->insert_edge(*ctrl_inst_map[bb], NLAInst::Complete,
-                                                 *sg->startCFU, 0,E_NCTL);
-          } else if(ctrl_event) {
-             getCPDG()->insert_edge(*ctrl_event, *sg->startCFU, 0, E_NCTL);
+                                   *sg->startCFU, 0,E_NCTL);
+
+/*            BB* dep_bb = ctrl_inst_map[bb]->_op->bb();
+            cout << "Func: " << bb->func()->nice_name() 
+                  << " BB Dep: " << dep_bb->rpoNum()
+             << " " 
+             << ctrl_inst_map[bb]->_op->id() << " -c-> " << nla_inst->_op->id() << " "
+             << ctrl_inst_map[bb]->_index << "->" << nla_inst->_index << "\n";*/
+
+          } else if(prev_ctrl_inst) {
+             getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
+                                    *sg->startCFU, 0, E_NCTL);
+
+/*             BB* dep_bb = prev_ctrl_inst->_op->bb();
+             cout << "Func: " << bb->func()->nice_name() 
+                  << " BB Dep: " << dep_bb->rpoNum()
+             << " " 
+             << prev_ctrl_inst->_op->id() << " -c-> " << nla_inst->_op->id() << " "
+             << prev_ctrl_inst->_index << "->" << nla_inst->_index << " (FAIL!!!!!!!!!)\n";*/
           }
-        } else {
-          if(ctrl_event) {
-             getCPDG()->insert_edge(*ctrl_event, *sg->startCFU, 0, E_NCTL);
-          }
+        } else if(prev_ctrl_inst) {
+          getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
+                                 *sg->startCFU, 0, E_NCTL);
         }
 
-      } else { //Speculative
-        if(ctrl_event && ctrl_inst && ctrl_inst->_ctrl_miss) {
-          getCPDG()->insert_edge(*ctrl_event, *sg->startCFU, 10, E_NCTL); 
+      } else { //Speculative -- TODO: FIXME: fix before running speculative NLA
+        if(prev_ctrl_inst && prev_ctrl_inst->_ctrl_miss) {
+          getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
+                                 *sg->startCFU, 10, E_NCTL); 
         }
       }
 
@@ -815,6 +1054,7 @@ private:
         Op* ctrl_op = prev_ctrl_inst->_op;
         LoopInfo* old_li = ctrl_op->func()->innermostLoopFor(ctrl_op->bb());
  
+
         std::shared_ptr<NLAInst> nla_inst = sg->insts.begin()->lock();
         LoopInfo* new_li = nla_inst->_op->func()->innermostLoopFor(nla_inst->_op->bb());
 
@@ -834,31 +1074,36 @@ private:
         }
       }
 
-      std::shared_ptr<NLAInst> begin_nla_inst = sg->insts.begin()->lock();
-      int iter = begin_nla_inst->iter;
 
-      int iter_dist = _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+      if(iter!=-1) {
+        if(cur_li) {
+          if(iter>=iter_dist) {
+            std::vector<std::shared_ptr<DynSubgraph>>& last_sgs = _lastOp[cur_li];
+            if(last_sgs.size() < (unsigned)iter_dist) {
+               last_sgs.resize(iter_dist);
+            }
 
-      int mod_iter = iter % iter_dist;
-      LoopInfo* cur_li = 
-        begin_nla_inst->_op->func()->innermostLoopFor(begin_nla_inst->_op->bb());
+            int hold_iter = (iter-iter_dist+1);
+            int hold_mod_iter = hold_iter%(iter_dist);
 
-      if(cur_li) {
-        if(iter>=iter_dist) {
-          std::shared_ptr<DynSubgraph> holdup_sg = 
-            _lastOp[cur_li][ (iter-iter_dist+1)%(iter_dist) ];
-          
-          getCPDG()->insert_edge(*holdup_sg->endCFU,
-                                 *sg->startCFU, 0, E_NITR);   
-        }
-      }
-  
-      //Check LSQ Size
-      for(auto &inst : sg->insts) {
-        std::shared_ptr<NLAInst> nla_inst = inst.lock();
-        if(nla_inst->_isstore) {
-          checkLSQSize(*sg->startCFU,nla_inst->_isload,nla_inst->_isstore);
-          break;
+            std::shared_ptr<DynSubgraph> holdup_sg = 
+                         last_sgs[hold_mod_iter ];
+            
+            if(holdup_sg) {  
+              
+              //cout << "NITR: " << holdup_sg->endCFU->cycle() << " -> " <<
+              //                           sg->startCFU->cycle() << "";
+              //cout << "(" << holdup_sg->endCFU->_index << " -> " <<
+              //                           sg->startCFU->_index << "";
+              //cout << ", " << holdup_sg->endCFU->_op->id() << " -> " <<
+              //                           sg->startCFU->_op->id() << ") "
+              //             << hold_iter << "," << hold_mod_iter << "->"              
+              //             << iter << "," << mod_iter << "\n";
+
+              getCPDG()->insert_edge(*holdup_sg->endCFU,
+                                     *sg->startCFU, 0, E_NITR);   
+            }
+          }
         }
       }
 
@@ -866,6 +1111,80 @@ private:
       if(horizon_event && sg->startCFU->cycle() < horizon_cycle) { 
         getCPDG()->insert_edge(*horizon_event,
                                *sg->startCFU, 0, E_HORZ);   
+      }
+
+      for(auto &inst : sg->insts) {
+        std::shared_ptr<NLAInst> nla_inst = inst.lock();
+        (*nla_inst)[NLAInst::Execute].reCalculate();
+        (*nla_inst)[NLAInst::Complete].reCalculate();
+        (*nla_inst)[NLAInst::Forward].reCalculate();
+        (*nla_inst)[NLAInst::Writeback].reCalculate();
+      }
+      sg->endCFU->reCalculate(); 
+
+    }
+  }
+
+
+struct sg_time_sort {
+  inline bool operator() (const std::shared_ptr<DynSubgraph>& i1, 
+                          const std::shared_ptr<DynSubgraph>& i2) { 
+    return i1->startCFU->cycle() < i2->startCFU->cycle();
+  } 
+};
+
+  // -------------------------------------------------------------------------------
+  // ----------------------------------Schedule CFUs--------------------------------
+  // 1 Stage Execution Strategy:
+  // 1. Apply all remaining static constraints & calc non-dynamic latency
+  // 2. Sort based on when they look ready to fire
+  // 3. Apply dynamic constraints in that order
+
+  void schedule_cfus(std::shared_ptr<NLAInst> control_inst) {
+    //0. sort subgraphs so step 1. can be performed easily
+    top_sort_subgraphs(); //have to sort to get the estimate properly
+
+    std::shared_ptr<DynSubgraph> sg = *_vecSubgraphs.begin();
+    std::shared_ptr<NLAInst> begin_nla_inst = sg->insts.begin()->lock();
+    cur_li =begin_nla_inst->_op->func()->innermostLoopFor(begin_nla_inst->_op->bb());
+    int iter = begin_nla_inst->iter;
+    int iter_dist =  _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+    int mod_iter  = iter % iter_dist;
+
+    //1. Apply remaining static constraints
+    apply_base_static_constraints(cur_li,iter,mod_iter,iter_dist);
+
+    //2. Sort based on fire time
+    if(_cfus_delay_reads) {
+      std::sort(_vecSubgraphs.begin(),_vecSubgraphs.end(),sg_time_sort());
+    }
+
+    //3.-------Apply Dynamic constraints------------
+    for(const auto &sg : _vecSubgraphs) { 
+
+      if(_serialize_sgs) {
+        if(prev_end_cfu) { // completely serial subgraphs
+          getCPDG()->insert_edge(*prev_end_cfu,
+                                 *sg->startCFU, 0, E_NSER);
+        }
+      }
+
+      if(_issue_inorder) { // issue CFUs in order
+        if(prev_begin_cfu) {
+           getCPDG()->insert_edge(*prev_begin_cfu,
+                                  *sg->startCFU, 0, E_NSER);
+        }
+      }
+  
+      //Check LSQ Size
+      for(auto &inst : sg->insts) {
+        std::shared_ptr<NLAInst> nla_inst = inst.lock();
+        if(nla_inst->_isstore) {
+          if(!ignoreMem(*nla_inst)) {
+            checkLSQSize(*sg->startCFU,nla_inst->_isload,nla_inst->_isstore);
+            break;
+          }
+        }
       }
 
 //      std::cout << "begin cfu" << sg->static_sg->cfu()->ind() 
@@ -895,9 +1214,13 @@ private:
            <<"   bb" << bb->rpoNum() << " inst" << nla_inst->_op->id() << "\n";
            */
 
+      sg->startCFU->done(++n_index);
 
       for(auto &inst : sg->insts) {
+      
         std::shared_ptr<NLAInst> nla_inst = inst.lock();
+        nla_inst->done(++n_index);
+
         (*nla_inst)[NLAInst::Execute].reCalculate();
 
         if(_pipelined_cfus) {
@@ -914,56 +1237,44 @@ private:
           }
         }
 
-        //Execute -- 
-        //TODO: Should we add another event for loads/stores who?
-        //
-        //Hmm: I think this was supposed to be memory port check.  I am updating to
-        //reflext this.  (condition non-sensically used to be &&)
         if(nla_inst->_isload || nla_inst->_isstore) {
-          int fuIndex = fuPoolIdx(nla_inst->_opclass,nla_inst->_op);
-          int maxUnits = getNumFUAvailable(nla_inst->_opclass,nla_inst->_op); //opclass
-          BaseInst_t* min_node = /*static_cast<BaseInst_t*>(*/
-               addResource(fuIndex, nla_inst->cycleOfStage(NLAInst::Execute), 
-                           getFUIssueLatency(nla_inst->_opclass,nla_inst->_op),
-                                              maxUnits, nla_inst);
-      
-          if (min_node) {
-            getCPDG()->insert_edge(*min_node, min_node->beginExecute(),
-                              *nla_inst, NLAInst::Execute, 
-                              getFUIssueLatency(nla_inst->_opclass,nla_inst->_op),E_MP);
+          if(!ignoreMem(*nla_inst)) {
+            checkFuncUnits(nla_inst); //Check Memory Ports
+          }
+
+          if(nla_inst->_isload) {
+            //get the MSHR resource here!
+            reorder_cache_prod(nla_inst);
+            checkNumMSHRs(nla_inst); 
+          } else { //insert stores into SQ (TODO: verify with microbench)
+            if(!ignoreMem(*nla_inst)) {
+              insertLSQ(nla_inst);
+            }
           }
         }
 
-
-
-        if(nla_inst->_isload) {
-          //get the MSHR resource here!
-          checkNumMSHRs(nla_inst); 
-        } else { //TODO: WHAT IS THIS?
-          insertLSQ(nla_inst);
-        }
         (*nla_inst)[NLAInst::Complete].reCalculate();
 
         //cout << "EP " << (*nla_inst)[NLAInst::Execute].cycle() << " "
         //              << (*nla_inst)[NLAInst::Complete].cycle() << "\n";
 
-
         if(_wb_networks != 0) {
           bool needs_forwarding=false;
-          for(auto i=nla_inst->_op->adj_d_begin(),e=nla_inst->_op->adj_d_end();i!=e;++i){
-            Op* dop = *i;
-            if(!li->sgSchedNLA().opScheduled(dop)) {
+          for(auto i=nla_inst->_op->adj_u_begin(),e=nla_inst->_op->adj_u_end();i!=e;++i){
+            Op* uop = *i;
+            if(!li->sgSchedNLA().opScheduled(uop)) {
               continue;
             }
-            if(sg->static_sg->getCFUNode(dop)==NULL) {
+            if(sg->static_sg->getCFUNode(uop)==NULL) {
               needs_forwarding=true; 
               break;
             }
           }
 
           (*nla_inst)[NLAInst::Forward].reCalculate();
+          
 
-          if(needs_forwarding) {
+          if(needs_forwarding && !nla_inst->_op->ctrlMove()) {
             NLAInst* dep_inst = static_cast<NLAInst*>(
                    addResource((uint64_t)&_wb_networks /*hacky hack hack*/,
                    nla_inst->cycleOfStage(NLAInst::Forward),
@@ -979,9 +1290,10 @@ private:
 
         (*nla_inst)[NLAInst::Writeback].reCalculate();
         if(nla_inst->_isstore) {
+          reorder_cache_prod(nla_inst);
           checkNumMSHRs(nla_inst); 
         }
-        
+
         //cout << "FW" << (*nla_inst)[NLAInst::Forward].cycle() << " "
         //             << (*nla_inst)[NLAInst::Writeback].cycle() << "\n";
 
@@ -1017,25 +1329,33 @@ private:
       prev_sg=sg;
       prev_begin_cfu=sg->startCFU;
       prev_end_cfu=sg->endCFU;
-
+ 
       sg->endCFU->reCalculate();
       _regionStats[li].total_cinsts+=1;
 
+      sg->endCFU->done(++n_index);
 
       //LoopInfo* li = Prof::get().curFrame()->curLoop();
       //int iter = Prof::get().curFrame()->getLoopIterNum();
 
+
       //see if last op
-      std::vector<std::shared_ptr<DynSubgraph>>& last_sgs = _lastOp[cur_li];
-      
-      if(last_sgs.size() < (unsigned)iter_dist) {
-        last_sgs.resize(iter_dist);
+      if(cur_li && iter!=-1) {
+        std::vector<std::shared_ptr<DynSubgraph>>& last_sgs = _lastOp[cur_li];
+        
+        if(last_sgs.size() < (unsigned)iter_dist) {
+          last_sgs.resize(iter_dist);
+        }
+        if(!last_sgs[mod_iter] || 
+            last_sgs[mod_iter]->endCFU->cycle() < sg->endCFU->cycle()) {
+          last_sgs[mod_iter]=sg;
+
+          //cout << "update last: " 
+          //  << sg->endCFU->_index << " " << sg->endCFU->_op->id() << " "
+          //  << iter << " " << mod_iter << " " << sg->endCFU->cycle() << "\n";
+        }
       }
-      if(!last_sgs[mod_iter] || 
-          last_sgs[mod_iter]->endCFU->cycle() < sg->endCFU->cycle()) {
-        last_sgs[mod_iter]=sg;
-        //cout << iter << " " << mod_iter << " " << sg->endCFU->cycle() << "\n";
-      }
+
 
       assert(sg.get());
       _prevSGMap[sg->static_sg] = sg;
@@ -1060,11 +1380,16 @@ private:
     }
 
     prev_ctrl_inst=ctrl_inst;
-    ctrl_event=prev_end_cfu; //TODO: make this more robust
- 
+    //ctrl_event=(*prev_ctrl_inst)[NLAInst::Complete];
+      //prev_end_cfu; //TODO: is this better?
+
     curNLAInsts.clear();
     _curSubgraphs.clear();
     _vecSubgraphs.clear();
+    _cache_reorder_map.clear();
+    //cout << "clear at " << n_index << "\n";
+    _sgMap.clear(); 
+
 //    std::cout << "-----------------------------------------------------------------------\n";
   //  std::cout << "clear\n";
   }
@@ -1073,9 +1398,12 @@ private:
     int ep_lat=n->ex_lat();
    
     Op* op = n->_op; //break out if stack -- don't count in energy
-    if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
+    if(op && ignoreMem(*n) ) {
       return;
     }
+
+    _nla_loads+=n->_isload;
+    _nla_stores+=n->_isstore;
 
     if(n->_isload || n->_isstore) {
       calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
@@ -1102,6 +1430,8 @@ private:
     } 
 
     if(n->_isload) {
+//      cout << "load " << n->_op->id() << " " << access_time << "\n";
+
       BaseInst_t* min_node =
            addMSHRResource(access_time, 
                            mshrT, n, n->_eff_addr, 1, rechecks, extraLat);
@@ -1126,6 +1456,8 @@ private:
     Subgraph* sg = li->sgSchedNLA().sgForOp(op);
     assert(sg);
 
+//    std::cout << "op:" << op->id() << " sgind:" << sg->id() << " func:" << op->func()->nice_name() << "\n";
+
     if(op->isCtrl()) {
       ctrl_inst=n;
     }
@@ -1133,7 +1465,7 @@ private:
     std::shared_ptr<DynSubgraph> dynSubgraph = _sgMap[sg];
 
     if(!dynSubgraph || dynSubgraph->ops_in_subgraph.count(op) == 1) {
-      n->dynSubgraph = std::make_shared<DynSubgraph>(sg,dynSGindex++); //initialize dynsubgrpah
+      n->dynSubgraph = std::make_shared<DynSubgraph>(sg,dynSGindex++,n->_index); 
       _sgMap[sg] = n->dynSubgraph;
       n->dynSubgraph->setCumWeights(curWeights()); //&_regionStats[li].cum_weights);
 
@@ -1145,13 +1477,31 @@ private:
       cout << "make shared " << n->dynSubgraph->static_sg->id() 
            << "(op: " << op->id() << ")\n";
 */
+     //   cout << " " << n->_index 
+     //        << "(" << n->_op->id() << ",n:" << n->dynSubgraph->dyn_ind << ")";
+
       _curSubgraphs.insert(n->dynSubgraph);
     } else {
       n->dynSubgraph = dynSubgraph;
+
+      //cout << " " << n->_index 
+      //     << "(" << n->_op->id() << ",o:" << n->dynSubgraph->dyn_ind << ")";
+
+
+
+      if(n->_index>4000) {
+        assert(n->_index - 4000 < n->startCFU()->_index );
+      }
+
 /*      cout << "----same " << n->dynSubgraph->static_sg->id()
            << "(op: " << op->id() << ")\n";
 */
     }
+
+    if(n->_index>4000) {
+      assert(n->_index - 4000 < n->startCFU()->_index );
+    }
+
 
     n->dynSubgraph->ops_in_subgraph.insert(op);
     n->dynSubgraph->insts.push_back(n);
@@ -1164,12 +1514,17 @@ private:
 
     getCPDG()->insert_edge(*n, NLAInst::Complete,*n->endCFU(),   0, E_CFUE);
 
+
+    int fwd_lat=_nla_fwd_lat;
+    if(n->_op->ctrlMove()) {
+      fwd_lat=0;
+    }
+
     getCPDG()->insert_edge(*n, NLAInst::Complete,
-                           *n, NLAInst::Forward, 1, E_NFWD);
+                           *n, NLAInst::Forward, fwd_lat, E_NFWD);
 
     n->st_edge = getCPDG()->insert_edge(*n, NLAInst::Forward,
                                         *n, NLAInst::Writeback, 0, E_WB);
-
 
     //serialize on dependent CFUs
     for (int i = 0; i < MAX_SRC_REGS; ++i) {
@@ -1181,20 +1536,39 @@ private:
         continue;
       }
       dg_inst_base<T,E>* orig_depInst=&(getCPDG()->queryNodes(n->index()-prod));
+      if(orig_depInst->_op && orig_depInst->_op->shouldIgnoreInAccel()) {
+        continue;
+      }
 
       bool out_of_bounds=false, error=false;
       dg_inst_base<T,E>* depInst = fixDummyInstruction(orig_depInst,out_of_bounds,error); //FTFY! : )
       if(error && error_with_dummy_inst==false) {
         error_with_dummy_inst=true;
         std::cerr << "ERROR: Dummy Inst of op had multiple prods:" << op->id() << "\n";
+        std::cerr << op->func()->nice_name() << "\n";
       }
       if(out_of_bounds) {
         continue;
       }
+      if(depInst->_op && 
+          (n->_op->bad_incr_dop(depInst->_op) ||
+           depInst->_op->shouldIgnoreInAccel() )) {
+        continue; 
+      }
 
+      if(n->_op->is_clear_xor()) {
+        continue;
+      }
+
+      assert(orig_depInst->_index >= depInst->_index);
+
+      if(n->_index>4000) {
+        assert(n->_index - 4000 < n->startCFU()->_index );
+      }
+      
       int data_ready_event=-1;
       if(!depInst->isPipelineInst()) {
-        NLAInst* prior_nla_inst = dynamic_cast<NLAInst*>(depInst);
+        NLAInst* prior_nla_inst = static_cast<NLAInst*>(depInst);
 
         //DIFFERENT SUBGRAPHS
         if(prior_nla_inst->dynSubgraph != n->dynSubgraph) {
@@ -1205,15 +1579,16 @@ private:
            /* cout << "NDWR: " << prior_nla_inst->dynSubgraph->static_sg->id() << "->" 
                    << n->dynSubgraph->static_sg->id() << "\n";*/
           } 
-          DynSubgraph::addDep(prior_nla_inst->dynSubgraph,n->dynSubgraph);
+          DynSubgraph::addDep(prior_nla_inst->dynSubgraph,n->dynSubgraph,
+                              false,"reg",*prior_nla_inst,*n);
           if(_cfus_delay_reads) {
             data_ready_event = NLAInst::Forward;
-            getCPDG()->insert_edge(*depInst, data_ready_event,
+            getCPDG()->insert_edge(*prior_nla_inst, data_ready_event,
                                    *n->startCFU(), 0, E_CFUR);
           } else {
             data_ready_event = NLAInst::Forward;
-            getCPDG()->insert_edge(*depInst, data_ready_event,
-                                   *n->startCFU(), 0, E_CFUR);
+            getCPDG()->insert_edge(*prior_nla_inst, data_ready_event,
+                                   *n, NLAInst::Execute, 0, E_CFUR);
           }
           //assert(!SGSched::depFromTo(prior_nla_inst->dynSubgraph->static_sg,
           //                           n->dynSubgraph->static_sg));
@@ -1241,35 +1616,110 @@ private:
           continue;
         }
 
-        std::shared_ptr<BaseInst_t> sh_inst = getInstForOp(md_op);
+        std::shared_ptr<BaseInst_t> sh_inst; //the dependent instruction
+
+        int iter=n->iter;
+        if(_agg_mem_dep && iter != -1) {
+          //Here we check if any memory dependence can be either ignored, or
+          //forwarded directly
+
+          vector<int> relDep;
+          bool only = op->nearestDep(md_op,relDep);
+
+          bool should_skip=false;
+          if(relDep.size() > 0) {
+            if(relDep.size() > 1) { //has to be nested
+              for(unsigned i = 0; i < relDep.size()-1; ++i) {
+                if(relDep[i] != 0) { //nearest dep is not in inner loop(TODO:can ignore?)
+                  should_skip=true; 
+                  break;
+                }
+              }
+            }
+  
+            int nearest_dep_len = -relDep[relDep.size()-1];
+            //should_skip will be true if nearest dep not inside inner loop, therefore, 
+            //this is for inner loops.  Also, if same iteration (==0), handle normally
+            if(!should_skip && nearest_dep_len != 0) { 
+              if(nearest_dep_len<0) {
+                static int num_allowed_errors=15;
+                if(num_allowed_errors > 0) {
+                  num_allowed_errors--;
+                  cerr << "ERROR/HUGE PROBLEM: very odd future dependence detected\n";
+                  std::cerr << "func: " << op->func()->nice_name() << "\n";
+                  std::cerr << "op: " << op->id() << "\n";
+                  for(unsigned i = 0; i < relDep.size(); ++i) {
+                    std::cerr << "relDep[" << i << "]=" << i << "\n";
+                  }
+                }
+              }
+
+              unsigned iter_dist =  _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+  
+              if((unsigned)nearest_dep_len >= iter_dist) { //skip if dep. already enforced
+                should_skip=true;
+              } else {
+                int new_iter = std::max(0,iter - nearest_dep_len);
+                int mod_new_iter = new_iter % iter_dist;
+                
+                if(_recentInsts.count(md_op) &&
+                   _recentInsts[md_op].size() == iter_dist &&
+                   _recentInsts[md_op][mod_new_iter] &&
+                   _recentInsts[md_op][mod_new_iter]->iter == new_iter) {
+                  //don't skip, but use this farther back instruction instead
+                  sh_inst = _recentInsts[op][mod_new_iter];
+                  if(_allow_store_fwd && only && md_op->isStore()) {
+                    //not just the nearest dep, but the only dependence -- forward store
+                    n->bypassed=true;  
+                  }
+                }
+              }
+            }
+          }
+          
+          if(should_skip) {
+            continue;
+          }
+        }
+
+        if(!sh_inst) { //only get sh_inst if not set yet
+          sh_inst = getInstForOp(md_op);
+        }
+
         if(sh_inst && !sh_inst->isPipelineInst()) {
-          NLAInst* mem_dep_inst = dynamic_cast<NLAInst*>(sh_inst.get());
-          getCPDG()->insert_edge(*mem_dep_inst,NLAInst::Execute,
-                                 *n,NLAInst::Execute, 1, E_NMTK);
-          if(mem_dep_inst->dynSubgraph!=n->dynSubgraph) {
-            DynSubgraph::addDep(mem_dep_inst->dynSubgraph,n->dynSubgraph);
+          NLAInst* mem_dep_inst = static_cast<NLAInst*>(sh_inst.get());
+
+
+          if(_cfus_delay_reads) {
+            if(mem_dep_inst->dynSubgraph!=n->dynSubgraph) {
+              DynSubgraph::addDep(mem_dep_inst->dynSubgraph,n->dynSubgraph,
+                                  false,"soft-mem",*mem_dep_inst,*n);
+
+              getCPDG()->insert_edge(*mem_dep_inst,mem_dep_inst->eventComplete(),
+                                     *n->startCFU(), 1, E_NMTK);
+            } else {
+              getCPDG()->insert_edge(*mem_dep_inst,mem_dep_inst->eventComplete(),
+                                     *n,n->beginExecute(), 0, E_NMTK);
+            }
+
+          } else {
+            if(mem_dep_inst->dynSubgraph!=n->dynSubgraph) {
+              DynSubgraph::addDep(mem_dep_inst->dynSubgraph,n->dynSubgraph,
+                                  false,"soft-mem",*mem_dep_inst,*n);
+
+              getCPDG()->insert_edge(*mem_dep_inst,mem_dep_inst->eventComplete(),
+                                     *n,NLAInst::Execute, 1, E_NMTK);
+            } else {
+              getCPDG()->insert_edge(*mem_dep_inst,mem_dep_inst->eventComplete(),
+                                     *n,NLAInst::Execute, 0, E_NMTK);
+            }
           }
         }
       }
     }
 
-#if 0
-    //TODO: FIX INORDER ADDRESS CALC
-    if(_inorder_address_calc && prevMemNode) {
-      if((n->_isload || n->_isstore) && 
-          !SGSched::depFromTo(n->dynSubgraph->static_sg,
-                             prevMemSubgraph->static_sg)) {
-        getCPDG()->insert_edge(*prevMemNode,prevMemNode->eventReady(),
-                               *n, NLAInst::Execute, 1, E_NMTK);
-        if(prevMemSubgraph && prevMemSubgraph != n->dynSubgraph) {
-          DynSubgraph::addDep(prevMemSubgraph,n->dynSubgraph,true/*ignore if cycle*/);
-        }
-      }
-    }
-#endif
-
+    //memory dependence
     if(_mem_dep_predictor) {
-      //memory dependence
       if(n->_isload || n->_isstore) {
         if ( (n->_mem_prod > 0 && n->_mem_prod < n->index() )  ) {
           BaseInst_t& dep_inst=getCPDG()->queryNodes(n->index()-n->_mem_prod);
@@ -1277,17 +1727,106 @@ private:
         }
         insert_mem_predicted_edges(*n); 
       }
+    } else {
+      if (n->_mem_prod > 0 && n->_mem_prod < n->_index) {
+        BaseInst_t& prev_node = getCPDG()->queryNodes(n->index()-n->_mem_prod);
+        insert_mem_dep_edge(prev_node,*n);
+      }
     }
 
-    //memory dependence
-    if (n->_mem_prod > 0 && n->_mem_prod < n->_index) {
-      BaseInst_t& prev_node = static_cast<BaseInst_t&>( 
-                          getCPDG()->queryNodes(n->index()-n->_mem_prod));
-
-      insert_mem_dep_edge(prev_node,*n);
-    }
-
+    /*
+    //cache dependence
+    if(n->_isload || n->_isstore) {
+      checkPP(*n);
+    }*/
   }
+
+  virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n) override {
+    if(!prev_node.isPipelineInst() &&  !n.isPipelineInst()) {
+      assert(&prev_node != &n);
+
+      if(prev_node._isload && n._isload) {
+        return;
+       }
+
+      NLAInst& prev_nla_inst = static_cast<NLAInst&>(prev_node);    
+      NLAInst& nla_n    = static_cast<NLAInst&>(n);
+
+
+      //TODO: add in network access, and make this dynamic?
+      if(_cfus_delay_reads) {
+        if(prev_nla_inst.dynSubgraph!=nla_n.dynSubgraph) {
+          DynSubgraph::addDep(prev_nla_inst.dynSubgraph,nla_n.dynSubgraph,
+                          false,"hard-mem",prev_nla_inst,nla_n);
+
+          getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                 *(nla_n.startCFU()),  1, E_MDep);
+        } else {
+          CP_DG_Builder::insert_mem_dep_edge(prev_node,n);
+        } 
+      } else { //hypothetical model
+        if(prev_nla_inst.dynSubgraph!=nla_n.dynSubgraph) {
+          DynSubgraph::addDep(prev_nla_inst.dynSubgraph,nla_n.dynSubgraph,
+                          false,"hard-mem",prev_nla_inst,nla_n);
+
+          getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
+                                 nla_n,nla_n.beginExecute(),  1, E_MDep); //extra lat
+        } else {
+          CP_DG_Builder::insert_mem_dep_edge(prev_node,n);
+        } 
+      }
+    } else {
+      CP_DG_Builder::insert_mem_dep_edge(prev_node,n);
+    }
+  }
+
+  // What types of memory are ignored?
+  // Stack Stores/Loads; Bypassed Loads
+  //
+  // What happens if memory is ignored?
+  // Memory Latency =0
+  // No MSHR Use
+  // No Memory Port Used
+  bool ignoreMem(NLAInst& n) {
+    if(_optimistic_stack && (n._op->isConstLoad() || n._op->isStack())) {
+      return true;
+    }
+    if(n.bypassed) {
+      return true;   
+    }
+    return false;
+  }
+
+#if 0
+  virtual void add_cache_dep(BaseInst_t& depInst, BaseInst_t &n, 
+                             int wait_lat, unsigned edge_type) override {
+
+    CP_DG_Builder::add_cache_dep(depInst,n,wait_lat,edge_type);
+    if(!depInst.isPipelineInst() &&  !n.isPipelineInst()) {
+      NLAInst& prev_nla_inst = static_cast<NLAInst&>(depInst);    
+      NLAInst& prev_nla_n    = static_cast<NLAInst&>(n);
+/*      cout << std::hex <<std::setw(12) << cache_mask(n._eff_addr) << " "
+           << std::dec << setw(8) << depInst._op->getUOPName() << " "
+           << setw(5) << edge_name[edge_type] << " "
+           << depInst._index << "->" << n._index << " " 
+           << "(" << depInst._op->id() << "->" << n._op->id();
+      
+      if(prev_nla_inst.double_line) {
+        cout << " (prev double)";
+      }
+      if(prev_nla_n.double_line) {
+        cout << " (cur double)";
+      }
+
+      cout << ")\n";*/
+
+/*      if(prev_nla_inst.dynSubgraph!=prev_nla_n.dynSubgraph) {
+        DynSubgraph::addDep(prev_nla_inst.dynSubgraph,prev_nla_n.dynSubgraph,
+                            false,"cache",prev_nla_inst,prev_nla_n);
+      }*/
+    }
+  }
+#endif
 
   virtual void printAccelHeader(std::ostream& out, bool hole) {
     out << std::setw(10) << (hole?"":"Avg_Time") << " ";
@@ -1443,6 +1982,17 @@ private:
 
     core->nla_network_accesses=_nla_network_writes;
 
+    //NLA STore Q"
+    //From McPAT:
+    //	    	LSQ->stats_t.readAc.access  = (XML->sys.core[ithCore].load_instructions + XML->sys.core[ithCore].store_instructions)*2;//flush overhead considered
+    //    	LSQ->stats_t.writeAc.access = (XML->sys.core[ithCore].load_instructions + XML->sys.core[ithCore].store_instructions)*2;
+    // To correct for McPAT overestimation of store Q, divide by 4, b/c what i want is this:
+    //     LSQ->stats_t.readAc.access  = XML->sys.core[ithCore].load_instructions;
+    //     LSQ->stats_t.writeAc.access = XML->sys.core[ithCore].store_instructions;
+
+    core->load_instructions     = _nla_loads/4;
+    core->store_instructions    = _nla_stores/4;
+
     accAccelEnergyEvents();
   }
 
@@ -1472,27 +2022,30 @@ private:
               case CFU_node::ALU: nALUs_on++; break;
               case CFU_node::MEM: break;
               case CFU_node::MPY: nMULs_on++; break;
-              case CFU_node::SHF: break;
+              case CFU_node::SHF: nALUs_on++; break;
               case CFU_node::MAX: assert(0); break;
             }
           }
         }
       }
       if(nALUs_on) {
-        nALUs_on=std::min(nALUs_on*1/2,1);
+        nALUs_on=std::min(nALUs_on*1/2,1); //correct for split of SHF/ALU
+        //Plus, this makes static/dynamic ratio more consistent with synthesis results
       }
 
       float ialu = RegionStats::get_leakage(mc_accel->cores[0]->exu->exeu,lc)* nALUs_on;
       float mul  = RegionStats::get_leakage(mc_accel->cores[0]->exu->mul,lc) * nMULs_on;
       float imu  = RegionStats::get_leakage(mc_accel->nlas[0]->imu_window,lc)* imus_on;
-      float net  = RegionStats::get_leakage(mc_accel->nlas[0]->bypass,lc);
+
+      float net  = RegionStats::get_leakage(mc_accel->nlas[0]->bypass,lc) * _wb_networks;
+      float lsq  = RegionStats::get_leakage(mc_accel->cores[0]->lsu->LSQ,lc);
 
       //cout << "alu: " << nALUs_on << " " << ialu << "\n";
       //cout << "mul: " << nMULs_on << " " << mul << "\n";
       //cout << "imu: " << imus_on  << " " << imu << "\n";
       //cout << "net: " << 1        << " " << net << "\n";
 
-      return ialu + mul + imu + net;
+      return ialu + mul + imu + net + lsq;
       //  float fpalu = mc_accel->cores[0]->exu->fp_u->rt_power.readOp.dynamic; 
       //  float calu  = mc_accel->cores[0]->exu->mul->rt_power.readOp.dynamic; 
       //  float network = mc_accel->nlas[0]->bypass->rt_power.readOp.dynamic; 
@@ -1511,7 +2064,9 @@ private:
     float imu = mc_accel->nlas[0]->imu_window->rt_power.readOp.dynamic; 
     float network = mc_accel->nlas[0]->bypass->rt_power.readOp.dynamic; 
 
-    return ialu + fpalu + calu + reg + imu + network;
+    float storeQ = mc_accel->cores[0]->lsu->LSQ->rt_power.readOp.dynamic;
+
+    return ialu + fpalu + calu + reg + imu + network + storeQ;
   }
 
   virtual int is_accel_on() {
@@ -1533,10 +2088,12 @@ private:
     float imu = mc_accel->imu_acc_power.rt_power.readOp.dynamic; 
     float network = mc_accel->nla_net_acc_power.rt_power.readOp.dynamic; 
 
-    float total = ialu + fpalu + calu + reg + imu + network;
+    float storeQ = 0; 
+
+    float total = ialu + fpalu + calu + reg + imu + network + storeQ;
 
     std::cout << _name << " accel(" << _nm << "nm)... ";
-    std::cout << total << " (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ", imu:" << imu << ", net:" << network << ")\n";
+    std::cout << total << " (ialu: " <<ialu << ", fp: " << fpalu << ", mul: " << calu << ", reg: " << reg << ", imu:" << imu << ", net:" << network << ", sq: " << storeQ << " <storeq not shown> )\n";
 
   }
 
@@ -1558,6 +2115,9 @@ private:
     _nla_operand_freads_acc  +=  _nla_operand_freads ;
     _nla_operand_fwrites_acc +=  _nla_operand_fwrites;
 
+    _nla_loads_acc           +=  _nla_loads;
+    _nla_stores_acc          +=  _nla_stores;
+
     _nla_int_ops         = 0;
     _nla_fp_ops          = 0;
     _nla_mult_ops        = 0;
@@ -1573,10 +2133,15 @@ private:
     _nla_operand_writes  = 0; 
     _nla_operand_freads  = 0;   
     _nla_operand_fwrites = 0; 
+
+    _nla_loads           = 0;
+    _nla_stores          = 0;
   }
 
   // Handle enrgy events for McPAT XML DOC
   virtual void printAccelMcPATxml(std::string fname_base, int nm) override {
+    cout << "nla_fwd_lat" << _nla_fwd_lat << "\n";
+
     #include "mcpat-defaults.hh"
     pugi::xml_document accel_doc;
     std::istringstream ss(xml_str);

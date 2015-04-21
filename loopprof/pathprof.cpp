@@ -409,6 +409,8 @@ void StackFrame::dyn_dep(Op* dep_op, Op* op,
       curIter->relevantLoop()->addRelativeLoopDep_rw(relDep);
     }
 
+    op->check_nearest_dep(dep_op, relDep);
+
     //cout << "dep dId:" << dep_dId << " dId:" << dId << " " << curIter->functionIter() << " ";
 
     //curIter->print();
@@ -670,12 +672,20 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
 
     for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
       LoopInfo* loopInfo = li->second;
+
+      //std::vector<Op*> long_loop_recs;
+      //loopInfo->calcRecurrences(long_loop_recs);
       loops.insert(std::make_pair(loopInfo->numInsts(),loopInfo));
     }
   } 
 
   std::ofstream sched_stats;
   sched_stats.open("stats/sched-stats.out", std::ofstream::out | std::ofstream::trunc);
+
+  std::ofstream sched_nla;
+  sched_nla.open("stats/sched-nla.out", std::ofstream::out | std::ofstream::trunc);
+  //sched_nla << "#loopname   entries exits iters cinsts    dyn_insts   Includes\n";
+  sched_nla << "#LoopName  loopid entries exits iters static_insts dyn_insts cinsts  Includes\n";
 
   cout << "CFU Scheduling";
   cout.flush();
@@ -755,9 +765,46 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
                                        attempted, total_dyn_insts);
       }
 
+      SGSched& sgSchedNLA = loopInfo->sgSchedNLA();
+
       if(worked) {
         sched_stats << " -- NLA'D\n";
         cout << loopInfo->id() << ",";
+
+        std::set<FunctionInfo*> funcsSeen;
+        std::vector<BB*> totalVec;
+        std::set<LoopInfo*> loopsSeen;
+        for(auto ii=loopInfo->rpo_begin(),ee=loopInfo->rpo_end();ii!=ee;++ii) {
+          BB* bb = *ii;  
+          totalVec.push_back(bb);
+        }
+        loopInfo->inlinedBBs(funcsSeen,totalVec);
+        for(BB* bb : totalVec) {
+          LoopInfo* cli = bb->func()->innermostLoopFor(bb);
+          if(cli!=NULL && cli != loopInfo) {
+            loopsSeen.insert(cli);
+          }
+        }
+
+
+        //sched_nla << "#LoopName loopid entries exits iters static_insts dyn_insts cinsts  Includes\n";
+        sched_nla << loopInfo->nice_name_full_quoted()
+           << " " << loopInfo->id()
+           << " " << loopInfo->getLoopEntries()
+           << " " << loopInfo->getLoopCount()
+           << " " << loopInfo->getTotalIters()
+           << " " << loopInfo->inlinedStaticInsts()
+           << " " << loopInfo->totalDynamicInlinedInsts()
+           << " " << sgSchedNLA.numSubgraphs();
+
+        for(FunctionInfo* fi : funcsSeen) {
+          sched_nla << " " << fi->nice_name_quoted();
+        }
+        for(LoopInfo* li : loopsSeen) {
+          sched_nla << " " << li->nice_name_full_quoted();
+        }
+        sched_nla << "\n";
+
       } else if(!attempted) {
         sched_stats << " -- Skip NLAt\n";
         cout << "s";      
@@ -813,16 +860,19 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
 
   adjustStack(newCPC,isCall,isRet);
 
-  /*if(isChanged) {
-    //cout << "WOOO!\n";
-    FunctionInfo* fi = _callStack.back().funcInfo();
-    cout << fi->firstBB()->head().first << " " << fi->firstBB()->head().second << ", ";
-  }*/
+  //if(isChanged) {
+  //  //cout << "WOOO!\n";
+  //  FunctionInfo* fi = _callStack.back().funcInfo();
+  //  cout << fi->firstBB()->head().first << " " << fi->firstBB()->head().second << ", ";
+  //}
+  
+
   StackFrame& sf = _callStack.back();
   Op* op = sf.processOp_phase2(_dId,newCPC,img._eff_addr,img._acc_size);
   if(op==NULL) {
     return;
   }
+
   op->setImg(img);
 
   _op_buf[_dId%MAX_OPS]=op;
@@ -869,10 +919,19 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
     }
   }
 
+  if(op->isCondCtrl() || op->isIndirectCtrl() || op->isCall() || op->isReturn()) {
+    _ctrlFreeMem.clear();
+  }
+
   if (img._mem_prod != 0) {
     uint64_t full_ind = _dId - img._mem_prod;
     if (img._mem_prod <= _dId) {
-      op->addMemDep(_op_buf[(full_ind + MAX_OPS) % MAX_OPS]);
+      Op* md_op = _op_buf[(full_ind + MAX_OPS) % MAX_OPS];
+      if(_ctrlFreeMem.count(md_op)) {
+        op->addMemDep(md_op,true);
+      } else {
+        op->addMemDep(md_op,false);
+      }
     }
   }
 
@@ -912,6 +971,9 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
       const_load_ops.erase(cpc);
       const_loads_backwards.erase(word_addr);
     }
+  }
+  if(op->isLoad() || op->isStore()) {
+    _ctrlFreeMem.insert(op); 
   }
 
   _dId++;

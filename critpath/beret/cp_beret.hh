@@ -493,6 +493,9 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           if(!_elide_mem) {
             checkNumMSHRs(b_inst); 
           }
+          if(b_inst->_isload) {
+            checkPP(*b_inst);
+          }
         }
         b_inst->reCalculate();  //TODO: check this! : 
 
@@ -527,9 +530,10 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
           //make sure we can fit all of our stores
           // stores must come after all computation is complete
           checkNumMSHRs(b_inst, last_cycle); 
-
           //update the LSQ with this info
-          insertLSQ(b_inst); 
+          insertLSQ(b_inst);  //TODO: This seems suspicious
+        
+          checkPP(*b_inst);
         }
         //done with this instruction
         //getCPDG()->done(sh_inst);

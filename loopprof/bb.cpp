@@ -16,6 +16,8 @@ void BB::trace(BB* bb_next) {
       return;
     }
   }
+  //cout << head().first << "->" << bb_next->head().first << "\n"; 
+
   _succ.push_back(bb_next);
   bb_next->rev_trace(this);
 }

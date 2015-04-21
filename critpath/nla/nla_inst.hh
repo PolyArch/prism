@@ -23,16 +23,21 @@ public:
   std::vector<std::weak_ptr<DynSubgraph>> dep_subgraphs; //things that i depend on
   std::vector<std::weak_ptr<DynSubgraph>> use_subgraphs; //things that use me
 
-  int ind;
-  DynSubgraph(Subgraph *sg, int index) {
+  int dyn_ind;
+  uint64_t index;
+
+  DynSubgraph(Subgraph *sg, int dyn_index, int inst_index) {
     startCFU=std::make_shared<T>();
     endCFU=std::make_shared<T>();
+    startCFU->_index=inst_index; //for tracking errors
     static_sg=sg;
-    ind=index;
+    dyn_ind=dyn_index;
+    index=inst_index;
   }
 
   static void addDep(std::shared_ptr<DynSubgraph> a, 
-                     std::shared_ptr<DynSubgraph> b, bool ignore_if_cycle=false);
+                     std::shared_ptr<DynSubgraph> b, bool ignore_if_cycle,
+                     const char* m, NLAInst& i1, NLAInst& i2);
 
 
   void setCumWeights(CumWeights* cum_weights) {
@@ -75,6 +80,7 @@ public:
   std::shared_ptr<T>& endCFU() {return dynSubgraph->endCFU;}
    
   int iter = -1;
+  bool bypassed = false;
 
   NLAInst(Op* op) {
     this->_op=op;
@@ -88,7 +94,8 @@ public:
   }
 
   E* ex_edge, *st_edge;
-
+  bool double_line=false;
+  int lines_swapped=0;
   void updateImg(const CP_NodeDiskImage &img) {
     _opclass=img._opclass;
     _isload=img._isload;
@@ -108,6 +115,8 @@ public:
     _iscall=img._iscall;
     _hit_level=img._hit_level;
     _miss_level=img._miss_level;
+    _eff_addr=img._eff_addr;
+    _acc_size=img._acc_size;
   }
 
 

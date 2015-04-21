@@ -52,6 +52,7 @@ public:
   uint64_t _eff_addr;
   bool _floating=false;
   bool _iscall=false;
+  bool bypassed=false;
 
   SuperInst(const CP_NodeDiskImage &img, uint64_t index, Op* op):
               dg_inst_base<T,E>(index){
@@ -76,6 +77,7 @@ public:
     _iscall=img._iscall;
     _hit_level=img._hit_level;
     _miss_level=img._miss_level;
+    _eff_addr=img._eff_addr;
     isAccelerated=true;
     this->_op=op;
   }
@@ -96,6 +98,9 @@ public:
     return Complete; 
   }
   virtual unsigned beginExecute() {
+    return Execute; 
+  }
+  virtual unsigned eventReady() {
     return Execute; 
   }
   virtual unsigned eventComplete() {
@@ -122,11 +127,13 @@ class cp_super : public ArgumentHandler,
 
 public:
   cp_super() : CP_DG_Builder<T,E>() {
+    getCPDG()->setCritListener(this);
   }
 
   virtual ~cp_super() {
   }
 
+  virtual bool removes_uops() {return true;}
   virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
     return &cpdg;
   };
@@ -135,21 +142,29 @@ public:
   uint64_t max_cycle=0;
 
   bool _no_speculation=false,_dataflow_no_spec=false;
+  bool _inorder_per_instruction=false, _model_sq=false;
   void handle_argument(const char *name, const char *arg) {
     ArgumentHandler::parse("super-no-spec",name,arg,_no_speculation);
     ArgumentHandler::parse("super-dataflow-no-spec",name,arg,_dataflow_no_spec);
-
-//    cout << "spec: " << _no_speculation << "\n";
+    ArgumentHandler::parse("inorder-per-instruction",name,arg,_inorder_per_instruction);
+    ArgumentHandler::parse("model-sq",name,arg,_model_sq);
+    // cout << "spec: " << _no_speculation << "\n";
   }
+
 
   virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img,Op* op) {
     if (getTraceOutputs()){
       dg_inst_base<T,E>& inst = getCPDG()->queryNodes(index);  
   
-      outs() << index + Prof::get().skipInsts << ": ";
-      outs() << inst.cycleOfStage(0) << " ";
-      outs() << inst.cycleOfStage(1) << " ";
-      outs() << inst.cycleOfStage(2) << " ";
+      for (unsigned i = 0; i < inst.numStages(); ++i) {
+        outs() << inst.cycleOfStage(i) << " ";
+        printEdgeDep(outs(),inst,i,E_FF);
+      }
+
+//      outs() << index + Prof::get().skipInsts << ": ";
+//      outs() << inst.cycleOfStage(0) << " ";
+//      outs() << inst.cycleOfStage(1) << " ";
+//      outs() << inst.cycleOfStage(2) << " ";
 
       CriticalPath::traceOut(index,img,op);
       outs() << "\n";
@@ -157,6 +172,8 @@ public:
   }
 
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) {
+    computeDFCTL(op,img);
+
     if(op &&( op->shouldIgnoreInAccel() || op->plainMove())) {
 //      getCPDG()->insert_edge(*inst, SuperInst::Execute,
  //                          *inst, SuperInst::Complete, 0, E_EP);
@@ -168,14 +185,7 @@ public:
     std::shared_ptr<SuperInst> sh_inst(inst);
     getCPDG()->addInst(sh_inst,index);
 
-  /*  
-    if(op->isBBHead() || op->isMem()) {
-      //only one memory instruction per basic block
-      prev_bb_end=cur_bb_end;
-      T* event_ptr = new T();
-      cur_bb_end.reset(event_ptr);
-    } 
-*/
+
     addDeps(sh_inst,img);
     countOpEnergy(op, _super_fp_ops, _super_mult_ops, _super_int_ops);
 
@@ -186,7 +196,18 @@ public:
       max_cycle = last_cycle;
     }
 
+    if(op->isCall() || op->isReturn()) {
+       ctrl_inst=sh_inst;
+       //ctrl_inst_map.clear();
+    }
+    if(_no_speculation) {
+      if(op->isCondCtrl() || op->isIndirectCtrl() || op->isCall() || op->isReturn()) {
+        ctrl_inst=sh_inst;
+      }
+    }
+
     keepTrackOfInstOpMap(sh_inst,op); 
+    prev_inst=sh_inst;
   }
 
 private:
@@ -202,12 +223,39 @@ private:
 
   std::unordered_map<BB*, std::shared_ptr<SuperInst>> ctrl_inst_map;
 
+  //Compute Dataflow Control -- this must be performed before adding deps
+  void computeDFCTL(Op* op, const CP_NodeDiskImage &img) {
+    if(_dataflow_no_spec) {
 
-  virtual void addDeps(std::shared_ptr<SuperInst>& inst,const CP_NodeDiskImage &img) {     
+      if(prev_inst) {
+        Op* prev_op = prev_inst->_op;
+        if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl()) {
+          BB* bb = op->bb();
+          FunctionInfo* f = bb->func();
+  
+          BB* prev_bb = prev_op->bb();
+          if(f->pdomR_has(prev_bb)) {
+            for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
+              BB* cond_bb = ii->first;
+              BB* trigger_bb = ii->second;
+              if(cond_bb == bb) { //if we went in this direction
+                ctrl_inst_map[trigger_bb]=prev_inst;
+//                std::cout << inst->_index << " " << prev_op->id() 
+//                          << "@BB" << prev_bb->rpoNum()
+//                          << "-> BB"  << trigger_bb->rpoNum() << "\n";
+
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  virtual void addDeps(std::shared_ptr<SuperInst>& inst,const CP_NodeDiskImage &img) {   
     setExecuteCycle_s(inst);
     setCompleteCycle_s(inst);
-    setWritebackCycle_s(inst);
-    
+    setWritebackCycle_s(inst); 
   }
 
 #if 0
@@ -231,6 +279,21 @@ private:
   //(no need for ready, b/c it has dedicated resources)
   virtual void setExecuteCycle_s(std::shared_ptr<SuperInst> &n) {
 
+    if(_inorder_per_instruction) {
+      BaseInstPtr prev_inst_for_op = getInstForOp(n->_op);
+      if(prev_inst_for_op) {
+        getCPDG()->insert_edge(*prev_inst_for_op, prev_inst_for_op->beginExecute(),
+                               *n, SuperInst::Execute, 1, E_SER);
+      }
+    }
+
+    if(_model_sq && n->_isstore) {
+      if(!ignoreMem(*n)) {
+        checkLSQSize((*n)[SuperInst::Execute],n->_isload,n->_isstore);
+        insertLSQ(n);
+      }
+    }
+
     for (int i = 0; i < MAX_SRC_REGS; ++i) {
       unsigned prod = n->_prod[i];
       if (prod <= 0 || prod >= n->index()) {
@@ -238,6 +301,9 @@ private:
       }
 
       dg_inst_base<T,E>* orig_depInst=&(getCPDG()->queryNodes(n->index()-prod));
+      if(orig_depInst->_op && orig_depInst->_op->shouldIgnoreInAccel()) {
+        continue;
+      }
 
       bool out_of_bounds=false, error=false;
       dg_inst_base<T,E>* depInst = fixDummyInstruction(orig_depInst,out_of_bounds,error); //FTFY! : )
@@ -247,6 +313,11 @@ private:
   //    }
       if(out_of_bounds) {
         continue;
+      }
+      if(depInst->_op && 
+          (n->_op->bad_incr_dop(depInst->_op) ||
+           depInst->_op->shouldIgnoreInAccel() )) {
+        continue; 
       }
 
 
@@ -281,32 +352,22 @@ private:
         }
       }
 
+      if(depInst->_op->ctrlMove()) {
+        dep_lat=0;
+      }
+
       getCPDG()->insert_edge(*depInst, depInst->eventComplete(),
                              *n, SuperInst::Execute, dep_lat, E_RDep);
     }
     //memory dependence
     if (n->_mem_prod > 0 && n->_mem_prod < n->index()) {
-      SuperInst& prev_node = static_cast<SuperInst&>( 
-                          getCPDG()->queryNodes(n->index()-n->_mem_prod));
-
-      if (prev_node._isstore && n->_isload) {
-        //data dependence
-        getCPDG()->insert_edge(prev_node.index(), SuperInst::Complete,
-                                  *n, SuperInst::Execute, 0, E_MDep);
-      } else if (prev_node._isstore && n->_isstore) {
-        //anti dependence (output-dep)
-        getCPDG()->insert_edge(prev_node.index(), SuperInst::Complete,
-                                  *n, SuperInst::Execute, 0, E_MDep);
-      } else if (prev_node._isload && n->_isstore) {
-        //anti dependence (load-store)
-        getCPDG()->insert_edge(prev_node.index(), SuperInst::Complete,
-                                  *n, SuperInst::Execute, 0, E_MDep);
-      }
+      BaseInst_t& prev_node = getCPDG()->queryNodes(n->index()-n->_mem_prod);
+      insert_mem_dep_edge(prev_node,*n);
     }
 
     if(_no_speculation && ctrl_inst) {
        getCPDG()->insert_edge(*ctrl_inst,SuperInst::Complete,
-                                     *n,SuperInst::Execute, 0, E_SER);
+                                     *n,SuperInst::Execute, 0, E_NCTL);
     }
 
     if(_dataflow_no_spec) {
@@ -314,18 +375,21 @@ private:
 
       if(ctrl_inst_map.count(bb)) {
         getCPDG()->insert_edge(*ctrl_inst_map[bb],SuperInst::Complete,
-                                               *n,SuperInst::Execute, 0,E_SER);
-        //BB* dep_bb = ctrl_inst_map[bb]->_op->bb();
-        //cout << "Func: " << bb->func()->id() << " BB Dep: " << dep_bb->rpoNum() <<
+                                               *n,SuperInst::Execute, 0,E_NCTL);
+//        BB* dep_bb = ctrl_inst_map[bb]->_op->bb();
+/*        cout << "Func: " << bb->func()->id() << " BB Dep: " << dep_bb->rpoNum()
+             << " " 
+             << ctrl_inst_map[bb]->_op->id() << " -c-> " << n->_op->id() << " "
+             << ctrl_inst_map[bb]->_index << "->" << n->_index << "\n";*/
       } else if (ctrl_inst) {
         getCPDG()->insert_edge(*ctrl_inst,SuperInst::Complete,
-                                     *n,SuperInst::Execute, 0, E_SER);
-        /*cout << "Call Dependence: " << ctrl_inst->_op->func()->id() << ")"
+                                     *n,SuperInst::Execute, 0, E_NCTL);
+/*        cout << "Call Dependence: " << ctrl_inst->_op->func()->id() << ")"
                                     << ctrl_inst->_op->func()->nice_name() << ") " 
                                     << bb->func()->id() 
                                     << "(" << bb->func()->nice_name() << ") ->" 
-                                    << bb->rpoNum() << "\n";
-       */
+                                    << bb->rpoNum() << "\n";*/
+       
       }
     }
     
@@ -359,7 +423,7 @@ private:
 
     if(horizon_event && n->cycleOfStage(SuperInst::Execute) < horizon_cycle) { 
       getCPDG()->insert_edge(*horizon_event,
-                             *n, SuperInst::Execute, E_HORZ);   
+                             *n, SuperInst::Execute, 0, E_HORZ);   
     }
 
     if(horizon_event) {
@@ -370,15 +434,14 @@ private:
     }
 
     //Only constrain memory port resources
-    if(n->_opclass==30 || n->_opclass==31) {
-      checkFuncUnits(n);
+    if(!ignoreMem(*n)) {
+      if(n->_opclass==30 || n->_opclass==31) {
+        checkFuncUnits(n);
+      }
     }
 
     if(n->_isload) {
-      Op* op = n->_op; //break out if stack
-      if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
-        //do nothing
-      } else {
+      if(!ignoreMem(*n)) {
         checkNumMSHRs(n);
       }
     }
@@ -412,6 +475,16 @@ private:
     }
   }
   */
+  bool ignoreMem(SuperInst& n) {
+    if(_optimistic_stack && (n._op->isConstLoad() || n._op->isStack())) {
+      return true;
+    }
+    if(n.bypassed) {
+      return true;   
+    }
+    return false;
+  }
+
   virtual unsigned getNumFUAvailable(uint64_t opclass, Op* op) {
     if(opclass==30 || opclass==31) {
       return RW_PORTS;
@@ -425,91 +498,30 @@ private:
     int lat=epLat(inst->_ex_lat,inst.get(),inst->_isload,
                   inst->_isstore,inst->_cache_prod,inst->_true_cache_prod,true);
 
-
-    Op* op = inst->_op; //break out if stack
-    if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
+    if(ignoreMem(*inst) || inst->_op->ctrlMove()) {
       lat=0;
     }
 
     getCPDG()->insert_edge(*inst, SuperInst::Execute,
                            *inst, SuperInst::Complete, lat, E_EP);
 
-    if(_no_speculation) {
-      Op* op = inst->_op;
- //     BB* bb = op->bb();
-
-      /*
-      bool fall_through=true;
-      if(op->bb_pos()==0) {
-        for(auto i=bb->pred_begin(), e=bb->pred_end();i!=e;++i) {
-          if((*i)->succ_size()!=1) {
-            fall_through=false;
-            break;
-          }
-        }
-        if(bb->pred_size()==0 || fall_through==false) {
-          ctrl_inst = inst;
-        }
-      }*/
-      if(op->isCondCtrl() || op->isIndirectCtrl() || op->isCall() || op->isReturn()) {
-        ctrl_inst=inst;
-      }
-    }
-
-    if(_dataflow_no_spec) {
-      Op* op = inst->_op;
-      if(op->isCall() || op->isReturn()) {
-         ctrl_inst=inst;
-         ctrl_inst_map.clear();
-      }
-
-      if(prev_inst) {
-        Op* prev_op = prev_inst->_op;
-
-        //hmm
-        //
-
-        if(prev_op->isCondCtrl() || prev_op->isIndirectCtrl()) {
-          BB* bb = op->bb();
-          FunctionInfo* f = bb->func();
-  
-          BB* prev_bb = prev_op->bb();
-          if(f->pdomR_has(prev_bb)) {
-            for(auto ii = f->pdomR_begin(prev_bb), ee = f->pdomR_end(prev_bb); ii != ee; ++ii) {
-              BB* cond_bb = ii->first;
-              BB* trigger_bb = ii->second;
-              if(cond_bb == bb) { //if we went in this direction
-                ctrl_inst_map[trigger_bb]=prev_inst;
-//                std::cout << inst->_index << " " << prev_op->id() 
-//                          << "@BB" << prev_bb->rpoNum()
-//                          << "-> BB"  << trigger_bb->rpoNum() << "\n";
-
-              }
-            }
-          }
-        }
-      }
-    }
-
-    prev_inst=inst;
+    checkPP(*inst);
   }
 
   virtual void setWritebackCycle_s(std::shared_ptr<SuperInst>& inst) {
     if(inst->_isstore) {
       int st_lat=stLat(inst->_st_lat,inst->_cache_prod,inst->_true_cache_prod,true);
 
-      Op* op = inst->_op; //break out if stack
-      if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
+      if(ignoreMem(*inst)) {
         st_lat=0;
       }
 
       getCPDG()->insert_edge(*inst, SuperInst::Complete,
                              *inst, SuperInst::Writeback, st_lat, E_WB);
 
-      if(op && _optimistic_stack && (op->isConstLoad() || op->isStack())) {
-       //do nothing
-      } else {
+      if(!ignoreMem(*inst)) {
         checkNumMSHRs(inst);
+        checkPP(*inst);
       }
     }
   }
@@ -630,11 +642,7 @@ private:
 
   uint64_t numCycles() {
     return max_cycle;
-    //getCPDG()->finish(maxIndex);
-    //return getCPDG()->getMaxCycles();
   }
-
-
 
 };
 

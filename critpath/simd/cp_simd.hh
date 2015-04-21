@@ -9,6 +9,23 @@
 
 #include "cp_args.hh"
 
+/*  There are many things wrong with the simd model.  (or any model, 
+ *  but particularly the simd model). I attempt to note down the most
+ *  important ones to fix here, for posterity.
+ *
+ *  1. Something about free scatter/gather type operations (forgot exactly
+ *  the problem, haven't seen it in a while)
+ *  Update: 3/27/15 -- Added "op->getStride()>8" to make sure crazy strides
+ *  don't get vectorized.  We are still hozed on the latency of these accesses.
+ *  
+ *  2. Cache produces are not kept track of -- meaning that its possible to
+ *  get free loads the second time, if the same cache line is loaded twice 
+ *  in a region.
+ *
+ */
+
+
+
 static unsigned floor_to_pow2(unsigned num)
 {
   if (num & (num-1)) {
@@ -431,6 +448,7 @@ namespace simd {
                                        int CurLoopIter,
                                        bool forceIT,
                                        unsigned vec_len) {
+      
       //if (vecloop_InstTrace.size() != 0) {
       // std::cout << "Completing SIMD Loop:" << li
       //          << " with iterCnt: " << CurLoopIter << "\n";
@@ -446,6 +464,9 @@ namespace simd {
       // Add trace to the pipe
       for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();I!=E;++I) {
         Op *op = I->first;
+
+        int stride=0;
+        op->getStride(&stride);
 
         if ((CurLoopIter == (int)vec_len) && emitted.count(op))
           continue;
@@ -476,7 +497,7 @@ namespace simd {
         unpackInsts.clear();
         unpackInsts.resize(vec_len);
         if (!forceIT && op->isLoad()) {
-          if (!isStrideAccess(op)) {
+          if (!isStrideAccess(op) || stride>8) {
             // we need to create unpack instruction for the loads
             uint64_t maxDepCycle = 0;
             InstPtr maxDepInst  = 0;
@@ -547,7 +568,7 @@ namespace simd {
             inserted(sh_inst); // bookkeeping
           }
           // Non strided -- create more loads
-          if (!forceIT && !isStrideAccess(op)) {
+          if (!forceIT && (!isStrideAccess(op)||stride>8) ) {
             std::vector<unsigned> loadInsts(vec_len);
             loadInsts[0] =  0;
             for (unsigned i = 1; i < vec_len; ++i) {
@@ -677,8 +698,11 @@ namespace simd {
           unpackInsts.clear();
           unpackInsts.resize(vec_len);
 
+          int stride=0;
+          op->getStride(&stride);
+
           if (op->isLoad()) {
-            if (!isStrideAccess(op)) {
+            if (!isStrideAccess(op) || stride>8) {
               // we need to create unpack instruction for the loads
               uint64_t maxDepCycle = 0;
               InstPtr maxDepInst  = 0;
@@ -772,7 +796,7 @@ namespace simd {
               inserted(inst);
             }
 
-            if (isStrideAccess(op, 0)) {
+            if (isStrideAccess(op, 0)) { //stride 0 access?
               InstPtr sh_inst = createShuffleInst(inst, op);
               addPipeDeps(sh_inst, 0);
               pushPipe(sh_inst);
@@ -780,11 +804,13 @@ namespace simd {
             }
 
             // Non strided -- create more loads
-            if (!isStrideAccess(op) ) {
+            if (!isStrideAccess(op) || stride>8) {
               std::vector<unsigned> loadInsts(vec_len);
               loadInsts[0] =  0;
               for (unsigned i = 1; i < vec_len; ++i) {
                 InstPtr tmpInst = createInst(op->img, inst->index(), op);
+                //Tony/TODO: Don't we need to update these loads with the correct latency???
+                //
                 // // They should atleas tmpInst
                 // for (unsigned j = 0; j < tmpInst->numStages(); ++j) {
                 //  tmpInst[j]->setCycle(inst->cycleOfStage(j));

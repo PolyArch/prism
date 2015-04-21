@@ -218,8 +218,6 @@ protected:
   std::unordered_map<Op*, uint64_t> _latestLoopIdx; //Todo: make this more robust
   std::unordered_map<Op*, std::pair<uint8_t,uint8_t>> _cacheHitLevel;
 
-
-
   virtual void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
                               const CP_NodeDiskImage &img) {
     _loop_InstTrace.push_back(_InstInfo<Op*, InstPtr, CP_NodeDiskImage>(op,

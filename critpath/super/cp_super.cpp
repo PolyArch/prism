@@ -10,5 +10,7 @@ static void init()
 {
   CPRegistry::get()->register_argument("super-no-spec", true, &cp_super.cp_obj);
   CPRegistry::get()->register_argument("super-dataflow-no-spec", true, &cp_super.cp_obj);
+  CPRegistry::get()->register_argument("inorder-per-instruction", true, &cp_super.cp_obj);
+  CPRegistry::get()->register_argument("model-sq", true, &cp_super.cp_obj);
 }
 

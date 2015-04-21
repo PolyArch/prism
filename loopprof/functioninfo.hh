@@ -216,6 +216,10 @@ public:
     return ss.str();
   }
 
+  std::string nice_name_quoted() const {
+   return std::string("\"") + nice_name() + std::string("\"");  
+  } 
+
   char _isSinCos=-1;
   bool isSinCos() {
     if(_isSinCos==-1) {
@@ -417,11 +421,25 @@ public:
     return static_insts;
   }
 
+  int numLoops() {
+    return _loopList.size();
+  }
 
   bool no_loops_in_inlined_callgraph();
 
   bool cantFullyInline() {
     return (_insts==0 || _callsRecursiveFunc);
+  }
+
+  int innerLoopStaticInsts() {
+    int static_insts=0;
+    for(auto i=_loopList.begin(),e=_loopList.end();i!=e;++i) {
+      LoopInfo* li = i->second;
+      if(li->isOuterLoop()) {
+        static_insts+=li->innerLoopStaticInsts();
+      }
+    }
+    return static_insts; 
   }
 
   //the whole thing, with inlining

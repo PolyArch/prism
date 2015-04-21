@@ -23,94 +23,6 @@
 // "edge" is a dependency between events
 // "inst" is simply a group of events
 
-//
-#define EDGE_TABLE                                      \
-  X(DEF,  "DEF", "Default Type")                        \
-  X(NONE, "NONE","Type Not Specified")                  \
-  X(FF,   "FF",  "Fetch to Fetch")                      \
-  X(IC,   "IC",  "ICache Miss")                         \
-  X(FBW,  "FBW", "Fetch Bandwidth")                     \
-  X(FPip, "FPip","Frontend Pipe BW")                    \
-  X(LQTF, "LQTF","Load/Store Queue To Fetch")           \
-  X(BP,   "BP",  "Branch Predict (in-order)")           \
-  X(CM,   "CM",  "Control Miss (OoO)")                  \
-  X(IQ,   "IQ",  "Instruction Queue Full")              \
-  X(LSQ,  "LSQ", "LoadStore Queue Full")                \
-  X(FD,   "FD",  "Fetch to Dispatch")                   \
-  X(DBW,  "DBW", "Dispatch Bandwidth")                  \
-  X(DD,   "DD",  "Dispatch Inorder")                    \
-  X(ROB,  "ROB", "ROB Full")                            \
-  X(DR,   "DR",  "Dispatch to Ready")                   \
-  X(NSpc, "NSpc","non-speculative inst")                \
-  X(RDep, "RDep","Register Dependence")                 \
-  X(MDep, "MDep","Memory Dependnece")                   \
-  X(EPip, "EPip","Execution Pipeline BW")               \
-  X(EE,   "EE",  "Execute to Execute")                  \
-  X(IBW,  "IBW", "Issue Width")                         \
-  X(RE,   "RE",  "Ready to Execute")                    \
-  X(FU,   "FU",  "Functional Unit Hazard")              \
-  X(EP,   "EP",  "Execute to Complete")                 \
-  X(WBBW, "WBBW","WriteBack BandWidth")                 \
-  X(MSHR, "MSHR","MSHR Resource")                       \
-  X(MP,   "MP",  "Memory Port Resource")                \
-  X(WB,   "WB",  "Writeback")                           \
-  X(PP,   "PP",  "Cache Dep (w/e)")                     \
-  X(PC,   "PC",  "Complete To Commit")                  \
-  X(SQUA, "SQUA","Squash Penalty")                      \
-  X(CC,   "CC",  "Commit to Commit")                    \
-  X(CBW,  "CBW", "Commit B/W")                          \
-  X(SER,  "SER", "serialize this instruction")          \
-  X(CXFR, "CXFR","CCores Control Transfer")             \
-  X(CSBB, "CSBB","CCores Seralize BB Activation")       \
-  X(BBA,  "BBA", "CCores Activate Basic Block")         \
-  X(BBE,  "BBR", "CCores Basic Block Ready")            \
-  X(BBC,  "BBC", "CCores Basic Block Complete")         \
-  X(BBN,  "BBN", "CCores Basic Block Not sure")         \
-  X(SEBB, "SEBB", "SEB Region Begin")                   \
-  X(SEBA, "SEBA", "SEB Activate")                       \
-  X(SEBW, "SEBW", "SEB Writeback")                      \
-  X(SEBS, "SEBS", "SEB Serialization")                  \
-  X(SSDF, "SSDF", "SEB Serialization, dataflow")        \
-  X(SSMD, "SSMD", "SEB Serialization, memory dep")        \
-  X(SEBL, "SEBL", "SEB Done")    \
-  X(SEB,  "SEB", "???")                                 \
-  X(SEBD, "SEBD", "Intra-SEB Data Dependence")                \
-  X(SEBX, "SEBX", "Inter-SEB Data Dependence")                \
-  X(BREP, "BREP", "Beret Replay")                               \
-  X(BXFR, "BXFR", "Beret Data Transfer")                        \
-  X(CHT,  "CHT",  "cheat edge for super insts")                 \
-  X(DyDep, "DyDep", "DySER Dependence")                         \
-  X(DyRR,  "DyRR", "DySER Functional unit ready queue")         \
-  X(DyRE,  "DyRE",  "DySER Ready to Execute")                   \
-  X(DyFU,  "DyFU", "DySER Functional unit pipelined")           \
-  X(DyEP,  "DyEP", "DySER Functional Execute to complete")      \
-  X(DyPP,  "DyPP", "DySER Complete To Complete")                \
-  X(DyCR,  "DyCR", "DySER Commit to ready")                     \
-  X(NPUPR, "NPUPR", "NPU Complete to ready")                    \
-  X(NPUFE, "NPUFE", "NPU Fake Edges")                    \
-  X(NCFG,  "NCFG",  "NLA Config") \
-  X(NCPU,  "NCPU",  "NLA to CPU Time") \
-  X(NSER,  "NSER",  "NLA CFU Serialization") \
-  X(NCTL,  "NCTL",  "NLA CTRL Serialization") \
-  X(NSLP,  "NSLP",  "NLA Serialize Loop") \
-  X(NITR,  "NITR",  "NLA Iteration Limit") \
-  X(NNET,  "NNET",  "NLA Network Conflict") \
-  X(CFUR,  "CFUR",  "CFU Ready (operands ready)") \
-  X(CFUB,  "CFUB",  "CFU Begin to Execute") \
-  X(CFUE,  "CFUE",  "CFU Complete to End") \
-  X(NFWD,  "NFWD",  "NLA Forward") \
-  X(NDWR,  "NDWR",  "NLA Delay CFU Writes") \
-  X(NMTK,  "NMTK",  "NLA Memory Token") \
-  X(HORZ,  "HORZ",  "The HORIZON")                    \
-  X(NUM,   "NUM",  "LAST (should not see)")        \
-
-
-
-#define X(a, b, c) E_ ## a,
-enum EDGE_TYPE {
-  EDGE_TABLE
-};
-#undef X
 
 #include "edge_table.hh"
 
@@ -168,6 +80,11 @@ public:
   }
 };
 
+template<typename E>
+class CritEdgeListener {
+public:
+  virtual void listen(E* edge, float weight) = 0;
+};
 
 // single node
 class dg_event_base {
@@ -205,7 +122,7 @@ template<typename T, typename E>
 class dg_inst_base {
 public:
   uint64_t _index=-1;
-  bool done = false;
+  bool _done = false;
   uint16_t _opclass = 0;
   bool _isload = false;
   bool _isstore = false;
@@ -227,7 +144,7 @@ public:
   bool _iscall = false;
   uint16_t _st_lat = 0;
   uint64_t _eff_addr = 0;
-  uint8_t _hit_level = 0, _miss_level = 0;
+  uint8_t _hit_level = 0, _miss_level = 0, _acc_size=0;
 
   virtual T &operator[](const unsigned i) =0;
 
@@ -272,6 +189,12 @@ public:
       (*this)[i]._cum_weights=cm;
       (*this)[i]._index=_index; //fun?
       (*this)[i]._op=_op; //fun?
+    }
+  }
+
+  virtual void done(uint64_t n_index) {
+     for(int i = 0; i < numStages(); ++i) {
+      (*this)[i].done(n_index); //fun?
     }
   }
 
@@ -466,6 +389,8 @@ public:
         old_edge->src()->add_edge(edge);
       }
     }
+    this->_op=from->_op; //super fun?
+    this->_index=from->_index; //super fun?
   }
 
   virtual unsigned numStages() {
@@ -490,7 +415,7 @@ public:
     } else if (this->_isstore) {
       return Writeback;
     } else {
-      assert(0 && "no mem access allowed");
+      assert(0 && "non-memory access not allowed");
     }
   }
   virtual unsigned eventCommit() {
@@ -543,6 +468,8 @@ public:
     this->_eff_addr=img._eff_addr;
     this->_hit_level=img._hit_level;
     this->_miss_level=img._miss_level;
+    this->_acc_size=img._acc_size;
+
 
     _icache_lat=img._icache_lat;
     _numSrcRegs=img._numSrcRegs;
@@ -604,6 +531,7 @@ public:
 
   uint64_t _cycle;
   uint64_t _index=-2;
+  uint64_t _n_index=0;
   Op* _op = NULL;
   dg_inst<NodeTy, E> *_inst;
   CumWeights* _cum_weights;
@@ -682,6 +610,10 @@ public:
     _edges.push_back(e);
     e->dest()->add_pred_edge(e);
     compute_cycle(e);
+  }
+
+  void done(uint64_t n_index) {
+    _n_index=n_index;
   }
 
   static void compute_cycle(EPtr e) {
@@ -842,6 +774,8 @@ public:
                               uint64_t destIdx, unsigned len) = 0;*/
   virtual dg_inst_base<T,E>& queryNodes(uint64_t idx) = 0;
   virtual bool hasIdx(uint64_t idx) = 0;
+  virtual void setCritListener(CritEdgeListener<E>* cel) = 0;
+
 
   virtual CumWeights* cumWeights() = 0;
 
@@ -889,6 +823,7 @@ protected:
   uint64_t _latestIdx;
 
   CumWeights _cum_weights;
+  CritEdgeListener<E>* _crit_edge_listener=NULL;
 
   // The "horizon" is the point beyond which no event may occur before, because
   // it is in the definite past.  This corresponds to a cycle number, and also
@@ -911,6 +846,8 @@ protected:
 */
 
 public:
+  virtual void setCritListener(CritEdgeListener<E>* cel) {_crit_edge_listener=cel;}
+
   bool hasIdx(uint64_t idx) {
     if(idx > _latestIdx) {
       return false;  //don't have it -- looking into the future
@@ -1059,6 +996,7 @@ public:
   bool detectCycle(T* n, std::unordered_set<T*>& seen, 
                        std::unordered_set<T*>& temp, T*& cycle_start) {
     if(temp.count(n)) {
+      std::cout << "cycle edges: \n";
       cycle_start=n;
       return true;
     }
@@ -1071,14 +1009,17 @@ public:
         bool is_cycling = detectCycle(src,seen,temp,cycle_start);
         if(cycle_start) {
           if(is_cycling) {
-            std::cout << "cycle edge: " << edge_name[edge->type()] << " "
-              << (uint64_t)src 
-              << " index:" << edge->src()->_index;
-              
+            if(edge->src()->_op) {
+              std::cout << edge->src()->_op->func()->nice_name() << "\t";
+              std::cout << std::setw(8) << edge->src()->_op->getUOPName();
+            }
+
+            std::cout << std::setw(5) << edge_name[edge->type()] 
+                      << " index:" << edge->src()->_index
+                      << " n_index:" << edge->src()->_n_index;
+             
             if(edge->src()->_op) {
               std::cout << "\top:" << edge->src()->_op->id();
-              std::cout << "\t" 
-                        << edge->src()->_op->func()->nice_name();
             }
             std::cout << "\n";
 
@@ -1166,6 +1107,11 @@ public:
             if(node->_cum_weights) {
               node->_cum_weights->countEdge(edge->type(),edge->len(),weight);
             }
+           
+            if(_crit_edge_listener) {
+              _crit_edge_listener->listen(edge,weight);
+            }
+            
             mini_worklist.insert(src_node);
           }
         }

@@ -64,9 +64,12 @@ void FunctionInfo::ascertainBBs() {
         for(auto si=fallBB->succ_begin(),se=fallBB->succ_end();si!=se;++si) {
           BB* succ_bb = *si;
           succ_bb->removePred(fallBB);
+          //cout << "splitting fall->x to small->x \n";
           smallBB->trace(succ_bb);
         }
         fallBB->clear_succ();
+
+        //cout << "splitting add fall->nextSmallest \n";
         fallBB->trace(nextSmallestBB);
       }
 
@@ -91,6 +94,13 @@ BB* FunctionInfo::addBB(BB* prevBB, CPC headCPC, CPC tailCPC, bool dynamic) {
       bb = bbMapIter->second;
      _bbTailMap[tailCPC].insert(bb); //add to the tail map
      
+     //print new attachment
+//     cout << "create: "; 
+//     if(prevBB!=NULL) {
+//       cout << prevBB->head().first << "-";
+//     }
+//     cout << "->" << headCPC.first << (dynamic?"d":"s") << "\n";
+
    } else {
      bb = bbMapIter->second;
    }
@@ -273,6 +283,7 @@ void FunctionInfo::deleteUnreachableStaticBBs() {
       }
       assert(nBB);
       if(nBB) {
+        //cout << "hooking reach\n";
         addBB(_firstBB,nBB->head(),nBB->tail());
       }
     } else {
@@ -365,6 +376,7 @@ void FunctionInfo::hookupExitBB(std::set<BB*>& exitBBs) {
   BB* newExitBB=NULL;
   for(auto i=exitBBs.begin(),e=exitBBs.end();i!=e;++i) {
     BB* exitBB = *i;
+    //cout << "hooking exit\n";
     newExitBB = addBB(exitBB,make_pair(-2,-2),make_pair(-3,-3));
   }
   newExitBB->setRPONum(_rpo.size());
@@ -773,6 +785,10 @@ void FunctionInfo::toDotFile(std::ostream& out) {
         out << " L" << smallest_li->id();
       }
 
+      if(bb.line_number() != 0) {
+        out << " " << bb.line_number();
+      }
+
       //out << hex << " " << bb.head().first << " " << hex << bb.tail().first;
       //out << dec;
 
@@ -1042,7 +1058,6 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
       //out << "\"" << op->cpc().first << "x" << op->cpc().second << "\" "
       //    << "[label=\"op" << i << "\" style=filled, color=white]\n";
 
-
 /*
       if(op!=bb.lastOp() && !bb.lastOp()->dependsOn(op)) {
       out << "\"" << op->cpc().first << "x" << op->cpc().second << "\""
@@ -1075,55 +1090,29 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
           //input dependences
         }
       }
-    }   
+    } 
 
 
-    BB::BBvec::iterator si,se;
-    BB::IntEdge::iterator ii,ie;
-    for(si=bb.succ_begin(),  se=bb.succ_end(); si!=se; ++si) {
+    for(auto si=bb.succ_begin(),  se=bb.succ_end(); si!=se; ++si) {
       BB* succ_bb = *si;
       if(bb.len() > 0 && succ_bb->len() > 0) {
         out << "\"" << bb.lastOp()->cpc().first << "x" <<  bb.lastOp()->cpc().second
             << "\"->"
             << "\"" << succ_bb->firstOp()->cpc().first << "x" 
             << succ_bb->firstOp()->cpc().second  << "\" [";
-      }
-      
-      out << "ltail=\"cluster_" << bb.head().first << "x" 
+
+        out << "ltail=\"cluster_" << bb.head().first << "x" 
                         << bb.head().second << "\" ";
-      out << "lhead=\"cluster_" << succ_bb->head().first << "x" 
+        out << "lhead=\"cluster_" << succ_bb->head().first << "x"  
                         << succ_bb->head().second << "\" ";
 
-      out << "arrowhead=open arrowsize=1.5 weight=1 penwidth=4 color=blue ];\n"; //minlen=2 : (
-
-
-      /*
-      BB::OpVec::iterator oi,oe;
-      for(oi=succ_bb->op_begin(),oe=succ_bb->op_end(),i=0;oi!=oe;++oi,++i) {
-        Op* succ_op = *oi;
- 
-        out << "\"" << bb.lastOp()->cpc().first << "x" <<  bb.lastOp()->cpc().second
-            << "\"->"
-            << "\"" << succ_op->cpc().first << "x" 
-                  << succ_op->cpc().second  << "\" [label=\"";
-
-        out << "\" ";
-        
-        out << "ltail=\"cluster_" << bb.head().first << "x" 
-                          << bb.head().second << "\" ";
-        out << "lhead=\"cluster_" << succ_bb->head().first << "x" 
-                          << succ_bb->head().second << "\" ";       
-        out << "weight=1 style=\"invis\"];\n";
-      }
-      */
-      
+        out << "arrowhead=open arrowsize=1.5 weight=1 penwidth=4 color=blue ];\n";       
+      }      
     }
-
   }
 
 
-  LoopList::iterator il,el;
-  for(il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
+  for(auto il=_loopList.begin(),el=_loopList.end();il!=el;++il) {
     LoopInfo& li = *(il->second);
 
     LoopInfo* pli = li.parentLoop();
@@ -1131,7 +1120,6 @@ void FunctionInfo::toDotFile_detailed(std::ostream& out) {
       out << "\"loop_" << pli->loop_head()->head().first << "\"->"
           << "\"loop_" << li.loop_head()->head().first << "\";";
     }
-
 
     out << "\"loop_" << li.loop_head()->head().first <<  "\" [fillcolor=pink,label=\"";
     out << "depth = " << li.depth() << ";\\n";

@@ -4,6 +4,8 @@
 #include "cfu.hh"
 #include "vectorization_legality.hh"
 
+#include "../critpath/edge_table.hh"
+
 using namespace std;
 
 uint32_t Subgraph::_idCounter=1;
@@ -175,6 +177,7 @@ bool LoopInfo::dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op) {
 void LoopInfo::beginLoop(bool profile) {
   _curIter=0;
   if(profile) {
+    _loopEntries++;
     _prevOpAddr.clear();
     _prevOpIter.clear();
   }
@@ -251,6 +254,398 @@ void LoopInfo::checkNesting(LoopInfo* li1, LoopInfo* li2) {
 }
 
 
+
+bool LoopInfo::BBReachableHelper(BB* bb1, BB* bb2, set<BB*>& seen) {
+//  cout << "trying bb: " << bb1->rpoNum() << " to " << bb2->rpoNum() << "\n";
+  for(auto I = bb1->succ_begin(), E = bb1->succ_end(); I!=E; ++I) {
+    BB* bb_next = *I;
+    if(bb_next==bb2) { //base case
+      //cout << "found\n";
+      return true;
+    } 
+//    cout << "  new possibility: bb:" << bb_next->rpoNum() << "\n";
+
+    if(inLoop(bb_next) && bb_next != loop_head() && seen.count(bb_next)==0
+       && bb_next->freq()!=0) {
+//      cout << "  Accepted \n";
+      seen.insert(bb_next);
+      bool success=BBReachableHelper(bb_next,bb2,seen);
+      if(success) {
+        return true;
+      }
+//      cout << "nope\n";
+    } 
+  }
+  return false;
+}
+
+bool LoopInfo::BBReachable(BB* bb1, BB* bb2) {
+  set<BB*> seen;
+  if(bb1==bb2 || bb2==loop_head()) {
+    return false;
+  }
+  return BBReachableHelper(bb1,bb2,seen);
+}
+
+bool LoopInfo::reachable_in_iter(Op* op1, Op* op2) {
+  BB* bb1 = op1->bb();
+  BB* bb2 = op2->bb();
+  if(bb1==bb2) {
+    return op1->bb_pos() < op2->bb_pos();
+  } 
+  return BBReachable(bb1,bb2); 
+}
+
+/*
+ * Implement this later
+void path(Op* op1, Op* op2) {
+
+}
+*/
+
+//implicit use of _dist, must be called after calcRecurrences, I know, more
+//lazy programming
+int LoopInfo::longest_dist(std::set<Op*>& op_set) {   
+  int longest=0;
+  for(Op* op1 : op_set) {
+    for(Op* op2 : op_set) {
+      if(op1!=op2 && _dist[op1->t][op2->t]>0) {
+        int length = -_dist[op1->t][op2->t];
+        if(length > longest) {
+          longest=length;
+        }
+      }
+    } 
+  }
+  return longest;
+}
+
+//returns longest path which rec_chains take (assume rec_chains sorted)
+//through the op_set in out_chain<first_op,last_op>
+int longest_path_through_ops(std::vector<rec_chain>& rec_chains,
+                             std::set<Op*>& op_set,
+                             std::pair<Op*,Op*>& out_chain) {
+  for(rec_chain& chain :rec_chains) {
+    Op* start_chain=NULL,* stop_chain=NULL;
+    int total_length=0;
+
+    for(Op* op : chain.ops) {
+      if(start_chain==NULL) {
+        if(op_set.count(op)) {
+          start_chain=op;
+          stop_chain=op; //updated later
+          total_length+=op->avg_lat();
+        }
+      } else { //we started the chain
+        if(op_set.count(op)==0) {
+          out_chain=make_pair(start_chain,stop_chain);
+          return total_length-stop_chain->avg_lat();
+        }
+        total_length+=op->avg_lat();
+        stop_chain=op; //this keeps getting overridden
+      }
+    }
+  }
+  return 0;
+}
+
+
+void update_dist_next(std::vector<std::vector<int>>& dist,
+                      std::vector<std::vector<Op*>>& next,
+                      Op* op1, Op* op2, int new_lat) {
+  if(new_lat < dist[op1->t][op2->t]) {
+    dist[op1->t][op2->t]=new_lat;
+    next[op1->t][op2->t]=op2;
+  }
+}
+
+void LoopInfo::add_rec_edge(std::vector<std::vector<int>>& dist,
+                            std::vector<std::vector<Op*>>& next,
+                  Op* op1, Op* op2, Op* tie_op1, Op* tie_op2) {
+  if(reachable_in_iter(op1,op2)) {
+    int new_lat = -op1->avg_lat();
+    update_dist_next(dist,next,op1,op2,new_lat);
+
+    if(op2 == tie_op1) {
+      update_dist_next(dist,next,op1,tie_op2,new_lat);
+    }
+    if(op2 == tie_op2) {
+      update_dist_next(dist,next,op1,tie_op1,new_lat);
+    }
+
+    //cout << op1->id() << " -> " << op2->id() << " l:" << new_lat << "\n";
+  }
+}
+
+rec_chain recover_path(std::vector<std::vector<Op*>>& next, Op* op1, Op* op2) {
+  rec_chain chain;
+  if(next[op1->t][op2->t]!=NULL) {
+    std::set<Op*> ops_seen;
+    ops_seen.insert(op1);
+
+    Op* cop = op1;
+    //cout << cop->id();
+    chain.add_op(cop);
+
+    while(cop!=op2) {
+      cop = next[cop->t][op2->t];      
+      
+      if(ops_seen.count(cop)||cop==NULL) {
+        //cout << "ERROR:  Recover Path Failed!\n";
+        return rec_chain();
+      } 
+
+      ops_seen.insert(cop);
+
+      //cout << "," << cop->id();
+      chain.add_op(cop);
+    }
+  }
+  return chain;
+}
+
+void update_length(std::vector<std::vector<int>>& dist,
+                   std::vector<std::vector<Op*>>& next,
+                   std::map<Op*,int>& longest_recs,
+                   std::vector<rec_chain>& rec_chains,
+                   Op* op1, Op* op2, int& longest) {
+
+  if(dist[op1->t][op2->t]<0) {
+    //cout << op1->id() << "->" << op2->id() 
+    //     << " has length: " << dist[op1->t][op2->t] << " : ";
+
+    rec_chain chain = recover_path(next,op1,op2);
+    if(chain.length>0) {
+      rec_chains.push_back(chain);
+    } 
+    //cout << "\n";
+
+    int length = -dist[op1->t][op2->t];
+    if(length>0 && length > longest_recs[op1]) {
+      longest_recs[op1]=length;
+    }
+    if(length>longest) {
+      longest=length;
+    }
+  }
+}
+
+bool LoopInfo::kinda_inner() {
+  if(isInnerLoop()) {
+    return true;
+  }
+  if(_immInnerLoops.size()==1) {
+    LoopInfo* ili = *_immInnerLoops.begin();
+    if(ili->_loopCount==0) {
+      BB* head_bb = ili->loop_head();
+      if(head_bb && head_bb->freq()==0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+int LoopInfo::calcRecurrences(std::vector<Op*>& long_loop_recs,
+                              std::vector<rec_chain>& rec_chains,
+                              Op* tie_op1, Op* tie_op2) {
+  //Only longest recurrences for pure inner loops
+  if(!kinda_inner() || containsCallReturn()) {
+    return 0;
+  }
+
+  //Floyd Warshall (lazy programming with maps, I know, I know -- time constarints...)
+  //Since we are using the shortest path algorithm for longest path, we need to 
+  //negate weights... unfortunately we can't handle arbitrary graphs for longest paths,
+  //(cause it's NP complete and I don't want to implement a crazy algorithm), so we are
+  //going to create a DAG and do that instead.
+
+
+  std::vector<Op*> op_vec;
+  std::set<Op*> op_set;
+
+  int num_items = 0;
+
+  //setup dist matrix
+  for(auto I=body_begin(),E=body_end();I!=E;++I) {
+    BB* bb = *I;
+
+    for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+      Op* op = *II;
+      if(op->shouldIgnoreInAccel()) {
+        continue;
+      }
+
+      op_vec.push_back(op);
+      op_set.insert(op);//more lazy programming : ))
+
+      op->t=num_items++;
+    }
+  }
+
+  auto& dist = _dist;
+  auto& next = _next; 
+
+  dist.clear();
+  next.clear();
+
+  dist.resize(num_items);
+  next.resize(num_items);
+  for(int i = 0; i < num_items; ++i) {
+    dist[i].resize(num_items);
+    next[i].resize(num_items);
+
+    for(int j = 0; j < num_items; ++j) {
+      dist[i][j]=0;
+      next[i][j]=NULL;
+    }
+  }
+
+  //setup dist matrix
+  for(auto I=body_begin(),E=body_end();I!=E;++I) {
+    BB* bb = *I;
+
+    for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+      Op* op = *II;
+      if(!op_set.count(op)) {
+        continue;
+      }
+
+      //Print Data Dependences
+      for(auto ui=op->adj_u_begin(),ue=op->adj_u_end();ui!=ue;++ui) {
+        Op* uop = *ui;
+        if(op_set.count(uop)) {
+          add_rec_edge(dist,next, op, uop, tie_op1, tie_op2);
+        }
+      }
+
+      //Print Ctrl Free Memory Dependences (we won't consider others, w/e)
+      for(auto di=op->m_cf_begin(),de=op->m_cf_end();di!=de;++di) {
+        Op* d_mop = *di;
+        if(!op_set.count(d_mop) || (d_mop->isLoad() && op->isLoad())) {
+          continue;
+        }
+        add_rec_edge(dist,next, d_mop, op, tie_op1, tie_op2);
+      }
+    }
+
+    //Since we are targetting NLA, we have to add control deps too, as edges
+    Op* bb_end_inst = bb->lastOp();
+    if(bb_end_inst && op_set.count(bb_end_inst) && func()->pdomR_has(bb)) {
+      for(auto ii = func()->pdomR_begin(bb), ee = func()->pdomR_end(bb); ii!=ee; ++ii){
+        //BB* cond_bb = ii->first;
+        BB* trigger_bb = ii->second;
+
+        if(!inLoop(trigger_bb)) {
+          continue;
+        }
+
+//        cout << bb->rpoNum() << " to " << trigger_bb->rpoNum() << ": ";
+        if(BBReachable(bb,trigger_bb)) {
+//          cout << "Yep\n";
+          for(auto bi=trigger_bb->op_begin(),be=trigger_bb->op_end();bi!=be;++bi) {
+            Op* t_op = *bi;
+            if(op_set.count(t_op)) {
+              add_rec_edge(dist,next, bb_end_inst, t_op, tie_op1, tie_op2);
+            }
+          }
+        } else {
+//          cout << "Nope\n";
+        }
+
+      }
+    }
+
+  }
+
+  //Floyd Warshall
+  for(unsigned k = 0; k<op_vec.size(); ++k) {
+    for(unsigned i = 0; i<op_vec.size(); ++i) {
+      for(unsigned j = 0; j<op_vec.size(); ++j) {
+
+        if(i==k || k==j || i==j ||
+           dist[i][k]==0 ||  dist[k][j]==0) {
+          continue;
+        }
+        if(dist[i][k] + dist[k][j] < dist[i][j]) {
+
+          dist[i][j] = dist[i][k] + dist[k][j];
+          next[i][j] = next[i][k];
+        }
+      }
+    }
+  }
+
+  std::map<Op*,int> longest_recs;
+  int longest=0;
+
+  //print interesting facts
+  //cout << "data dep facts:" << nice_name_full() << "\n";
+  for(auto I=body_begin(),E=body_end();I!=E;++I) {
+    BB* bb = *I;
+
+    for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+      Op* op = *II;
+      if(!op_set.count(op)) {
+         continue;
+      }
+      for(auto di=op->adj_d_begin(),de=op->adj_d_end();di!=de;++di) {
+        Op* dop = *di;
+        if(!op_set.count(dop)) {
+           continue;
+        }
+        if(!reachable_in_iter(dop,op)) {
+          update_length(dist,next,longest_recs,rec_chains,op,dop,longest);
+          if(tie_op1==op) {
+            update_length(dist,next,longest_recs,rec_chains,tie_op2,dop,longest);         
+          }
+          if(tie_op2==op) {
+            update_length(dist,next,longest_recs,rec_chains,tie_op1,dop,longest);         
+          }
+        }
+      }
+    }
+    if(isLatch(bb)) {
+      Op* t_op = bb->lastOp();
+      if(t_op && op_set.count(t_op)) {
+        //cout << "latch facts:\n";
+        BB* head = loop_head();
+        for(auto II=head->op_begin(),EE=head->op_end();II!=EE;++II) {
+          Op* h_op = *II;
+          if(!op_set.count(h_op)) {
+            continue;
+          }
+          update_length(dist,next,longest_recs,rec_chains,h_op,t_op,longest);
+          if(tie_op1==h_op) {
+            update_length(dist,next,longest_recs,rec_chains,tie_op2,t_op,longest);
+          }
+          if(tie_op2==h_op) {
+            update_length(dist,next,longest_recs,rec_chains,tie_op1,t_op,longest); 
+          }      
+        }
+      }
+    }
+  }
+
+  std::sort(rec_chains.begin(),rec_chains.end());
+
+  long_loop_recs.clear();
+  for(auto iter : longest_recs) {
+    Op* op = iter.first;
+    int length = iter.second;
+    if(length > (longest*2)/3 || length > longest-3) {
+      long_loop_recs.push_back(op);
+    }
+  }
+
+  return longest;
+}
+
+
+
+
+
+
 //Keep track of address Paterns
 void LoopInfo::opAddr(Op* op, uint64_t addr, uint8_t acc_size) { 
    static std::set<Op*> null_op;
@@ -308,6 +703,26 @@ void LoopInfo::opAddr(Op* op, uint64_t addr, uint8_t acc_size) {
    if(_opStride[op]!=stride) { //set to false if we saw bad stride;
      _opStriding[op]=false;
    }
+}
+
+
+bool LoopInfo::useOutsideSet(std::set<Op*>& relevantOps, Op* op) {
+   for(auto usi=op->adj_d_begin(),use=op->adj_d_end();usi!=use;++usi) {
+    Op* use_op = *usi;
+    if(relevantOps.count(use_op)>0) {
+      return true;
+    }
+  }
+  return false; 
+}
+bool LoopInfo::depOutsideSet(std::set<Op*>& relevantOps, Op* op) {
+  for(auto dsi=op->adj_d_begin(),dse=op->adj_d_end();dsi!=dse;++dsi) {
+    Op* dep_op = *dsi;
+    if(relevantOps.count(dep_op)>0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 
@@ -410,7 +825,10 @@ void LoopInfo::checkCompatible(std::set<Op*>& ops,
   for(auto di=cur_op->adj_d_begin(),de=cur_op->adj_d_end();di!=de;++di) {
     compatDep(*di,ops,closeSet,orig_op,cur_op,cur_fu,doneOps,doneFUs);
   }
-  for(auto di=cur_op->m_begin(),de=cur_op->m_end();di!=de;++di) {
+  for(auto di=cur_op->m_cf_begin(),de=cur_op->m_cf_end();di!=de;++di) {
+    if((*di)->isLoad() && cur_op->isLoad()) {
+      continue; //TODO: LoadLoad
+    }
     if(!dataDepBT(ops,*di,cur_op)) {
       compatDep(*di,ops,closeSet,orig_op,cur_op,cur_fu,doneOps,doneFUs);
     }
@@ -515,11 +933,15 @@ const char * text_pre = R"HERE(
 binary variable Mvn(v,n), Bvv(v,v);
 positive variable Tv(v);
 positive variable U(v,v,fu);
-variable LAT, READS, WRITES, GOAL;
-alias(v,v1,v2,v3,v4);
+positive variable W(v);
+W.up(v)=1;
+positive variable LAT, READS, WRITES, CP;
+variable GOAL;
+alias(v,v1,v2,v3,v4,vi);
 alias(n,n1,n2);
 alias(fu,fu1,fu2);
 alias(s,s1,s2);
+positive variable PC(v1,v2);
 
 * if v1 is close to v2
 set close_dep(v1,v2);
@@ -540,7 +962,6 @@ for (depth = 0 to 4,
 *display close_dep;
 
 Bvv.fx(v1,v2)$(not possDep(v1,v2))=1;
-
 
 )HERE";
 
@@ -568,7 +989,8 @@ c(v,'nreg')=YES;
 Equations 
   map1(v),
   map2(v),
-  route1(v,v,n),
+*recently removed route1, its redundant with boundary
+*  route1(v,v,n), 
   regforce(v,v),
 *  init_used(v,n),
 *  prop_used1(v,v,n,v),
@@ -582,7 +1004,11 @@ Equations
 
   boundary(v,v,n),
   timing1(v,v),
-  timing2(v,v),
+*  timing2(v,v),
+  timing3a(v,v,v),
+  timing3b(v,v,v),
+  path(v,v),
+  c_cp,
   c_lat(v),
   c_writes,
   c_reads,
@@ -594,10 +1020,10 @@ Equations
 map1(v)..                    sum(fu$     c(v,fu),  Mvn(v,fu)) =e= 1;
 map2(v)..                    sum(fu$(not c(v,fu)), Mvn(v,fu)) =e= 0;
 
-route1(v1,v2,fu2)$(A(v1,v2) and c(v2,fu2)).. 
-      Mvn(v2,fu2) =l= sum(n1$(c(v1,n1) and Hnn(n1,fu2)), Mvn(v1,n1));
+*route1(v1,v2,fu2)$(A(v1,v2) and c(v2,fu2)).. 
+*      Mvn(v2,fu2) =l= sum(n1$(c(v1,n1) and Hnn(n1,fu2)), Mvn(v1,n1));
 
-regforce(v1,v2)$A(v1,v2).. Bvv(v1,v2) =l= Mvn(v1,'nreg');
+regforce(v1,v2)$A(v1,v2).. Bvv(v1,v2) =l= W(v1);
 
 *init_used(v1,fu1)$(c(v1,fu1)).. U(v1,v1,fu1) =g= Mvn(v1,fu1); 
 *prop_used1(v1,v2,fu1,v3)
@@ -610,6 +1036,8 @@ regforce(v1,v2)$A(v1,v2).. Bvv(v1,v2) =l= Mvn(v1,'nreg');
 *  sum(v2$(c(v2,fu) and possDep(v1,v2)),U(v1,v2,fu)) =l= 1;
 
 
+* This equation allows incomming edges to any node. TODO: Split this into
+* two equations to only proper inputs to allow incomming edges.
 boundary(v1,v2,fu2)$(A(v1,v2) and c(v2,fu2))..
          Bvv(v1,v2) =g= -sum(fu1$(c(v1,fu1) and Hnn(fu1,fu2)),Mvn(v1,fu1)) + Mvn(v2,fu2);
 
@@ -631,21 +1059,33 @@ restrict_fu(v1,v2,fu)$(c(v1,fu) and c(v2,fu) and (ORD(v1) lt ORD(v2)) and possDe
                               Mvn(v1,fu) + Mvn(v2,fu) =l= Bvv(v1,v2) +1;
 
 timing1(v1,v2)$(A(v1,v2))..
-                              Tv(v2) =g= Bvv(v1,v2) + Tv(v1);
+                              Tv(v2) =g= Bvv(v1,v2) + L(v1) + Tv(v1);
+*                              Tv(v2) =g= Bvv(v1,v2) + Tv(v1);
 
-timing2(v1,v2)$(A(v1,v2))..
-                              Tv(v2) =l= CARD(v)*Bvv(v1,v2) + Tv(v1);
+*timing2(v1,v2)$(A(v1,v2))..
+*                              Tv(v2) =l= CARD(v)*Bvv(v1,v2) + Tv(v1);
 
-c_writes.. WRITES =e= sum(v, Mvn(v,'nreg'));
+timing3a(v1,v2,vi)$(possDep(v1,v2) and A(vi,v2) and (ORD(v1) lt ORD(v2)) and (ORD(v1) ne ORD(vi)))..
+                    Tv(v1) =g= (Bvv(vi,v2)-Bvv(v1,v2)-1)*sum(v,L(v)+1) + L(vi) + Tv(vi)+1;
+
+timing3b(v1,v2,vi)$(possDep(v1,v2) and A(vi,v1) and (ORD(v1) lt ORD(v2)) and (ORD(v2) ne ORD(vi)))..
+                    Tv(v2) =g= (Bvv(vi,v1)-Bvv(v1,v2)-1)*sum(v,L(v)+1) + L(vi) + Tv(vi)+1;
+
+path(v1,v2)$(P(v1,v2) ne 0).. PC(v1,v2) =e= Tv(v2) - Tv(v1) - P(v1,v2);
+
+c_cp.. CP =e= sum((v1,v2)$(P(v1,v2) ne 0),PC(v1,v2));
+
+
+c_writes.. WRITES =e= sum(v, W(v));
 c_reads..  READS  =e= sum((v1,v2)$(A(v1,v2)), Bvv(v1,v2));
 
-c_lat(v)$(sum(v2$A(v,v2),1) eq 0).. LAT    =g= Tv(v);
-c_goal..   GOAL   =e= LAT + WRITES + READS;
+c_lat(v)$(sum(v2$A(v,v2),1) eq 0).. LAT    =g= Tv(v) - O_LAT;
+c_goal..   GOAL   =e= 5*CP + LAT_F*LAT + 2*WRITES + READS;
 
 
-option optca = 1.9999;
-option optcr = 0.15;
-option reslim = 200;
+option optca = 0.9999;
+option optcr = 0.03;
+option reslim = 250;
 option threads = 16;
 
 Model sg/all/;
@@ -668,46 +1108,59 @@ scalar t;
 *put v.tl n.tl/
 *);
 
-
-* all verticies at this time step
-set par(v); 
+* current supbgraph starters at this time step
+set par(v);
+* done subgraphs
+set done(v);
 * the current subgraph which we are printing
 set curr(v);
 
+loop(v,par(v)=NO);
+loop(v,done(v)=NO);
 
-for (t = 0 to LAT.l,
+for (t = smin(v,Tv.l(v)) to smax(v,Tv.l(v)),
 *  put "TIME" t" "/
 
-  loop(v,par(v)=NO);
   loop(v,
     if(Tv.l(v) >= t-0.05 and Tv.l(v) <= t+0.05,
        par(v)=YES;
     );
   );
   loop(v,
-    if(par(v),
+    if(par(v) and not done(v),
       loop(v1,curr(v1)=NO);
- 
+
       loop((s,n)$(Mvn.l(v,n) and cfu(s,n)),
         put s.tl;
       );
-     
-      
-      par(v)=NO;
+
+      done(v)=YES;
       curr(v)=YES;
-      loop(v3$par(v3),
-        loop((v1,v2,fu1,fu2)$(A(v1,v2)    and Hnn(fu1,fu2)  and 
-                              Mvn.l(v1,fu1) and Mvn.l(v2,fu2) and
-                              (curr(v2) or curr(v1)) 
-                              and Tv.l(v1) >= t-0.05 and Tv.l(v1) <= t+0.05
-                              and Tv.l(v2) >= t-0.05 and Tv.l(v2) <= t+0.05
-                              ),
-          curr(v1)=YES;
-          curr(v2)=YES;
-          par(v1)=NO;
-          par(v2)=NO;
-        );
-      );
+
+      loop(vi$(ORD(vi) < ORD(v) and (1-Bvv.l(vi,v))),
+        curr(vi)=YES;
+        done(vi)=YES;
+      )
+      loop(vi$(ORD(v) < ORD(vi) and (1-Bvv.l(v,vi))),
+        curr(vi)=YES;
+        done(vi)=YES;
+      )
+
+
+
+*      loop(v3$par(v3),
+*        loop((v1,v2,fu1,fu2)$(A(v1,v2)    and Hnn(fu1,fu2)  and
+*                              Mvn.l(v1,fu1) and Mvn.l(v2,fu2) and
+*                              (curr(v2) or curr(v1))
+*                              and Tv.l(v1) >= t-0.05 and Tv.l(v1) <= t+0.05
+*                              and Tv.l(v2) >= t-0.05 and Tv.l(v2) <= t+0.05
+*                              ),
+*          curr(v1)=YES;
+*          curr(v2)=YES;
+*          par(v1)=NO;
+*          par(v2)=NO;
+*        );
+*      );
       loop((v1,fu1)$(curr(v1) and Mvn.l(v1,fu1)),
         put v1.tl fu1.tl;
       );
@@ -717,7 +1170,6 @@ for (t = 0 to LAT.l,
 
 *  put /;
 );
-
 
 
 )HERE";
@@ -881,13 +1333,13 @@ obj/;
 }
 
 bool LoopInfo::printGamsPartitionProgram(std::string filename, CFU_set* cfu_set,
-    bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops) {
+    bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops, bool NLA) {
 
     _sgSchedBeret.reset();  
     BBvec& bbVec = getHotPath();
     return printGamsPartitionProgram(filename,
       bbVec, _sgSchedBeret, 
-      cfu_set, gams_details, no_gams);
+      cfu_set, gams_details, no_gams,NLA);
 }
 
 
@@ -900,6 +1352,16 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set,
                      attempted, max_insts);
 }
 
+void LoopInfo::inlinedBBs(std::set<FunctionInfo*>& funcsSeen,std::vector<BB*>& totalVec){
+  for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+    FunctionInfo* fi = i->first.second;
+    fi->inlinedBBs(funcsSeen,totalVec);
+  }
+  for(auto i=_immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
+    LoopInfo* li=*i;
+    li->inlinedBBs(funcsSeen,totalVec);
+  }  
+}
 
 
 /* This algo Searches chunks up the outer loop into peices, and and schedules
@@ -915,8 +1377,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
   uint64_t total_dyn = totalDynamicInlinedInsts();
   uint64_t total_static = inlinedStaticInsts();
 
-  if(total_dyn <1024 || ((double)total_dyn)/((double)max_insts) < 0.00005 ||
-     total_static *20 > total_dyn) {
+  if(total_dyn < 512 || total_static * 10 > total_dyn) {
     sgSched.reset();
     return false; //skip if any are true
   }
@@ -938,10 +1399,8 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
 //      }
   
       std::cout << "b";
-      for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
-        FunctionInfo* fi = i->first.second;
-        fi->inlinedBBs(funcsSeen,totalVec);
-      }
+      inlinedBBs(funcsSeen,totalVec);
+      
     } else {
       sgSched.reset();
       return false;
@@ -950,7 +1409,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
 
   sgSched.setFuncs(funcsSeen);
   attempted=true;
-  //for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii, ++piece) {
+  //for(auto ii=_rpo.begin(),ee=_rpo.end();ii!=ee;++ii, ++piece) 
   for(auto ii=totalVec.begin(),ee=totalVec.end();ii!=ee;++ii, ++piece) {
     BB* bb = *ii;  
 
@@ -962,7 +1421,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
       ss << "schedNLA." << id() << "." << piece; 
       bool ret = printGamsPartitionProgram(ss.str(),
                      curVec,sgSched,
-                     cfu_set, gams_details, no_gams,100,100); 
+                     cfu_set, gams_details, no_gams,100,100, true/*NLA*/); 
       if(!ret) {
         sgSched.reset();
         return false; //fail if any piece fails
@@ -979,7 +1438,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
      BBvec& bbVec,
      SGSched& sgSched,
      CFU_set* cfu_set, bool gams_details,bool no_gams,
-     int max_beret_size, int max_mem_ops) {
+     int max_beret_size, int max_mem_ops, bool NLA) {
 
   static int id=0;
 
@@ -1017,7 +1476,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         if(bb->len() + cursize > MAX_GAMS_SIZE) {
           //std::cout << "aux scheduling, len:" << cursize << "\n";
           worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
-                             gams_details, no_gams, max_beret_size, max_mem_ops);
+                             gams_details, no_gams, max_beret_size, max_mem_ops, NLA);
 
           if(!worked) {
             std::cerr << "failed 1!\n";
@@ -1034,7 +1493,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       //last one
       //std::cout << "aux scheduling, len:" << cursize << "\n";
       worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
-                                          gams_details, no_gams, max_beret_size, max_mem_ops);
+                                          gams_details, no_gams, max_beret_size, max_mem_ops, NLA);
 
           if(!worked) {
             std::cerr << "failed 2!\n";
@@ -1043,6 +1502,19 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       return worked; //recursively done!  (cheap hack, but w/e)
     }
   }
+
+  BB* first_bb = *bbVec.begin();
+  LoopInfo* inner_li = first_bb->func()->innermostLoopFor(first_bb);
+  /*std::cout << "\n SCHEDULE -- " << first_bb->func()->nice_name();
+  if(inner_li) {
+    std::cout << "(inner li:" << inner_li->id() << ")";
+  }
+
+  for(auto const& bb : bbVec) {
+    cout << " " << bb->rpoNum();
+  }
+  cout << "\n";*/
+
 
   ++id;
   stringstream ids;
@@ -1073,10 +1545,10 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 //      if((op->shouldIgnoreInAccel() || op->plainMove()) && !useOutsideLoop(op)) {
 //        continue;
 //      }
+      //std::cout << op->func()->nice_name();
       if((op->shouldIgnoreInAccel() || op->plainMove())) {
         continue;
       }
-
 
       assert(op);
       opSet.insert(op);
@@ -1097,16 +1569,16 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     return true; //nothing to schedule
   }
 
-/*  if(setContainsCallReturn(opSet)) {
+/*  if(setContainsCallReturn(opSet)) 
     //if loop contains call, don't perform subgraph matching...
     return false;
-  }*/
+  */
 
   std::ofstream out((string("gams/") + filename).c_str()); 
   out << ss.str();
 
   out << "set A(v,v)/";
-  std::stringstream fixes,fixes2,streamD,streamM,streamK;
+  std::stringstream fixes,fixes2,streamD,streamM,streamK,streamL;
   countElements=0;
   unsigned countOps=0;
   int countElementsD=0,countElementsM=0,countElementsK=0;
@@ -1126,7 +1598,8 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         //Don't consider any irrelevant edges.
         if(!dependenceInPath(opSet,op,uop)) {
           fixes << "x.fx('" << op->id() << "')=1;\n"; // must write reg
-          fixes2 << "Mvn.fx('" << op->id() << "','nreg')=1;\n"; // must write reg
+          fixes2 << "Mvn.fx('" << op->id() << "','nreg')=1;"; // must write reg
+          fixes2 << "W.fx('" << op->id() << "')=1;\n"; //must write reg
           continue;
         }
         if(countElements++ != 0) {
@@ -1145,14 +1618,21 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         countElementsM++;
       }
 
-      if(countElementsK++ != 0) {
+      if(countElementsK++ != 0) { //can share with L
         streamK <<",";
+        streamL <<",";
       }
-      streamK << op->id() << "." << CFU_node::kindName(CFU_node::kindOf(op->opclass()));
-      
 
-      for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
+      streamK << op->id() << "." << CFU_node::kindName(CFU_node::kindOf(op->opclass()));
+      streamL << op->id() << " " << op->avg_lat();
+
+      //put data dependence between ctrlFree memory dependences
+      for(auto di=op->m_cf_begin(),de=op->m_cf_end();di!=de;++di) {
         Op* mop = *di;
+        if(mop->isLoad() && op->isLoad()) {
+          continue;
+        }
+
         if(dependenceInPath(opSet,mop,op) && !dataDepBT(opSet,mop,op)) {
           if(countElementsD++ != 0) {
             streamD <<",";
@@ -1164,8 +1644,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
       if(op->numUses()==0 && op->numMemUses()==0) {
         fixes << "x.fx('" << op->id() << "')=0;\n"; //inst does not write reg
-        fixes2 << "Mvn.fx('" << op->id() << "','nreg')=0;\n"; //inst does not write reg
+        fixes2 << "Mvn.fx('" << op->id() << "','nreg')=0;"; //inst does not write reg
+        fixes2 << "W.fx('" << op->id() << "')=0;\n"; //inst does not write reg
       }
+      if(op->isCtrl()) {
+        fixes2 << "Bvv.fx('" << op->id() << "',v)$possDep('" << op->id() << "',v)=1;\n";
+      }
+      
     }
   }
   out << "/;\n"; 
@@ -1175,6 +1660,10 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   out << "/;\n"; 
   out << "set M(v)/";
   out << streamM.str();
+  out << "/;\n"; 
+
+  out << "parameter L(v)/";
+  out << streamL.str();
   out << "/;\n"; 
 
   if(cfu_set) {
@@ -1205,6 +1694,100 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       out << op1->id() << "." << op2->id();
     }
     out << "/;\n"; 
+
+
+
+    if(!NLA) {
+      out << "scalar LAT_F/1/;\n";
+      out << "scalar O_LAT/0/;\n";
+    }
+
+    if(NLA) {
+      std::vector<Op*> long_loop_recs;
+      std::vector<rec_chain> rec_chains;
+      int orig_rec_len = 0;
+      if(inner_li) {
+        inner_li->calcRecurrences(long_loop_recs,rec_chains);
+      }
+ 
+      //first print any important recurrences
+      out << "parameter P(v,v)/";
+      std::pair<Op*,Op*> rec_pair;
+      if(inner_li) {
+        int rec_len = longest_path_through_ops(rec_chains,opSet,rec_pair);
+        if(rec_len>0 && rec_pair.first && rec_pair.second) {
+          out << rec_pair.first->id() << "." << rec_pair.second->id() << " " << rec_len; 
+        }
+      }
+      out << "/;\n";
+
+      out << "scalar O_LAT/"; //original latency
+      if(inner_li) {
+        int length = longest_dist(opSet); //reads _dist implicitly
+        out << length << "/;\n";
+        out << "scalar LAT_F/4/;\n";
+      } else {
+        out << "0/;\n"; //fix this -- should be crit-path latency
+        out << "scalar LAT_F/1/;\n";
+      }
+
+      for(Op* op : long_loop_recs) { //fix long recurrences to 0
+        bool dep_on_other_rec=false; 
+        for(Op* check_op : long_loop_recs) { //first make sure isn't dep on other recs
+          if(op==check_op) {
+            continue;
+          }
+          if(dataDepBT(opSet,check_op,op)) {
+            dep_on_other_rec=true;
+            break;
+          }
+        }
+        if(dep_on_other_rec==false && opSet.count(op)) {
+          fixes2 << "Bvv.fx(v,'" <<op->id() << "')$possDep(v,'" << op->id() << "')=1;\n";
+          //std::cout << "Bvv.fx(v,'" <<op->id() << "')$possDep(v,'" << op->id() << "')=1;\n";
+        }
+      }
+
+      //generate bad Bvv set -- O(n^3) but who cares?
+      for(const std::pair<Op*,Op*>& p : closeSet) {
+        Op* op1 = p.first;
+        Op* op2 = p.second;
+        if(op1==op2) continue;
+        if(op1->id()>op2->id()) continue; //just do one pair
+      
+        bool op1_inc=false,op2_inc=false;
+        bool op1_out=false,op2_out=false;
+        bool fix_off =false;
+
+        if(!dataDepBT(opSet,op1,op2) && !dataDepBT(opSet,op2,op1)) { //operations can go in parallel
+          op1_inc=depOutsideSet(opSet,op1);
+          op2_inc=depOutsideSet(opSet,op2);
+          op1_out=useOutsideSet(opSet,op1);
+          op2_out=useOutsideSet(opSet,op2);          
+          if( (op1_inc && op2_out) || (op1_out && op2_inc) ) {
+            fix_off=true;
+          }
+
+          if(!fix_off) {
+            if(inner_li && _dist.size() <100) {
+
+              //cout << "\n" << op1->id() << "~~" << op2->id() << "\n";            
+              int new_len=inner_li->calcRecurrences(long_loop_recs,rec_chains,op1,op2);
+              if (new_len > orig_rec_len + 2) {
+                fix_off=true; 
+              }
+              //cout  << " new:" << new_len << " old:" << orig_rec_len << "\n";
+            }
+          }
+        }
+
+        if(fix_off) {
+          fixes2 << "Bvv.fx('" << op1->id() << "','" <<op2->id() << "')=1;\n";
+          fixes2 << "Bvv.fx('" << op2->id() << "','" <<op1->id() << "')=1;\n";
+        }
+      }
+    }
+
   }
 
   std::string resultfile=filename + ".out";
@@ -1212,9 +1795,9 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
   if(nMemDepOps < countElementsM/max_mem_ops) {
     nMemDepOps = countElementsM/max_mem_ops;
   }
-  
+ 
+ 
   //TODO: don't redo gams, just make it check current files
-
   if(!cfu_set) { //size-based
     printGamsPartitionText(out,opSet.size(),resultfile,
                            fixes.str(),nMemDepOps,max_beret_size,max_mem_ops);
@@ -1392,7 +1975,8 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
               someDep = true;
             }
           }
-          for(auto di=op->m_begin(),de=op->m_end();di!=de;++di) {
+          for(auto di=op->m_cf_begin(),de=op->m_cf_end();di!=de;++di) {
+            //TODO: LoadLoad
             Op* mem_op = *di;
             if(sg->hasOp(mem_op)) {
               //latestSGInd=sg_ind+1;
@@ -1405,7 +1989,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
         //find earliest position to put it in
         if(someDep || /*usesInPath*/ true || curOp + max_beret_size > countOps) {
           Subgraph* subgraphFound=NULL;
-          //for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) {
+          //for(sg_ind=latestSGInd; sg_ind < subgraphVec.size(); ++sg_ind) 
 
           for(auto i=latest_sg, e=sgSched.sg_end();i!=e;++i) {
 		    Subgraph* sg = *i;
@@ -1496,64 +2080,290 @@ void LoopInfo::serializeSubgraphs() {
   assert(0 && "not implemented -- need to put in sgsched");
 }
 
+/*
 void LoopInfo::printSubgraphDot(std::ostream& out, 
-                                SGSched& sgSched,
-                                bool NLA) {
-  out << "digraph GB{\n";
-  out << "compound=true\n";
+                                std::unordered_map<Op*,std::map<Op*,std::map<unsigned,double>>>* critEdges) {
+  
+}
+*/
 
-  for(auto sgi=sgSched.sg_set_begin(), sge=sgSched.sg_set_end(); sgi!=sge;++sgi) {
-    Subgraph* sg = *(sgi);
-    out << "subgraph"
-        << "\"cluster_" << sg->id() << "\"{" 
-   
-        << "label=\"sg " << sg->id();
-        
-    if(sg->cfu()) {
-     out << " (cfu" << sg->cfu()->ind() << ")";
+//helper function to print node
+void print_dot_node(std::ostream& out, 
+    std::unordered_map<Op*,std::map<Op*,std::map<unsigned,double>>>* critEdges, 
+    Op* op, int weight_min, bool insg=true) {
+  out << "\"" << op->id() << "\" "
+      << "[";
+
+  std::string extra("");
+
+  if(critEdges && (*critEdges)[op][op].size()!=0) {
+    stringstream ss;
+    ss << "\\n";
+    for(const auto& i : (*critEdges)[op][op]) {
+      unsigned type = i.first;
+      double weight = i.second;
+      if(/*type == E_RDep || */weight < weight_min) {
+        continue;
+      }
+      ss << edge_name[type] << ":" << weight << "\\n";
     }
-    out << "\"\n";
 
-    out << "style=\"filled,rounded\"\n";
-    out << "color=lightgrey\n";
+    extra=ss.str();
+  }
 
-    for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
-      Op* op = *oi;
+  out << op->dotty_name_and_tooltip(extra);
+
+  if(insg) {
+    out << ",style=filled, color=white";
+  }
+  out << "]\n";
+}
+
+void print_dot_sg(std::ostream& out, 
+  std::unordered_map<Op*,std::map<Op*,std::map<unsigned,double>>>* critEdges,
+  unordered_map<Op*,map<Op*,string>>& e_msg, unordered_map<Op*,map<Op*,bool>>& e_constr,
+  unordered_map<Op*,map<Op*,bool>>& e_backwards,
+  SGSched& sgSched, Subgraph* sg, int weight_min) {
+
+  out << "subgraph"
+      << "\"cluster_" << sg->id() << "\"{" 
+  
+      << "label=\"sg " << sg->id();
       
-      out << "\"" << op->id() << "\" "
-          << "[";
+  if(sg->cfu()) {
+   out << " (cfu" << sg->cfu()->ind() << ")";
+  }
+  out << "\"\n";
 
-      out << op->dotty_name_and_tooltip();
+  out << "style=\"filled,rounded\"\n";
+  out << "color=cornsilk\n";
 
-      out << ",style=filled, color=white]\n";
+  for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
+    Op* op = *oi;
+    print_dot_node(out,critEdges,op,weight_min);
+  }
 
-    }
-
-    out << "}\n";
+  out << "}\n";
  
- //Iterate through Ops
-    for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
-      Op* op = *oi;
-      
-      Op::Deps::iterator ui,ue; //uses
-      for(ui=op->adj_u_begin(),ue=op->adj_u_end();ui!=ue;++ui) {
-        Op* uop = *ui;
-        if(op->func()==uop->func()) { //only check deps inside the function
-          if(dependenceInPath(sgSched.opSet(),op,uop)) {  //for forward deps
-             out << "\"" << op->id() << "\"" << " -> "
-                 << "\"" << uop->id() << "\"[";
+  //Iterate through Ops
+  for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
+    Op* op = *oi;
+    
+    Op::Deps::iterator ui,ue; //uses
+    for(ui=op->adj_u_begin(),ue=op->adj_u_end();ui!=ue;++ui) {
+      Op* uop = *ui;
+      if(op->func()==uop->func()) { //only check deps inside the function
+        //string label="";
 
-             out << "weight=0.5]\n";
-          } else {
-             out << "\"" << op->id() << "\"" << " -> "
-                 << "\"" << uop->id() << "\"[";
+        e_msg[op][uop]+="";
 
-             out << "weight=0.5,color=red,constraint=false]\n";
-          }
+        /*
+        if(critEdges && (*critEdges)[op][uop][E_RDep] >= weight_min) {
+          stringstream ss;
+          ss << "label=" << (*critEdges)[op][uop][E_RDep] << ",";
+          label=ss.str();
+         }
+         */
+
+        if(LoopInfo::dependenceInPath(sgSched.opSet(),op,uop)) {  //for forward deps
+           /*out << "\"" << op->id() << "\"" << " -> "
+               << "\"" << uop->id() << "\"[" << label;
+           out << "weight=0.5]\n";*/
+           e_constr[op][uop]=true; //makes it black
+        } else {
+           /*out << "\"" << op->id() << "\"" << " -> "
+               << "\"" << uop->id() << "\"[" << label;
+
+           out << "weight=0.5,color=red,fontcolor=red,constraint=false]\n";*/
+           e_backwards[op][uop]=true;
         }
       }
     }
   }
+}
+
+void LoopInfo::printSubgraphDot(std::ostream& out, 
+          SGSched& sgSched,
+          std::unordered_map<Op*,std::map<Op*,std::map<unsigned,double>>>* critEdges, 
+          bool NLA, bool only_sgs,  LoopInfo* li) {
+
+  out << "digraph GB{\n";
+  out << "compound=true\n";
+
+  int weight_min=10; //TODO: make this better
+
+  std::set<Subgraph*> done_sgs;
+
+  //need to coalesce edges for good routing
+  unordered_map<Op*,map<Op*,string>> e_msg;
+  unordered_map<Op*,map<Op*,bool>> e_constr;
+  unordered_map<Op*,map<Op*,bool>> e_backwards;
+
+  // Make all the clusters and groups
+  for(auto I=li->body_begin(),E=li->body_end();I!=E;++I) {
+    BB* bb = *I;
+    out << "subgraph"
+        << "\"cluster_bb" << bb->rpoNum() << "\"{" 
+   
+        << "label=\"BB " << bb->rpoNum() << "\"\n";
+
+    out << "style=\"filled,rounded\"\n";
+    out << "color=lightgrey\n";
+
+    for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+      Op* op = *II;
+      Subgraph * sg = sgSched.sgForOp(op);
+      if(sg && !done_sgs.count(sg)) {
+        done_sgs.insert(sg);
+        print_dot_sg(out,critEdges,e_msg,e_constr,e_backwards,sgSched,sg,weight_min);
+      }
+    }
+    out << "}\n";
+
+    //Print non-sg operands
+    if(!only_sgs) {
+      for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+        Op* op = *II;
+        if(sgSched.sgForOp(op)==NULL) {
+          
+          print_dot_node(out,critEdges,op,weight_min,false); //print the node
+  
+          Op::Deps::iterator ui,ue; //uses
+          for(ui=op->adj_u_begin(),ue=op->adj_u_end();ui!=ue;++ui) {
+            Op* uop = *ui;
+            string label="";  
+            e_msg[op][uop]+="";
+            e_constr[op][uop]=true;
+
+          /* if(critEdges && (*critEdges)[op][uop][E_RDep] >= weight_min) {
+              stringstream ss;
+              ss << "label=" << (*critEdges)[op][uop][E_RDep] << ",";
+              label=ss.str();
+             }*/
+  
+            //if(dependenceInPath(sgSched.opSet(),op,uop)) {  //for forward deps
+          /*     out << "\"" << op->id() << "\"" << " -> "
+                   << "\"" << uop->id() << "\"[" << label;
+               out << "weight=0.5]\n";*/
+            /*} else {
+               out << "\"" << op->id() << "\"" << " -> "
+                   << "\"" << uop->id() << "\"[" << label;
+  
+               out << "weight=0.5,color=red,fontcolor=red,constraint=false]\n";
+            }*/
+          }
+          /*for(const auto& i : (*critEdges)[op]) {
+            Op* dest_op = i.first;
+            if(op==dest_op) {
+              continue;
+            }
+            
+            for(const auto& j : i.second) {
+              unsigned type   = j.first;
+              double   weight = j.second;
+              if(weight >= weight_min) {
+                if(e_msg[op][uop].length()>0) {
+                  e_msg+="\\n";
+                }
+                e_msg += edge_name[type] << ":" << weight;
+
+//                out << "\"" <<     op->id() << "\"" << " -> "
+  //                 << "\"" << dest_op->id() << "\"[";
+
+                //out << "label=\"" << edge_name[type] << ":" << weight << "\",";
+                //out << "weight=0.5,color=purple,fontcolor=purple,constraint=false]\n";
+              }
+            }         
+          }*/
+        }
+
+      }
+    }
+  }
+ 
+  for(auto sgi=sgSched.sg_set_begin(), sge=sgSched.sg_set_end(); sgi!=sge;++sgi) {
+    Subgraph* sg = *(sgi);
+    if(!done_sgs.count(sg)) {
+      print_dot_sg(out,critEdges,e_msg,e_constr,e_backwards,sgSched,sg,weight_min);
+    }
+  }
+
+  if(critEdges) {
+    for(auto sgi=sgSched.sg_set_begin(), sge=sgSched.sg_set_end(); sgi!=sge;++sgi) {
+      Subgraph* sg = *(sgi);
+      for(auto oi=sg->op_begin(),oe=sg->op_end();oi!=oe;++oi) {
+        Op* op = *oi;
+        
+        for(const auto& i : (*critEdges)[op]) {
+          Op* dest_op = i.first;
+          if(op==dest_op) {
+            continue;
+          }
+          
+          for(const auto& j : i.second) {
+            unsigned type   = j.first;
+            double   weight = j.second;
+
+            /*if(type==E_RDep) {
+              continue;
+            }*/
+
+            if(weight >= weight_min) {
+                if(e_msg[op][dest_op].length()>0) {
+                  e_msg[op][dest_op]+="\\n";
+                }
+                stringstream ss;
+                ss <<  edge_name[type] << ":" << weight;
+                e_msg[op][dest_op] +=ss.str();
+
+              /*out << "\"" <<     op->id() << "\"" << " -> "
+                 << "\"" << dest_op->id() << "\"[";
+              out << "label=\"" << edge_name[type] << ":" << weight << "\",";
+              out << "weight=0.5,color=purple,fontcolor=purple,constraint=false]\n";*/
+            }
+          }         
+        }
+      }
+    }
+  }
+  //Print BB Connections
+  for(auto I=li->body_begin(),E=li->body_end();I!=E;++I) {
+    BB* bb = *I;
+    for(auto si=bb->succ_begin(),  se=bb->succ_end(); si!=se; ++si) {
+      BB* succ_bb = *si;
+      if(bb->len() > 0 && succ_bb->len() > 0) {
+        out << "\"" << bb->lastOp()->id() << "\"->" 
+            << "\"" << succ_bb->firstOp()->id() << "\" [";
+
+        out << "ltail=\"cluster_bb" << bb->rpoNum() << "\" ";
+        out << "lhead=\"cluster_bb" << succ_bb->rpoNum() << "\" ";
+
+        out << "arrowhead=open arrowsize=1.5 weight=1 penwidth=4 color=blue ];\n";       
+      } 
+    }
+  }
+
+
+  for(const auto kv1 : e_msg) {
+    Op* op = kv1.first;
+    for(const auto kv2 : e_msg[op]) {
+      Op* uop = kv2.first;
+      string msg = kv2.second; 
+      out << "\"" <<  op->id() << "\"" << " -> "
+          << "\"" << uop->id() << "\"[";
+
+      out << "label=\"" << msg << "\",";
+      if(e_constr[op][uop]) {
+        out << "weight=0.5,color=black,fontcolor=black,constraint=true]\n";
+      } else if (e_backwards[op][uop]) {
+        out << "weight=0.5,color=red,fontcolor=red,constraint=false]\n";
+      } else {
+        out << "weight=0.5,color=purple,fontcolor=purple,constraint=false]\n";
+      }
+    }
+  }
+  
+
   out << "}\n";
 }
 
@@ -1597,6 +2407,39 @@ uint64_t LoopInfo::totalDynamicInlinedInsts() {
   }
 
   return total;
+}
+
+int LoopInfo::innerLoopStaticInsts() {  
+  int static_insts=0;
+  if(!isInnerLoop()) {
+    for(auto i=_immInnerLoops.begin(),e=_immInnerLoops.end();i!=e;++i) {
+      LoopInfo* li=*i;
+      static_insts+=li->innerLoopStaticInsts();
+    }
+  } else { //INNER LOOPS ONLY
+    bool is_pure=true;
+
+    int temp_static_insts=0;
+    for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+      FunctionInfo* fi = i->first.second;
+      temp_static_insts+=fi->inlinedStaticInsts();
+      if(fi->numLoops() > 0) {
+        is_pure=false;
+      }
+    }
+
+    if(is_pure) {
+      static_insts = temp_static_insts; //all functions i call
+      static_insts += staticInsts(); //all insts in me
+    } else {
+      for(auto i=_calledToMap.begin(),e=_calledToMap.end();i!=e;++i) {
+        FunctionInfo* fi = i->first.second;
+        static_insts += fi->innerLoopStaticInsts();
+      }
+    }
+  }
+  assert(static_insts>0);
+  return static_insts;
 }
 
 

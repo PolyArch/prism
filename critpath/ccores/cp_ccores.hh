@@ -661,6 +661,7 @@ private:
                                *cur_bb_end, 0,E_BBC);
       }
     }
+    checkPP(inst);
   }
 
   virtual void setWritebackCycle_cc(std::shared_ptr<CCoresInst>& inst, const CP_NodeDiskImage &img) {

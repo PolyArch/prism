@@ -51,6 +51,7 @@ public:
     _st_lat=img._xc-img._wc;
     _floating=img._floating;
     _iscall=img._iscall;
+    _eff_addr=img._eff_addr;
     _op=op;
     this->isAccelerated=true;
   }

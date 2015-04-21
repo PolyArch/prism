@@ -76,15 +76,20 @@ public: //screw this multi-inheritance nonsense  : )
           hasNonStridedMemAccess = true;
         }
 #endif
+        else if (stride > 32) { // Tony: more than 64 bytes -- very liberal
+          hasNonStridedMemAccess = true;
+        }
+
 
         if (!nonStrideAccessLegal) {
           if (hasNonStridedMemAccess)
             vectorizableMemAccess = false;
         }
         // FIXME:: we do not handle non strided stores yet.
-        if ((*I)->isStore() && hasNonStridedMemAccess)
+        // Tony :: if so, then lets not vectorize past "long long" stride (64 bytes)
+        if ((*I)->isStore() && (hasNonStridedMemAccess || stride > 64)) { 
           vectorizableMemAccess = false;
-
+        }
       }
     }
 

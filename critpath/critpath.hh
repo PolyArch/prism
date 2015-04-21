@@ -18,6 +18,17 @@
 
 #include "prof.hh"
 
+class critFuncEdges {
+public:
+  std::unordered_map<Op*,std::map<Op*,std::map<unsigned,double>>> critEdges;
+  float total_weight=0;
+
+  void add_edge(Op* src_op, Op* dest_op, unsigned type, float weight) {
+    critEdges[src_op][dest_op][type]+=weight;
+    total_weight+=weight;
+  }
+};
+
 // abstract class for all critical path
 class CriticalPath {
 protected:
@@ -54,6 +65,8 @@ protected:
   int N_MUL_FPU=2;
   int RW_PORTS=2;
 
+  int L1_MSHRS=4;
+
   int IBUF_SIZE=32;
   int PIPE_DEPTH=16;      
   int PHYS_REGS=256;
@@ -65,7 +78,7 @@ protected:
   int _max_ex_lat=1073741824;
   int _nm=22;
 
-  unsigned _cpu_wakeup_cycles=20;  //impose pipeline constraints on CFU use
+  unsigned _cpu_wakeup_cycles=20;  //cycles to wake CPU
 
   //Revolver Stuff
   bool _enable_revolver=false;
@@ -152,6 +165,7 @@ protected:
   uint64_t n_flt=0;
   uint64_t n_l1_miss=0;
   uint64_t n_l2_miss=0; 
+  uint64_t revolver_insts=0;
 
   class RegionStats {
   public:
@@ -326,12 +340,12 @@ protected:
       out << std::setw(9)  << cycles  << " ";
       out << std::setw(10) << insts  << " ";
       out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(insts,cycles) << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_br,insts) << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_br_miss,m_br) << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_flt,insts) << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_mem,insts) << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_l1_miss,m_mem) << " ";
-      out << std::setw(pc) << std::fixed << std::setprecision(2) << sr(m_l2_miss,m_mem) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(3) << sr(m_br,insts) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(3) << sr(m_br_miss,m_br) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(3) << sr(m_flt,insts) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(3) << sr(m_mem,insts) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(3) << sr(m_l1_miss,m_mem) << " ";
+      out << std::setw(pc) << std::fixed << std::setprecision(3) << sr(m_l2_miss,m_mem) << " ";
 
       printPower(total,out,ex_freq);
       printPower(stateful_core_static,out,ex_freq);
@@ -507,6 +521,10 @@ public:
       }
 
     }
+
+    //bonus
+    std::cout << "Revolver Insts:" << revolver_insts << "\n";
+
   }
 
 private:
@@ -572,6 +590,21 @@ protected:
     if (img._icache_lat >0) {
       outs() << "I$" << img._icache_lat;
     }
+
+    if(op) {
+      outs() << (op->shouldIgnoreInAccel()? " +ig ":"");
+      outs() << (op->plainMove()? " +pm ":"");
+      outs() << (op->isConstLoad()? " +cm ":"");
+      outs() << (op->isStack()? " +ss ":"");
+      
+      LoopInfo* li = op->func()->innermostLoopFor(op->bb());
+      if(li) {
+        outs() << li->nice_name_full();
+      } else {
+        outs() << op->func()->nice_name();
+      }
+    }
+
   }
 
 public:
@@ -588,6 +621,7 @@ public:
     if (cycles != 0) {
       out << " " << (double)baseline_cycles/ (double)cycles;
     }
+    loopsgDots(out, name);
     accelSpecificStats(out, name);
     out << "\n";
   
@@ -602,13 +636,14 @@ public:
     out << "Offset Critical Edges: ";
     print_edge_weights(out, AnalysisType::Offset);
     out << "\n";
-
-
   }
 
 
-  virtual void accelSpecificStats(std::ostream& out, std::string &name) {
-  }
+  virtual void accelSpecificStats(std::ostream& out, std::string &name) {}
+
+  virtual bool removes_uops() {return false;}
+  virtual void loopsgDots(std::ostream& out, std::string &name) {}
+
 
   void setTraceOutputs(bool t) {
     TraceOutputs = t;
@@ -643,6 +678,8 @@ public:
     N_FPU=Prof::get().fp_alu_count;
     N_MUL_FPU=Prof::get().fp_mul_div_sqrt_count;
     RW_PORTS=Prof::get().read_write_port_count;
+    L1_MSHRS=Prof::get().dcache_mshrs;
+
 
  
     //N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
@@ -671,7 +708,8 @@ public:
 
   bool isInOrder() {assert(_setInOrder); return _isInOrder;}
 
-  virtual void setWidth(int i,bool scale_freq, bool revolver, int mem_ports) {
+  virtual void setWidth(int i,bool scale_freq, bool match_simulator, 
+                        bool revolver, int mem_ports, int num_L1_MSHRs) {
     return;
   }
 
@@ -684,12 +722,15 @@ public:
     n_flt+=img._floating;
     n_mem += img._isload;
     n_mem += img._isstore;
-    if(img._miss_level>=1) {
-      n_l1_miss++;
-    } 
-    if(img._miss_level>=2) {
-      n_l2_miss++;
-    } 
+    revolver_insts += _revolver_active;
+    if(img._isload || img._isstore) {
+      if(img._miss_level>=1) {
+        n_l1_miss++;
+      } 
+      if(img._miss_level>=2) {
+        n_l2_miss++;
+      } 
+    }
     if(out.good()) {
       traceOut(index, img, op);
     }
@@ -949,8 +990,8 @@ public:
     sa(dcache_node,"dcache_config",ss.str());
 
     ss.str("");
-    ss << Prof::get().dcache_mshrs << "," << Prof::get().dcache_mshrs << ","
-       << Prof::get().dcache_mshrs << "," << Prof::get().dcache_write_buffers;
+    ss << L1_MSHRS << "," << L1_MSHRS << "," << L1_MSHRS << "," 
+       << Prof::get().dcache_write_buffers;
     sa(dcache_node,"buffer_sizes",ss.str());
 
     sa(dcache_node,"read_accesses",Prof::get().dcacheReads);

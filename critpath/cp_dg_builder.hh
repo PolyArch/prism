@@ -20,7 +20,9 @@
 #define MEMORY_LATENCY 60
 
 template<typename T, typename E>
-class CP_DG_Builder : public CriticalPath {
+class CP_DG_Builder : 
+  public CritEdgeListener<dg_edge_impl_t<dg_event>>,
+  public CriticalPath {
 
 public:
   typedef dg_inst_base<T, E> BaseInst_t;
@@ -46,9 +48,46 @@ public:
      avg_rob_head=20;
   }
 
+  std::unordered_map<FunctionInfo*,critFuncEdges> _crit_edge_map;
+  virtual void listen(E* edge, float weight) {
+    T* src  = edge->src();
+    T* dest = edge->dest();
+    if(src->_op && dest->_op) {
+      _crit_edge_map[src->_op->func()].add_edge(src->_op,dest->_op,edge->type(),weight);
+    }
+  }
+
+  virtual void loopsgDots(std::ostream&out, std::string &name) {
+    string dir="analysis/";
+    for(auto i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
+      FunctionInfo& fi = *i->second;
+      std::stringstream filename;
+      std::string file_base = fi.nice_filename(); 
+
+      for(auto II=fi.li_begin(), EE=fi.li_end(); II!=EE; ++II) {
+        LoopInfo* li = II->second;
+
+        if(li->hasSubgraphs(true)) {
+	  filename.str("");
+	  filename << dir << "/" << _run_name << file_base << "_" << _name << ".crit_loopsg" << li->id() << ".dot"; 
+          std::ofstream dotOutFile(filename.str().c_str()); 
+
+          li->printSubgraphDot(dotOutFile,li->sgSchedNLA(),
+                               &(_crit_edge_map[&fi].critEdges),true,removes_uops(),li);
+	}
+
+
+      }
+    }
+
+
+
+  }
+
   virtual ~CP_DG_Builder() {}
 
-  virtual void setWidth(int i,bool scale_freq,bool revolver,int mem_ports) {
+  virtual void setWidth(int i,bool scale_freq, bool match_simulator,
+                        bool revolver,int mem_ports, int num_L1_MSHRs) {
     _enable_revolver=revolver;
 
     FETCH_WIDTH = i;
@@ -109,7 +148,7 @@ public:
         COMMIT_TO_COMPLETE_STAGES=2;
         PIPE_DEPTH=17;
         PHYS_REGS=160;
-        IQ_WIDTH=40;
+        IQ_WIDTH=48;
         LQ_SIZE = 64;
         SQ_SIZE = 36;
         ROB_SIZE=168;
@@ -119,7 +158,7 @@ public:
         COMMIT_TO_COMPLETE_STAGES=2;
         PIPE_DEPTH=18;
         PHYS_REGS=168;
-        IQ_WIDTH=48;
+        IQ_WIDTH=52;
         LQ_SIZE = 42;
         SQ_SIZE = 72;
         ROB_SIZE=192;
@@ -174,16 +213,19 @@ public:
           SQ_SIZE = 72;
           ROB_SIZE=192;
         }
-        /*
-        CORE_CLOCK=2000;
-        FETCH_TO_DISPATCH_STAGES=4;
-        COMMIT_TO_COMPLETE_STAGES=2;
-        PIPE_DEPTH=19;
-        PHYS_REGS=168;
-        IQ_WIDTH=48;
-        LQ_SIZE = 32;
-        SQ_SIZE = 32;
-        ROB_SIZE=192;*/
+        
+        if(match_simulator) {
+          CORE_CLOCK=2000;
+          FETCH_TO_DISPATCH_STAGES=4;
+          COMMIT_TO_COMPLETE_STAGES=2;
+          PIPE_DEPTH=19;
+          PHYS_REGS=168;
+          IQ_WIDTH=48;
+          LQ_SIZE = 32;
+          SQ_SIZE = 32;
+          ROB_SIZE=192;
+        }
+
       }
 
       LQ.resize(LQ_SIZE);
@@ -195,7 +237,12 @@ public:
 
     if(mem_ports!=-1) {
       RW_PORTS=mem_ports;
-      cout << "Override RW_PORTS: " << mem_ports << "\n";
+      cout << "Override RW_PORTS: " << RW_PORTS << "\n";
+    }
+
+    if(num_L1_MSHRs!=-1) {
+      L1_MSHRS=num_L1_MSHRs;
+      cout << "Override L1_MSHRS: " << L1_MSHRS << "\n";
     }
     //IBUF_SIZE=FETCH_TO_DISPATCH_STAGES * ISSUE_WIDTH;
   }
@@ -226,7 +273,7 @@ public:
         } else if(op->bb_pos()==0) {
           if(!_cur_revolver_li->inLoop(bb)) {
             breakout=true;
-            if(!_cur_revolver_li->isLatch(_prev_op->bb())) {
+            if(_prev_op && !_cur_revolver_li->isLatch(_prev_op->bb())) {
               side_exit=true;
 //              cout << " not loop latch\n";
             }
@@ -338,8 +385,6 @@ public:
     addDeps(sh_inst,op);
     pushPipe(sh_inst);
     inserted(sh_inst);
-
-    _prev_op=op;
   }
 
 
@@ -381,6 +426,30 @@ public:
     cleanUp(final_cycle+3000);
     return final_cycle;
   }
+
+  virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
+                    unsigned default_type1, unsigned default_type2 = E_NONE)
+  {
+    if (!getTraceOutputs())
+      return;
+    E* laEdge = inst[ind].lastArrivingEdge();
+    unsigned lae;
+    if (laEdge) {
+      lae = laEdge->type();
+      if ((lae != default_type1 && lae!=default_type2) || laEdge->len()>1) {
+        outs << edge_name[lae];
+        /*int idiff=-laEdge->src()->_index + inst._index;
+        if(idiff != 0) {
+          outs << idiff;
+        }*/
+        if(laEdge->len()!=0) {
+          outs << laEdge->len();
+        }
+      }
+    }
+    outs << ",";
+  }
+
 
   virtual void printEdgeDep(Inst_t& inst, int ind,
                     unsigned default_type1, unsigned default_type2 = E_NONE)
@@ -442,6 +511,7 @@ public:
     outs() << " sq:" << sqSize();
 
     outs() << "\n";
+    outs().flush();
   }
 
 
@@ -764,6 +834,12 @@ protected:
       auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
       auto firstMSHRUse = MSHRUseMap.begin();
       if(upperMSHRUse->first > firstMSHRUse->first) {
+/*        auto i = firstMSHRUse;
+        auto e = upperMSHRUse;
+        for(;i!=e;++i) {
+         uint64_t cycle = i->first;
+         std::cerr << cycle << " " << i->second.size() << "\n";
+        }*/
         MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
       }
     }
@@ -823,9 +899,8 @@ protected:
       if(_enable_revolver&&inst->_index!=0) { 
         track_revolver(inst->_index,inst->_op);
       }
+      _prev_op=inst->_op;
     }
-
-
 
     maxIndex = inst->index();
     _curCycle = inst->cycleOfStage(Inst_t::Fetch);
@@ -858,7 +933,7 @@ protected:
                      uint64_t& extraLat,
                      bool not_coalescable=false) { 
 
-    int maxUnits = Prof::get().dcache_mshrs;
+    int maxUnits = L1_MSHRS;
     rechecks=0; 
 
     uint64_t cur_cycle=min_cycle;
@@ -1653,7 +1728,7 @@ protected:
     //memory dependence
     if(n._isload || n._isstore) {
       checkMemoryDependence(n);
-      insert_mem_predicted_edges(n); 
+      insert_mem_predicted_edges(n);
     }
     return n;
   }
@@ -1701,6 +1776,9 @@ protected:
 
   //Instructions dep_n and n are truely dependent
   virtual void addTrueMemDep(BaseInst_t& dep_n, BaseInst_t& n) {
+
+//    std::cout << "ooo-try-pred" << dep_n._op->id() << "-m->" << n._op->id() << "\n";
+        
     //This should only get seen as a mem dep, if the dependent instruction is 
     //actually not complete "yet"
     if(dep_n.cycleOfStage(dep_n.eventComplete()) > 
@@ -1708,6 +1786,8 @@ protected:
 
       if(n._op!=NULL && dep_n._op!=NULL) {
         //add this to the memory predictor list
+//      std::cout << "ooo-will-pred" << dep_n._op->id() << "-m->" << n._op->id() << "\n";
+
         memDepSet[n._op].insert(dep_n._op);
       } else {
         //We better insert the mem-dep now, because it didn't get added to memDepSet
@@ -1726,20 +1806,22 @@ protected:
 
   //Inserts edges predicted by memory dependence predictor
   virtual void insert_mem_predicted_edges(BaseInst_t& n) {
-      checkClearMemDep();
-      //insert edges 
-      for(auto i=memDepSet[n._op].begin(), e=memDepSet[n._op].end(); i!=e;++i) {
-        Op* dep_op = *i;
-        BaseInstPtr sh_inst = getInstForOp(dep_op);
-        if(sh_inst) {
-          insert_mem_dep_edge(*sh_inst,n);
-        }
-      } 
+    checkClearMemDep();
+    //insert edges 
+    for(auto i=memDepSet[n._op].begin(), e=memDepSet[n._op].end(); i!=e;++i) {
+      Op* dep_op = *i;
+      BaseInstPtr sh_inst = getInstForOp(dep_op);
+
+      if(sh_inst) {
+        insert_mem_dep_edge(*sh_inst,n);
+      }
+    } 
   }
 
 
   virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n)
   {
+    assert(&prev_node != &n);
     if (prev_node._isstore && n._isload) {
       // RAW true dependence
       getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
@@ -1923,11 +2005,10 @@ protected:
       int_ops++;
       return;
     case 2: //IntMult
-      int_ops++; //TODO: FIXME: delete
       mult_ops++;
       return;
     case 3: //IntDiv
-      int_ops++;
+      mult_ops++;
       return;
 
     case 4: //FloatAdd
@@ -2025,8 +2106,9 @@ protected:
       if(rechecks!=0) {
         //create a copy of the instruction to serve as a dummy
         Inst_t* dummy_inst = new Inst_t();
-        dummy_inst->setCumWeights(curWeights());
         dummy_inst->copyEvents(n.get());
+        dummy_inst->setCumWeights(curWeights());
+
         //Inst_t* dummy_inst = new Inst_t(*n);
         std::shared_ptr<Inst_t> sh_dummy_inst(dummy_inst);
         
@@ -2277,8 +2359,9 @@ protected:
     int lat;
     if(isload) {
       if(cache_prod && true_cache_prod) {
-        lat = Prof::get().dcache_hit_latency + 
-              Prof::get().dcache_response_latency;
+        lat = std::min(ex_lat,
+           Prof::get().dcache_hit_latency + Prof::get().dcache_response_latency);
+
       } else {
         lat = ex_lat;
       }
@@ -2359,50 +2442,68 @@ protected:
   std::unordered_map<Op*,int> errors_dep;
 
   //Cache Line Producer
-  virtual void checkPP(Inst_t &n) {
-    //lets only do this for loads
+  virtual void checkPP(BaseInst_t &n, unsigned edge_type=E_PP, BaseInst_t* cdep=NULL) {
+    uint64_t cache_prod = n._cache_prod;
 
-    if(n._isload) {
-      //This edge doesn't work...
-      uint64_t cache_prod = n._cache_prod;
+    BaseInst_t* depInst=NULL;
 
-      if (cache_prod > 0 && cache_prod < n.index()) {
-        if(!getCPDG()->hasIdx(n.index()-cache_prod)) {
-          if(!errors_dep.count(n._op)) {
-            std::cerr << "ERROR: Cache Prod MISSING!: ";
-            if(n._op) {
-              std::cerr << n._op->dotty_name();
-            } else {
-              std::cerr <<"no op->id()";
-            }
-            std::cerr << "\n";
-          }
-          errors_dep[n._op]++;
-          return;
-        }
-
-        BaseInst_t& depInst = getCPDG()->queryNodes(n.index()-cache_prod);
-
-        if(depInst.isDummy()) {
-          if(!dummies_dep.count(depInst._op)) {
-            std::cerr << "Dummy Dep: "  << n._op->dotty_name()
-                      << " -> "   << depInst._op->dotty_name() << "\n";
-          }
-          dummies_dep[depInst._op]++;
-          return;
-        }
-
-        if(depInst._isload) {
-          getCPDG()->insert_edge(depInst, depInst.memComplete(),
-                                 n, n.memComplete(), 1, E_PP);
-        }
-      }
+    if(cdep) {
+      depInst=cdep;
+    } else if (cache_prod > 0 && cache_prod < n.index()) {
+      depInst=cache_dep_at(n,n.index()-cache_prod);
     }
+
+    if(depInst) {        
+      if(depInst->isDummy()) {
+        if(!dummies_dep.count(depInst->_op)) {
+          std::cerr << "Dummy Dep: "  <<  n._op->dotty_name()
+                    << " -> "   << depInst->_op->dotty_name() << "\n";
+        }
+        dummies_dep[depInst->_op]++;
+        return;
+      } 
+
+      //this check is here because simd does not keep track of its thigns
+      if(depInst->_isload) {
+        add_cache_dep(*depInst, n, 1, edge_type);
+      }
+
+      /*
+      if(depInst._isstore) {
+        if(depInst._eff_addr != n._eff_addr) {
+          add_cache_dep(depInst, n,0);        
+        }
+      }*/
+    }
+
     return;
   }
 
-  //For inorder, commit comes after execute, by 
-  //
+  BaseInst_t* cache_dep_at(BaseInst_t& n, uint64_t index) {
+    if(!getCPDG()->hasIdx(index)) {
+      if(!errors_dep.count(n._op)) {
+        std::cerr << "ERROR: Cache Prod MISSING!: ";
+        if(n._op) {
+          std::cerr << n._op->dotty_name();
+        } else {
+          std::cerr <<"no op->id()";
+        }
+        std::cerr << "\n";
+      }
+      errors_dep[n._op]++;
+      return NULL;
+    }
+
+    return &getCPDG()->queryNodes(index);
+  }
+
+  virtual void add_cache_dep(BaseInst_t& depInst, BaseInst_t &n, int wait_lat,
+      unsigned edge_type) {
+    getCPDG()->insert_edge(depInst, depInst.memComplete(),
+                           n, n.memComplete(), wait_lat, edge_type);
+  }
+
+  //For inorder, commit comes after execute
   virtual Inst_t &checkEC(Inst_t &n) {
     getCPDG()->insert_edge(n, Inst_t::Execute,
                            n, Inst_t::Commit, INORDER_EX_DEPTH,E_EPip);
@@ -2860,7 +2961,7 @@ protected:
         mult_ops++;
         return;
       case 3: //IntDiv
-        int_ops++;
+        mult_ops++;
         return;
   
       case 4: //FloatAdd

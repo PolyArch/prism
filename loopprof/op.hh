@@ -18,6 +18,7 @@
 class Op;
 
 #include "exec_profile.hh"
+#include "util.hh"
 
 class FunctionInfo;
 class BB;
@@ -46,6 +47,8 @@ namespace std {
   };
 }
 
+
+
 /*
 namespace std {
     template <>
@@ -58,8 +61,10 @@ namespace std {
 }*/
 class Op {
 public:
+  typedef std::vector<int> loop_dep;
   typedef std::set<Op*> Deps;
   static uint32_t _idcounter;
+  int t; //temp variable used for anything
   CP_NodeDiskImage img;
 
 private:
@@ -70,11 +75,13 @@ private:
   CPC _cpc;
   Deps _deps, _uses;
   Deps _memUses /*not saved*/;
-  Deps _memDeps,_cacheDeps,_ctrlDeps;
+  Deps _memDeps,_ctrlFreeMemDeps,_cacheDeps,_ctrlDeps;
   Deps _adjDeps, _adjUses;
   Deps _stackDeps;
 
-  std::map<Op*, std::set<unsigned> > _indOfDep;
+  std::map<Op*, std::pair<loop_dep,bool> > _nearestDep;
+
+  std::map<Op*, std::set<unsigned>> _indOfDep;
   std::map<unsigned, Deps> _depsOfInd;
 
   unsigned _opclass=0;
@@ -98,8 +105,6 @@ private:
   uint64_t _first_effAddr = 0;
 
 
-
-
   friend class boost::serialization::access;
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version) {
@@ -114,8 +119,10 @@ private:
     ar & _deps;
     //ar & _uses;
     ar & _memDeps;
+    ar & _ctrlFreeMemDeps;
     ar & _cacheDeps;
     ar & _stackDeps;
+    ar & _nearestDep;
     ar & _opclass;
     ar & temp_flags;
     //ar & _bb; saved in bb, just add it back from bb
@@ -211,7 +218,10 @@ public:
 
   //number of possible dependent operands at operand_index i
   unsigned numDepOpsAtIndex(int i) {
-    return _depsOfInd[i].size();
+    if(_depsOfInd.count(i)) {
+      return _depsOfInd[i].size();
+    }
+    return 0;
   }
 
   void setIsConstLoad() { 
@@ -466,6 +476,46 @@ public:
     _opclass=opclass;
   }
 
+  //Returns the nearest loop relative dependence (for now, loops) in relDep
+  //return value is whether it was the only, or simply nearest relative dependence
+  bool nearestDep(Op* dep_op, std::vector<int>& relDep) {
+    if(_nearestDep.count(dep_op)) {
+      relDep = _nearestDep[dep_op].first;
+      return _nearestDep[dep_op].second;
+    } else {
+      relDep.clear(); //make sure its empty
+      return false;
+    }
+  }
+
+  void check_nearest_dep(Op* dep_op, loop_dep relDep) {
+    if(_nearestDep.count(dep_op)) {
+      std::vector<int>& myDep = _nearestDep[dep_op].first;
+      if(myDep==relDep) {
+        return;
+      } else {
+        bool choose_mine=false;
+
+        for(unsigned i = 0; i < myDep.size(); ++i) {
+          if(myDep[i]>relDep[i]) {
+            choose_mine=true;
+            break;
+          } else if (relDep[i]>myDep[i]) {
+            break;
+          }
+        }
+
+        if(choose_mine) { //dep changed, so must be false
+          _nearestDep[dep_op]=std::make_pair(myDep,false);
+        } else {
+          _nearestDep[dep_op]=std::make_pair(relDep,false);
+        }
+      }
+    } else {
+      _nearestDep[dep_op]=std::make_pair(relDep,true);
+    }
+  }
+
   void addDep(Op* op, unsigned i) {
     assert(op);
     _deps.insert(op);
@@ -475,13 +525,19 @@ public:
     op->addUse(this);
     updated();
   }
-  void addMemDep(Op* op) {
+  void addMemDep(Op* op, bool ctrlFree) {
     assert(op->isLoad() || op->isStore());
     _memDeps.insert(op);
+    
+    if(ctrlFree) {
+      _ctrlFreeMemDeps.insert(op);
+    }
 
     op->addMemUse(this);
     updated();
   }
+
+  
 
   void addCacheDep(Op* op) {_cacheDeps.insert(op); updated();}
   void addCtrlDep(Op* op) {_ctrlDeps.insert(op); updated();}
@@ -500,6 +556,14 @@ public:
       return false;
   }
 
+  static bool checkUOpNameHas(Op *op, const char *chkStr) {
+      std::string uop_name = op->getUOPName();
+      if (uop_name.find(chkStr) != std::string::npos)
+        return true;
+      return false;
+  }
+
+
   bool shouldIgnoreInAccel() {
     if(!_cached_ignore_valid) {
       _cached_ignore=_shouldIgnoreInAccel();
@@ -515,7 +579,70 @@ public:
     }
     return _cached_plain_move;
   }  
+
+  bool ctrlMove() {
+    if(!_cached_plain_move_valid) {
+      _cached_plain_move=_plainMove();
+      _cached_plain_move_valid=true;
+    }
+    return _cached_ctrl_mover;
+  }  
+
+
   
+  char _is_inc_r=-1;
+  bool is_inc_r() {
+    if(_is_inc_r==-1) {
+     uint64_t pc = _cpc.first;
+     int upc = _cpc.second;
+      std::string disasm =  ExecProfile::getDisasm(pc, upc);
+      _is_inc_r = disasm.find("INC_R") != std::string::npos;
+    } 
+    return _is_inc_r;
+  }
+
+  //get a token from a stream
+  static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
+    bool valid = true; 
+    do {
+      valid = std::getline( iss, thing , c);
+    } while(valid && thing.size() == 0);
+    return valid;
+  }
+
+  char _is_clear_xor=-1;
+  bool is_clear_xor() {
+    if(_is_clear_xor==-1) {
+     uint64_t pc = _cpc.first;
+     int upc = _cpc.second;
+      std::string disasm =  ExecProfile::getDisasm(pc, upc);
+       size_t pos = disasm.find("xor ");
+       if(pos != std::string::npos) {
+         std::string subdis = disasm.substr(pos);
+         std::istringstream ss(subdis);
+         std::string g1,r1,r2,r3;
+         getToken(ss,g1,' ');
+         getToken(ss,r1,',');
+         getToken(ss,r2,',');
+         getToken(ss,r3,' ');
+         r1=trim(r1);
+         r2=trim(r2);
+         r3=trim(r3);
+//         std::cout << "g: \"" << g1 << "\", r1: \"" << r1 
+//                   << "\", r2: \"" << r2 << "\", r3: \"" << r3 << "\"\n";
+         if(r1 == r2 && r2 == r3) {
+           _is_clear_xor=1;
+         } else {
+           _is_clear_xor=0;
+         }
+       } else {
+         _is_clear_xor=0;
+       }
+    } 
+    return _is_clear_xor;
+  }
+
+
   char _is_sigmoid=-1;
   bool is_sigmoid() {
     if(_is_sigmoid==-1) {
@@ -574,9 +701,12 @@ private:
     //if(numUses()==0) {  //This is a bad idea, because some deps won't show
     //  return true;
     //}
-    if(checkDisasmHas(this, "lfpimm") ||
-       checkDisasmHas(this, "limm") ||
-       checkDisasmHas(this, "rdip") ) {
+    
+    if(checkUOpNameHas(this, "lfpimm") ||
+       checkUOpNameHas(this, "limm") ||
+       checkUOpNameHas(this, "rdip") ||
+       checkUOpNameHas(this, "fault") ||
+       is_clear_xor()) {
       if(!has_use_outside_func()) {
         return true;
       }
@@ -585,16 +715,45 @@ private:
   }
 
   bool _cached_plain_move=false;
+  bool _cached_ctrl_mover=false;
   bool _cached_plain_move_valid=false;
 
   bool _plainMove() {
-     if(checkDisasmHas(this, "mov2fpsimp") ||
-        checkDisasmHas(this, "movsimp")) {
+     if(checkUOpNameHas(this, "mov2fpsimp") ||
+        checkUOpNameHas(this, "movsimp") ||
+        checkUOpNameHas(this, "mulel") ||
+        checkUOpNameHas(this, "muleh") ||
+        checkUOpNameHas(this, "divq") ||
+        checkUOpNameHas(this, "divr") ||
+        checkUOpNameHas(this, "zexti") ||
+        checkUOpNameHas(this, "movfp") ) {
 
        //we must aslo make sure that we don't read the destination.
        //TODO: is this too conservative?
        if(_depsOfInd.size() <= 1) {
-         return true;
+ 
+         if(_depsOfInd.size() ==0 || _uses.size() ==0) {
+           return true;  //fine if no one uses or produces
+         }
+
+         bool use_or_dep_inside=false;
+         for(Op* dop : _deps) {
+           if(dop->bb() == bb()) {
+             use_or_dep_inside=true;
+             break;
+           }
+         }
+         for(Op* uop : _uses) {
+           if(uop->bb() == bb()) {
+             use_or_dep_inside=true;
+             break;
+           }
+         }
+         _cached_ctrl_mover=!use_or_dep_inside;
+         return use_or_dep_inside;
+       } else {
+         std::cerr << "op:" << this->id() << "(" << getUOPName() << ") has "
+                   << _depsOfInd.size() << "dep entries!\n";
        } 
      }
      return false;
@@ -602,7 +761,6 @@ private:
 
 
 public:
-
   static const char* opname(int opclass) {
     switch(opclass) {
     case 0: //No_OpClass
@@ -642,6 +800,8 @@ public:
 
   Deps::iterator m_begin() { return _memDeps.begin(); }
   Deps::iterator m_end() { return _memDeps.end(); }
+  Deps::iterator m_cf_begin() { return _ctrlFreeMemDeps.begin(); }
+  Deps::iterator m_cf_end() { return _ctrlFreeMemDeps.end(); }
   Deps::iterator m_use_begin() { return _memUses.begin(); }
   Deps::iterator m_use_end() { return _memUses.end(); }
 
@@ -652,13 +812,13 @@ public:
     //std::cout << "touch" << _id << "\n";
     for(Op* uop : _uses) {
       //std::cout << "use" << _id << " ";
-      if(skipped.count(uop) || uses.count(uop)) {
+      if(skipped.count(uop) || uses.count(uop) || uop->bad_incr_dop(this) ) {
         //std::cout << skipped.count(uop) << "," << uses.count(uop) << _id << "\n";
         continue;
       }
       if(uop->shouldIgnoreInAccel()) {
         skipped.insert(uop);
-        return;
+        continue;
       }
       if(!uop->plainMove()) {
         uses.insert(uop);
@@ -681,14 +841,27 @@ public:
   }
   Deps::iterator adj_u_end() {return _adjUses.end();}
 
+  //Input: dependent operation
+  bool bad_incr_dop(Op* dop) {
+    //check if skip b/c inc_r
+    //INC_R operations sometimes get extra deps b/c gem5 is a PITA
+    bool bad_incr_dop=false;
+    if(is_inc_r()) {
+      for(int i : _indOfDep[dop]) {
+        bad_incr_dop |= (i!=0);
+      }
+    }
+    return bad_incr_dop;
+  }
+
   void dSet(Deps& deps,Deps& skipped) {
     for(Op* dop : _deps) {
-      if(skipped.count(dop) || deps.count(dop)) {
-        return;
+      if(skipped.count(dop) || deps.count(dop) || bad_incr_dop(dop)) {
+        continue;
       }
       if(dop->shouldIgnoreInAccel()) {
         skipped.insert(dop);
-        return;
+        continue;
       }
       if(!dop->plainMove()) {
         deps.insert(dop);
@@ -759,10 +932,25 @@ public:
 
       out << "       ";
       out << "defs:";
-      for(auto di=d_begin(),de=d_end();di!=de;++di) {
-        Op* dep_op = *di;
-        out << dep_op->id() << ",";
+      //for(auto di=d_begin(),de=d_end();di!=de;++di) {
+      //  Op* dep_op = *di;
+      //  out << dep_op->id() << ",";
+      //}
+
+      out << "<";
+      for(unsigned i = 0; i < MAX_SRC_REGS; ++i) {
+        if(i!=0) {
+          out << ";";
+        }
+        if(_depsOfInd.count(i)) {
+          for(Op* dep_op : _depsOfInd[i]) {
+            out << dep_op->id() << ",";
+          }
+        }
       }
+      out << ">";
+
+
       out << " uses:";
       for(auto ui=u_begin(),ue=u_end();ui!=ue;++ui) {
         Op* use_op = *ui;
@@ -772,15 +960,48 @@ public:
       out << " mem deps:";
       for(auto mi=m_begin(),me=m_end();mi!=me;++mi) {
         Op* mem_dep = *mi;
-        out << mem_dep->id() << ",";
+        out << mem_dep->id();
+
+        if(_nearestDep.count(mem_dep)) {
+          std::vector<int>& myDep = _nearestDep[mem_dep].first;
+          out << "<";
+          for(unsigned i = 0; i < myDep.size(); ++i) {
+            if(i!=0) {
+              out << " ";
+            }
+            out << myDep[i];
+          }
+          out << ">";
+          if(_nearestDep[mem_dep].second) {
+            out << " ONLY";
+          }
+        }
+        out << ",";
       }
 
       out << "    ";
       out << "adj defs:";
-      for(auto di=adj_d_begin(),de=adj_d_end();di!=de;++di) {
-        Op* dep_op = *di;
-        out << dep_op->id() << ",";
+//      for(auto di=adj_d_begin(),de=adj_d_end();di!=de;++di) {
+//        Op* dep_op = *di;
+//        out << dep_op->id() << ",";
+//      }
+
+      out << "<";
+      for(unsigned i = 0; i < MAX_SRC_REGS; ++i) {
+        if(i!=0) {
+          out << ";";
+        }
+        if(_depsOfInd.count(i)) {
+          for(Op* dep_op : _depsOfInd[i]) {
+            if(_adjDeps.count(dep_op)) {
+              out << dep_op->id() << ",";
+            }
+          }
+        }
       }
+      out << ">";
+
+
       out << " adj uses:";
       for(auto ui=adj_u_begin(),ue=adj_u_end();ui!=ue;++ui) {
         Op* use_op = *ui;
@@ -791,9 +1012,9 @@ public:
       return out.str();
   }
 
-  std::string dotty_name_and_tooltip() {
+  std::string dotty_name_and_tooltip(std::string extra="") {
     std::stringstream out;
-    out << "label=\"" << dotty_name();
+    out << "label=\"" << dotty_name() << extra;
     out << "\", ";
     out << "tooltip=\"" << dotty_tooltip() << "\"";
     return out.str();

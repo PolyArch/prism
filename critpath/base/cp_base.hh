@@ -6,6 +6,10 @@
 class default_cpdg_t : public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>>
 {
 public:
+  default_cpdg_t() : CP_DG_Builder() {
+    getCPDG()->setCritListener(this);
+  }
+
   dep_graph_t<Inst_t, dg_event, dg_edge_impl_t<dg_event>>* getCPDG()
   {
     return &cpdg;

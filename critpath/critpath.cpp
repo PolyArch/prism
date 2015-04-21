@@ -20,10 +20,7 @@
 #include <fstream>
 
 CPRegistry* CPRegistry::_registry = 0;
-
-
 using namespace std;
-
 
 int main(int argc, char *argv[])
 {
@@ -33,6 +30,7 @@ int main(int argc, char *argv[])
   int  allModels=0;
   int inorderWidth=0;
   bool revolver=false;
+  bool match_sim=false;
   int oooWidth=0;
   bool traceOutputs = false;
   int gen_loop_prof = 0;
@@ -52,12 +50,13 @@ int main(int argc, char *argv[])
 
   bool isStdOutTerminal = (ttyname(1) != 0);
   int mem_ports=-1;
+  int num_L1_MSHRs=-1;
 
   //This needs to be here
   system("mkdir -p mcpat/");
+  system("mkdir -p analysis/");
 
-  static struct option static_long_options[] =
-    {
+  static struct option static_long_options[] = {
       {"help", no_argument, 0, 'h'},
       {"elide-mem", no_argument, 0, 'e'},
       {"no-registry", no_argument, 0, 'n'},
@@ -85,6 +84,9 @@ int main(int argc, char *argv[])
 
       {"revolver", no_argument, 0, 12},
       {"memports", required_argument, 0, 14},
+      {"match-sim", no_argument, 0, 15},
+
+      {"num-mshrs", required_argument, 0, 16},
 
       {0,0,0,0}
     };
@@ -178,6 +180,15 @@ int main(int argc, char *argv[])
                   << "Options are inorder, ooo, or both.\n";
       }
       break;
+    case 15:
+      match_sim=true;
+      break;
+    case 16:
+      num_L1_MSHRs = atoi(optarg);
+      if (!num_L1_MSHRs) {
+        num_L1_MSHRs = -1;
+      }
+      break;
     case 'p': {
       progress_granularity_set = true;
       progress_granularity = atoi(optarg);
@@ -256,10 +267,12 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setDefaults();
 
   if(inorderWidth > 0) {
-    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,revolver,mem_ports);
+    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,
+                                match_sim,revolver,mem_ports, num_L1_MSHRs);
   }
   if(oooWidth > 0) {
-    CPRegistry::get()->setWidth(oooWidth, false,scale_freq,revolver,mem_ports);
+    CPRegistry::get()->setWidth(oooWidth, false,scale_freq,
+                                match_sim,revolver, mem_ports, num_L1_MSHRs);
   }
   CPRegistry::get()->setTraceOutputs(traceOutputs);
   CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat,elide_mem);

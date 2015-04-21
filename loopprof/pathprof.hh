@@ -15,6 +15,7 @@
 #include <list>
 #include <vector>
 #include <set>
+#include <unordered_set>
 #include <bitset>
 #include <string>
 #include <assert.h>
@@ -453,7 +454,7 @@ private:
   //Phase 2 Processing
   int _dId;
   Op* _op_buf[MAX_OPS];
-
+  std::unordered_set<Op*> _ctrlFreeMem;
 
   //get a token from a stream
   static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
@@ -693,18 +694,18 @@ public:
 
       for(auto I=fi.li_begin(), E=fi.li_end(); I!=E; ++I) {
         LoopInfo* li = I->second;
-        if(li->hasSubgraphs()) {
+        if(li->hasSubgraphs()) { //beret
 	  filename.str("");
 	  filename << dir << "/" << file_base << ".loopsg" << li->id() << ".dot"; 
           std::ofstream dotOutFile(filename.str().c_str()); 
 
-          li->printSubgraphDot(dotOutFile);
+          li->printSubgraphDot(dotOutFile,false/*nla*/,true/*just sgs*/,li);
 	}
-        if(li->hasSubgraphs(true)) {
+        if(li->hasSubgraphs(true)) { //nla
 	  filename.str("");
 	  filename << dir << "/" << file_base << ".NLA.loopsg" << li->id() << ".dot"; 
           std::ofstream dotOutFile(filename.str().c_str()); 
-          li->printSubgraphDot(dotOutFile,true);
+          li->printSubgraphDot(dotOutFile,true/*nla*/,true/*just sgs*/,li);
 	}
 
       }

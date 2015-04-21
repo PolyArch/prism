@@ -192,7 +192,7 @@ public:
 
 
   CFU_set() {}
-  void beret_set() {
+  void old_set() {
     CFU_node* n1,*n2,*n3,*n4,*n5,*n6;
     CFU* cfu;
 
@@ -243,6 +243,88 @@ public:
     cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,false,true,{n1,n2}));
     cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::SHF,true,true,{n3}));
   }
+
+  void beret_set() {
+    CFU_node* n1,*n2,*n3,*n4,*n5;
+    CFU* cfu;
+
+    addCFU(cfu=new CFU(cfu_ind++));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::SHF,true,true,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n1}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1,n2}));
+
+    addCFU(cfu=new CFU(cfu_ind++));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::MPY,true,true,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1,}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1,n2}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1,n3}));
+
+    addCFU(cfu=new CFU(cfu_ind++));
+//    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::MEM,true,false,{}));
+//    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n1}));
+//    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,false,true,{n1,n2}));
+//    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n3}));
+
+//    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+//    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+//    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::MEM,false,true,{n1}));
+//    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::MEM,false,true,{n1,n2}));
+
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n1}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::MEM,false,true,{n1,n2}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::ALU,false,true,{n2,n3}));
+    cfu->add(n5=new CFU_node(cfu,ind++,CFU_node::ALU,false,true,{n4}));
+
+    addCFU(cfu=new CFU(cfu_ind++));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1,n2}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::SHF,true,true,{n1,n3}));
+//    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::SHF,true,true,{n2}));
+
+    addCFU(cfu=new CFU(cfu_ind++));
+//    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::MEM,true,false,{}));
+//    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::MEM,true,false,{n1}));
+//    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n2}));
+//    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n3}));
+//    cfu->add(n5=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n4}));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n2}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n1,n2}));
+
+
+    addCFU(cfu=new CFU(cfu_ind++));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::SHF,true,false,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::SHF,true,false,{}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n1}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{n2}));
+    cfu->add(n5=new CFU_node(cfu,ind++,CFU_node::ALU,false,true,{n3,n4}));
+//    cfu->add(n6=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n5}));
+
+    addCFU(cfu=new CFU(cfu_ind++));
+//    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{}));
+//    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::MPY,true,true,{n1}));
+//    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n2}));
+//    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+//    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::MPY,true,true,{n1}));
+//    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n2}));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::MEM,true,true,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::MPY,true,true,{n1,n2}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n3}));
+
+
+    addCFU(cfu=new CFU(cfu_ind++));
+    cfu->add(n1=new CFU_node(cfu,ind++,CFU_node::SHF,true,false,{}));
+    cfu->add(n2=new CFU_node(cfu,ind++,CFU_node::ALU,true,true,{n1}));
+    cfu->add(n3=new CFU_node(cfu,ind++,CFU_node::ALU,false,true,{n1,n2}));
+    cfu->add(n4=new CFU_node(cfu,ind++,CFU_node::SHF,false,true,{n1,n3}));
+  }
+
+
+
 
   void print_to_stream(std::ostream& s) {
     s << "set n/n1*n" << ind-1 << ",nreg/;\n";

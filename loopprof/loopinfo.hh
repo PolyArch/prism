@@ -5,6 +5,7 @@
 #include <list>
 #include <vector>
 #include <sstream>
+#include <unordered_map>
 
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/set.hpp>
@@ -142,9 +143,9 @@ template<class Archive>
     _funcs.clear();
   }
 
-  Subgraph* subgraphOfOp(Op* op) {
+  Subgraph* sgForOp(Op* op) {
     return _opSubgraphMap[op];
-  }
+  } 
 
   static bool depFromTo(Subgraph* sg1, Subgraph* sg2) {
     for(auto i1 = sg1->opv_begin(), e1=sg1->opv_end(); i1!=e1;++i1) {
@@ -198,12 +199,23 @@ template<class Archive>
     assert(_opset.size() == check_set.size());
   }
 
-  Subgraph* sgForOp(Op* op) {
-    return _opSubgraphMap[op];
-  } 
 };
 
 
+struct rec_chain {
+  std::vector<Op*> ops;
+  int length=0;
+  bool is_ctrl=false;
+
+  void add_op(Op* op) {
+    ops.push_back(op);
+    length+=op->avg_lat();
+  }
+
+  bool operator < (const rec_chain& other) const {
+    return (length < other.length);
+  }
+};
 
 
 
@@ -242,8 +254,12 @@ private:
   int     _maxPaths = 0;
   IntMap _iterCount; //path iteration count
   int    _totalIterCount = 0; //total number of iters
+  int    _loopEntries = 0; //total number of loops
   int    _loopCount = 0; //total number of loops
   int    _curIter = 0;
+
+  std::vector<std::vector<int>> _dist; //used for rec calculation
+  std::vector<std::vector<Op*>> _next;
 
   int _ninputs = -1;
   int _noutputs = -1;
@@ -420,6 +436,9 @@ public:
 
   std::string nice_name();
   std::string nice_name_full();
+  std::string nice_name_full_quoted() {
+   return std::string("\"") + nice_name_full() + std::string("\"");  
+  }
   void nice_name_tree(std::stringstream& ss);
 
   void setFuncInfo(FunctionInfo* f) {_funcInfo=f;}
@@ -451,6 +470,22 @@ public:
   SGSched& sgSchedNLA() {return _sgSchedNLA;}
   SGSched& sgSchedBeret() {return _sgSchedBeret;}
 
+  
+int longest_dist(std::set<Op*>& op_set);
+
+int calcRecurrences(std::vector<Op*>& long_loop_recs, 
+                   std::vector<rec_chain>& rec_chains,
+                   Op* tie_op1=NULL, Op* tie_op2=NULL);
+  //Things that help with calc recurrences:
+bool BBReachableHelper(BB* bb1, BB* bb2, std::set<BB*>& seen);
+bool BBReachable(BB* bb1, BB* bb2);
+bool reachable_in_iter(Op* op1, Op* op2);
+void add_rec_edge(std::vector<std::vector<int>>& dist,
+                  std::vector<std::vector<Op*>>& next, 
+                  Op* op1, Op* op2, Op* tie_op1, Op* tie_op2);
+
+
+
   bool isOuterLoop() {
     return _immOuterLoop == NULL;
   }
@@ -460,16 +495,23 @@ public:
   int pathFreq(int i) {
     return _iterCount[i];
   }
-  int getTotalIters() { return _totalIterCount;}
+
+  int getLoopEntries() { return _loopEntries;}
+  int getLoopCount()   { return _loopCount;}
+  int getTotalIters()  { return _totalIterCount;}
+
 
   uint32_t id() {return _id;}
   FunctionInfo* func() {return _funcInfo;}
 
   bool dependenceInPath(Op* dop, Op* op); 
-  bool dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op);
+  static bool dependenceInPath(std::set<Op*>& relevantOps,Op* dop, Op* op);
 
   bool dataDepBT(std::set<Op*>& relevantOps,Op* dop, Op* op, std::set<Op*>& seenOps);
   bool dataDepBT(std::set<Op*>& relevantOps,Op* dop, Op* op);
+
+  bool useOutsideSet(std::set<Op*>& relevantOps, Op* op);
+  bool depOutsideSet(std::set<Op*>& relevantOps, Op* op);
 
   void compatUse(Op* uop, std::set<Op*>& ops,
                  std::set<std::pair<Op*,Op*>>& closeSet, 
@@ -506,18 +548,19 @@ public:
 
   bool printGamsPartitionProgram(std::string filename, CFU_set* cfu_set=NULL, 
                                  bool gams_details=false, bool no_gams=false, 
-                                 int max_beret_ops=6, int max_mem_ops=2);
+                                 int max_beret_ops=6, int max_mem_ops=2, bool NLA=false);
 
   bool printGamsPartitionProgram(std::string filename, 
     BBvec& bbVec, SGSched& sgSched,
     CFU_set* cfu_set=NULL, bool gams_details=false, bool no_gams=false,
-    int max_beret_ops=6, int max_mem_ops=2);
+    int max_beret_ops=6, int max_mem_ops=2, bool NLA=false);
 
-  void printSubgraphDot(std::ostream& out, bool NLA=false) {
+  void printSubgraphDot(std::ostream& out, bool NLA, 
+                        bool only_sgs, LoopInfo* li) {
     if(NLA) {
-      printSubgraphDot(out,_sgSchedNLA,true);
+      printSubgraphDot(out,_sgSchedNLA,NULL,true,only_sgs,li);
     } else {
-      printSubgraphDot(out,_sgSchedBeret,false);
+      printSubgraphDot(out,_sgSchedBeret,NULL,false,only_sgs,li);
     }
   }
 
@@ -530,7 +573,8 @@ public:
 
   void printSubgraphDot(std::ostream& out, 
                         SGSched& subgraphSet, 
-                        bool NLA);
+                        std::unordered_map<Op*,std::map<Op*,std::map<unsigned,double>>>* critEdges, 
+                        bool NLA, bool only_sgs, LoopInfo* li);
 
   void calledTo(Op* op, FunctionInfo* fi) {
     _calledToMap[std::make_pair(op,fi)]++;
@@ -573,7 +617,7 @@ public:
   LoopSet::iterator iloop_begin() {return _immInnerLoops.begin();} 
   LoopSet::iterator iloop_end() {return _immInnerLoops.end();} 
 
-  
+  bool kinda_inner();
 
   bool callsFunc(FunctionInfo* fi) {
     return _calledTo.count(fi);
@@ -692,6 +736,8 @@ public:
     return static_insts;
   }
 
+  int innerLoopStaticInsts();
+
   int inlinedOnlyStaticInsts();
 
   //the whole thing, with inlining
@@ -701,6 +747,8 @@ public:
     }
     return staticInsts() + inlinedOnlyStaticInsts();
   }
+
+  void inlinedBBs(std::set<FunctionInfo*>& funcsSeen, std::vector<BB*>& totalVec);
 
   bool isLoopFullyParallelizable() {
     if(!isInnerLoop()) {
@@ -788,7 +836,7 @@ class LoopIter {
 public:
   typedef std::vector<std::pair<LoopInfo*,int>> IterPos;
   typedef std::vector<LoopInfo*> LoopStack;
-
+  
 private:
   IterPos iterPos;
   uint64_t function_iter=0;
@@ -806,6 +854,12 @@ public:
   LoopInfo* relevantLoop() {return iterPos.back().first;}
   int relevantLoopIter() {return iterPos.size() > 0 ? iterPos.back().second:-1;}
   uint64_t functionIter() {return function_iter;}
+
+//  void fill_dep_vector(std::vector<int> loop_dep) {
+//    for(const auto& i : IterPos) {
+//      loop_dep.push_back(i->second); //will this work?
+//    }  
+//  }
 
   unsigned psize() {return iterPos.size();}
   IterPos::iterator pbegin() {return iterPos.begin();}
