@@ -9,6 +9,12 @@
 #include "sliceinfo.hh"
 #include "cp_utils.hh"
 
+
+#define TRACE_DYSER_MODEL 0
+
+/*
+ *
+ */
 namespace DySER {
 
 
@@ -50,6 +56,34 @@ namespace DySER {
       mergedOpMap[op] = merged;
       return merged;
     }
+
+  //Tony: save out the slices
+  virtual uint64_t finish() {
+    for(auto i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
+      FunctionInfo* fi = i->second;
+      for(auto i=fi->li_begin(),e=fi->li_end();i!=e;++i) {
+        LoopInfo* li = i->second;
+        std::cout << "loop " << li->id() << " found\n";
+
+        if(li->isInnerLoop()) {
+          //std::cout << "Printing slice" << li->id() << "\n";
+          if(!SliceInfo::has(li,_dyser_size)) {
+            //std::cout << "---------------------------------not\n";
+            continue;
+          }
+          SliceInfo* si = SliceInfo::get(li, _dyser_size);
+          //save out the slice info
+          std::stringstream si_name;
+          si_name << "analysis/" << li->nice_name_full_filename()<<"."<<_run_name << ".slice.dot";
+          std::ofstream outf;
+          outf.open(si_name.str(),std::ofstream::out | std::ofstream::trunc);
+          si->toDotFile(outf);
+        }
+      }
+    }
+
+    return numCycles(); //default does nothing
+  }
 
 
   protected:
@@ -97,7 +131,7 @@ namespace DySER {
                                                           index));
       dy_compute->isAccelerated = true;
       if (op) {
-        keepTrackOfInstOpMap(dy_compute, op);
+//        keepTrackOfInstOpMap(dy_compute, op);
 
         if (SI->shouldIncludeInCSCount(op)) {
           switch(dy_compute->_opclass) {
@@ -140,18 +174,12 @@ namespace DySER {
     InstPtr createDySendInst(Op *op) {
       InstPtr dy_send = InstPtr(new dyser_send(op));
       dy_send->isAccelerated = true;
-      if (op) {
-        keepTrackOfInstOpMap(dy_send, op);
-      }
       return dy_send;
     }
 
     InstPtr createDyRecvInst(Op *op) {
       InstPtr dy_recv = InstPtr(new dyser_recv(op));
       dy_recv->isAccelerated = true;
-      if (op) {
-        keepTrackOfInstOpMap(dy_recv, op);
-      }
       return dy_recv;
     }
 
@@ -261,7 +289,7 @@ namespace DySER {
 
   public:
     cp_dyser(): CP_OPDG_Builder<T, E> () {
-      getCPDG()->no_horizon();
+      //getCPDG()->no_horizon();
     }
     virtual ~cp_dyser() {}
 
@@ -269,10 +297,17 @@ namespace DySER {
                           const CP_NodeDiskImage &img, Op* op) {
     }
 
-    virtual dep_graph_t<Inst_t, T, E>* getCPDG() {
-      return &cpdg;
-    }
-    dep_graph_impl_t<Inst_t, T, E> cpdg;
+    virtual void setGraph(dep_graph_impl_t<Inst_t,T,E>* cpdg) override {
+      _cpdg=cpdg;
+    }   
+
+    virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
+      if(_cpdg==NULL) {
+        _cpdg=new dep_graph_impl_t<Inst_t,T,E>();
+      }
+      return _cpdg;
+    };
+    dep_graph_impl_t<Inst_t,T,E>* _cpdg;
 
   //TODO: Check    
   virtual int is_accel_on() {
@@ -314,10 +349,20 @@ namespace DySER {
       if (CurLoop != li) {
         // we switched to a different loop
 
+        if(TRACE_DYSER_MODEL) {
+          std::cout << "NOT THE SAME LOOP\n";
+        }
+
+
         // check whether we are in call to sin/cos function
         if (CurLoop
             && canDySERize(CurLoop)
             && PrevOp->func()->isSinCos()) {
+
+          if(TRACE_DYSER_MODEL) {
+            std::cout << "FOUND SIN/COS\n";
+          }
+
           StackLoop = CurLoop;
           StackLoopIter = CurLoopIter;
         }
@@ -345,8 +390,18 @@ namespace DySER {
           StackLoopIter = 0;
         }
 
+        if(TRACE_DYSER_MODEL) {
+          if(CurLoop) {
+            std::cout << "NEW LOOP: " << CurLoop->id() << "\n";
+          } else {
+            std::cout << "DySER LOOP Done\n";
+          }
+        }
+
+
       } else if (!CurLoop) {
         // no loop
+
       } else if (CurLoop) {
         // Same loop
         if (op == op->bb()->lastOp() // last instruction in the bb
@@ -357,6 +412,12 @@ namespace DySER {
           }
         _shouldCompleteLoop = shouldCompleteThisLoop(CurLoop,
                                                      CurLoopIter);
+          if(TRACE_DYSER_MODEL) {
+            if(_shouldCompleteLoop) {
+              std::cout << "TIME TO COMPLETE\n";
+            }
+          }
+
       }
 
       if (!StackLoop && !canDySERize(li)) {
@@ -368,8 +429,8 @@ namespace DySER {
       } else {
         // Create the instruction, but add it to the loop trace.
         // but do not map op <-> inst.
-        InstPtr inst = createInst(img, index, 0); //Tony: why not add op?
-        getCPDG()->addInst(inst, index);
+        InstPtr inst = createInst(img, index, op,false); 
+        //this->cpdgAddInst(inst, index); -- this gets added later
 
         trackLoopInsts(CurLoop, op, inst, img);
       }
@@ -532,6 +593,21 @@ namespace DySER {
                                    unsigned curLoopIter,
                                    bool loopDone)
     {
+
+      if(TRACE_DYSER_MODEL) {
+        std::cout << "completeDySERLoop, iter:" << curLoopIter;
+        if(loopDone) {
+          std::cout << ", loop DONE";
+        } else {
+          std::cout << " loop not done";
+        }
+        std::cout<< "\n";
+      }
+
+
+      Op* first_op = _loop_InstTrace.front().first;
+      assert(first_op);
+
       if (PrevLoop != DyLoop) {
         incrConfigSwitch(1, 0);
         PrevLoop = DyLoop;
@@ -539,8 +615,7 @@ namespace DySER {
           // first time  -- no penalty - to simulate our trace.
           _ConfigCache.push_front(DyLoop);
         else {
-          auto I = std::find(_ConfigCache.begin(), _ConfigCache.end(),
-                             DyLoop);
+          auto I = std::find(_ConfigCache.begin(), _ConfigCache.end(), DyLoop);
           if (I != _ConfigCache.end()) {
             // we have the config in cache
             ConfigInst = insertDyConfig(_num_cycles_switch_config);
@@ -553,7 +628,7 @@ namespace DySER {
           _ConfigCache.push_front(DyLoop);
 
           // forget about least recently used
-          if (_ConfigCache.size() > 8)
+          if (_ConfigCache.size() > 16)
             _ConfigCache.pop_back();
 
           justSwitchedConfig = true;
@@ -579,6 +654,7 @@ namespace DySER {
           // We will switch to the config and switch back ....
           ConfigInst = insertDyConfig(_num_cycles_switch_config*2
                                       + _num_cycles_ctrl_miss_penalty);
+          assert(_lastInst->_op);
         }
       }
 
@@ -608,6 +684,8 @@ namespace DySER {
     virtual void completeDySERLoopWithIT(LoopInfo *DyLoop,
                                          unsigned curLoopIter,
                                          bool loopDone) {
+      assert(0);
+
       assert(DyLoop);
 
       SI = SliceInfo::get(DyLoop, _dyser_size);
@@ -631,6 +709,19 @@ namespace DySER {
 
     virtual void completeDySERLoopWithLI(LoopInfo *LI, int curLoopIter,
                                          bool loopDone) {
+
+      if(TRACE_DYSER_MODEL) {
+        std::cout << "completeDySERLoop -- SCALAR, iter:" << curLoopIter;
+        if(loopDone) {
+          std::cout << ", loop DONE";
+        } else {
+          std::cout << " loop not done";
+        }
+        std::cout << "hi";
+        std::cout<< "\n";
+      }
+
+
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
       if (getenv("MAFIA_DUMP_SLICE_INFO")) {
@@ -645,21 +736,46 @@ namespace DySER {
       std::map<Op*, InstPtr> memOp2Inst;
       std::map<Op*, InstPtr> bundledOp2Inst;
       DySERizingLoop = true;
+
+      if(TRACE_DYSER_MODEL) {
+        std::cout << "try\n";
+      }
+
       for (int idx = 0; idx < curLoopIter; ++idx) {
+        if(TRACE_DYSER_MODEL) {
+          std::cout << "iter: " << idx << "\n";
+        }
+
         memOp2Inst.clear();
         bundledOp2Inst.clear();
         for (auto I = LI->rpo_rbegin(), E = LI->rpo_rend(); I != E; ++I) {
           BB *bb = *I;
+
+          if(TRACE_DYSER_MODEL) {
+            std::cout << "bb:" << bb->rpoNum() << "\n";
+          }
+
           for (auto OI = bb->op_begin(), OE = bb->op_end(); OI != OE; ++OI) {
             Op *op = *OI;
+
+            if(TRACE_DYSER_MODEL) {
+              std::cout << "op: " << op->id() << "\n";
+            }
             if (isOpMerged(op))
               continue;
             if (SI->isInternalCtrl(op))
               continue;
-            InstPtr inst = createInst(op->img, 0, op);
-            // update cache execution delay if necessary
+            //we don't know the index, so lets not worry
+            InstPtr inst = createInst(op->img, 0, op, false);
+            //Tony: don't track map!
+
+            if(TRACE_DYSER_MODEL) {
+              std::cout << "created instruction: " << op->id() << "\n";
+            }
+
+            // update cache execution delay
             updateInstWithTraceInfo(op, inst, false);
-            //getCPDG()->addInst(inst, inst->_index); //Tony: added this
+            //this->cpdgAddInst(inst, inst->_index); //Tony: added this
 
 
             if (!SI->isInLoadSlice(op)) {
@@ -677,8 +793,6 @@ namespace DySER {
             if (!SI->isInLoadSlice(op)) {
               Op *firstOp = SI->getBundledNode(op);
 
-              //TODO: TONY -- put something here to eliminate doing 
-
               if (firstOp && tryBundleDySEROps) {
                 if (bundledOp2Inst.count(firstOp) == 0) {
                   insert_sliced_inst(SI, op, inst, loopDone);
@@ -686,8 +800,9 @@ namespace DySER {
                 } else {
                   this->keepTrackOfInstOpMap(bundledOp2Inst[firstOp], op);
                 }
-              } else
+              } else {
                 insert_sliced_inst(SI, op, inst, loopDone);
+              }
             } else {
               // load slice -- coalesce if possible
               if (coalesceMemOps && (op->isLoad() || op->isStore())) {
@@ -710,137 +825,173 @@ namespace DySER {
     }
 
     InstPtr _last_dyser_inst = 0;
-    virtual InstPtr insertDySend(Op *op) {
+  virtual InstPtr insertDySend(Op *op) {
 
-      InstPtr dy_send = createDySendInst(op);
+    InstPtr depInst = std::static_pointer_cast<Inst_t>(getInstForOp(op));
+    InstPtr dy_send = createDySendInst(op);
 
-      if (justSwitchedConfig) {
-        if (ConfigInst.get() != 0) {
-          getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
-                                 *dy_send, Inst_t::Ready, 0,
-                                 E_DyCR);
-        }
+    if (justSwitchedConfig) {
+      if (ConfigInst.get() != 0) {
+        getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
+                               *dy_send, Inst_t::Ready, 
+                               0, E_DyCR);
+      }
+    }
+
+    if(depInst) {
+      //depInst->addOperandInst(depInst);  // these seem bad! ERROR MEM LEAK
+      dy_send->addOperandInst(depInst);  // better?
+    }
+
+    addDeps(dy_send, op);
+    pushPipe(dy_send);
+    inserted(dy_send);
+    add_inst_checked(dy_send);
+    _last_dyser_inst = dy_send;
+
+    if (op) {
+      keepTrackOfInstOpMap(dy_send, op);
+    }
+
+    return dy_send;
+  }
+
+  virtual InstPtr insertDyRecv(Op *op, InstPtr dy_inst, unsigned latency = 0) {
+    InstPtr dy_recv = createDyRecvInst(op);
+
+    dy_recv->adjustExecuteLatency(latency);
+
+    dy_recv->addOperandInst(dy_inst); //These appear okay
+
+     /*getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
+                           *dy_recv, Inst_t::Ready,
+                           dy_recv->adjustExecuteLatency(latency),E_RDep);*/
+
+    addDeps(dy_recv, op);
+    pushPipe(dy_recv);
+    inserted(dy_recv);
+    add_inst_checked(dy_recv);
+    _last_dyser_inst = dy_recv;
+
+    if (op) {
+      keepTrackOfInstOpMap(dy_recv, op);
+    }
+
+    return dy_recv;
+  }
+
+  virtual InstPtr insertDyConfig(unsigned numCyclesToFetch) {
+    if (numCyclesToFetch == 0)
+      return 0;
+    InstPtr dy_config = createDyConfigInst(numCyclesToFetch);
+    if (_last_dyser_inst.get() != 0)
+      getCPDG()->insert_edge(*_last_dyser_inst,
+                             _last_dyser_inst->eventCommit(),
+                             *dy_config, Inst_t::Ready, 0,
+                             E_DyCR);
+    addDeps(dy_config);
+    pushPipe(dy_config);
+    inserted(dy_config);
+    add_inst_checked(dy_config);
+    _last_dyser_inst = dy_config;
+    return dy_config;
+  }
+
+
+  virtual InstPtr insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
+                                     bool loopDone,
+                                     bool useOpMap = true,
+                                     InstPtr prevInst = 0,
+                                     bool emitDySendForCS = true,
+                                     bool emitDyRecv = true,
+                                     unsigned dyRecvLat = 0) {
+    if (SI->isInLoadSlice(op)) {
+      if (op->isLoad() || op->isStore() || op->shouldIgnoreInAccel()) {
+        inst->isAccelerated = true;
       }
 
-      addPipeDeps(dy_send, op);
-      pushPipe(dy_send);
-      inserted(dy_send);
-      _last_dyser_inst = dy_send;
-      return dy_send;
+      if(TRACE_DYSER_MODEL) {
+        std::cout << "insert load sliced inst: " << op->id() << "\n";
+      }
+
+      // FIXME:: Should all loadslice is not floating point ???
+      //if (op->isLoad())
+      if (getenv("MAFIA_DYSER_ENERGY_HACK") != 0)
+      {
+        // change it to int
+        inst->_floating = false;
+      }
+      addDeps(inst, op);
+      pushPipe(inst);
+      inserted(inst);
+      add_inst_checked(inst);
+
+      if (!op->isLoad() // Skip DySER Load because we morph load to dyload
+          &&  SI->isAInputToDySER(op)
+          && dyser_inst::Send_Recv_Latency > 0) {
+        // Insert a dyser send instruction to pipeline
+        return insertDySend(op);
+      }
+      return inst;
     }
 
-    virtual InstPtr insertDyRecv(Op *op, InstPtr dy_inst, unsigned latency = 0) {
-      InstPtr dy_recv = createDyRecvInst(op);
-
-      getCPDG()->insert_edge(*dy_inst, dy_inst->eventComplete(),
-                             *dy_recv, Inst_t::Ready,
-                             dy_recv->adjustExecuteLatency(latency),
-                             E_RDep);
-
-      addDeps(dy_recv, op);
-      pushPipe(dy_recv);
-      inserted(dy_recv);
-      _last_dyser_inst = dy_recv;
-      return dy_recv;
+    if(TRACE_DYSER_MODEL) {
+      std::cout << "insert comp sliced inst: " << op->id() << "\n";
     }
 
-    virtual InstPtr insertDyConfig(unsigned numCyclesToFetch) {
-      if (numCyclesToFetch == 0)
-        return 0;
-      InstPtr dy_config = createDyConfigInst(numCyclesToFetch);
-      if (_last_dyser_inst.get() != 0)
-        getCPDG()->insert_edge(*_last_dyser_inst,
-                               _last_dyser_inst->eventCommit(),
-                               *dy_config, Inst_t::Ready, 0,
+
+    //add_inst_checked(inst); //add it even if compute
+
+    inst->isAccelerated = true;
+    // Computation Slice!
+    if (emitDySendForCS && SI->isAInputToDySER(op)) { //we want this to refer to the old iteration
+      // We are here, if op is an accumulate type instruction.
+      // We should insert this op in the loop head itself...
+      //insertDySend(op);
+    }
+
+    InstPtr prevPipelinedInst = ((useOpMap)
+                                 ? std::static_pointer_cast<Inst_t>(
+                                   getInstForOp(op))
+                                 : prevInst);
+
+    InstPtr dy_inst = createDyComputeInst(op,
+                                          inst->index(),
+                                          SI);
+
+    if (justSwitchedConfig) {
+      if (ConfigInst.get() != 0) {
+        getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
+                               *dy_inst, dyser_compute_inst::DyReady,
+                               0,
                                E_DyCR);
-      addDeps(dy_config);
-      pushPipe(dy_config);
-      inserted(dy_config);
-      _last_dyser_inst = dy_config;
-      return dy_config;
+      }
     }
 
-
-    virtual InstPtr insert_sliced_inst(SliceInfo *SI, Op *op, InstPtr inst,
-                                       bool loopDone,
-                                       bool useOpMap = true,
-                                       InstPtr prevInst = 0,
-                                       bool emitDySendForCS = true,
-                                       bool emitDyRecv = true,
-                                       unsigned dyRecvLat = 0) {
-      if (SI->isInLoadSlice(op)) {
-        if (op->isLoad() || op->isStore() || op->shouldIgnoreInAccel()) {
-          inst->isAccelerated = true;
-        }
-
-        // FIXME:: Should all loadslice is not floating point ???
-        //if (op->isLoad())
-        if (getenv("MAFIA_DYSER_ENERGY_HACK") != 0)
-        {
-          // change it to int
-          inst->_floating = false;
-        }
-        addDeps(inst, op);
-        pushPipe(inst);
-        inserted(inst);
-
-        if (!op->isLoad() // Skip DySER Load because we morph load to dyload
-            &&  SI->isAInputToDySER(op)
-            && dyser_inst::Send_Recv_Latency > 0) {
-          // Insert a dyser send instruction to pipeline
-          return insertDySend(op);
-        }
-        return inst;
-      }
-
-      inst->isAccelerated = true;
-      // Computation Slice!
-      if (emitDySendForCS && SI->isAInputToDySER(op)) {
-        // We are here, if op is an accumulate type instruction.
-        // We should insert this op in the loop head itself...
-        insertDySend(op);
-      }
-
-      InstPtr prevPipelinedInst = ((useOpMap)
-                                   ? std::static_pointer_cast<Inst_t>(
-                                     getInstForOp(op))
-                                   : prevInst);
-
-      InstPtr dy_inst = createDyComputeInst(op,
-                                            inst->index(),
-                                            SI);
-
-      if (justSwitchedConfig) {
-        if (ConfigInst.get() != 0) {
-          getCPDG()->insert_edge(*ConfigInst, ConfigInst->eventComplete(),
-                                 *dy_inst, dyser_compute_inst::DyReady,
-                                 0,
-                                 E_DyCR);
-        }
-      }
-
-      //Assumptions::
-      // All Instruction in CS can be scheduled to DySER
-      // Latency between complete->next instruction is zero
-      // Honor data dependence
-      setDataDep(dy_inst, op, prevPipelinedInst);
-      // Honor ready to Execute
-      setReadyToExecute(dy_inst, op, prevPipelinedInst);
-      // Honor Execute->Complete (latency)
-      setExecuteToComplete(dy_inst, op, prevPipelinedInst);
+    //Assumptions::
+    // All Instruction in CS can be scheduled to DySER
+    // Latency between complete->next instruction is zero
+    // Honor data dependence
+    setDataDep(dy_inst, op, prevPipelinedInst);
+    // Honor ready to Execute
+    setReadyToExecute(dy_inst, op, prevPipelinedInst);
+    // Honor Execute->Complete (latency)
+    setExecuteToComplete(dy_inst, op, prevPipelinedInst);
 
 
-      if (getenv("DUMP_MAFIA_DYSER_EXEC") != 0) {
-        std::cout << "      "; dumpInst(dy_inst);
-      }
-
-      keepTrackOfInstOpMap(dy_inst, op);
-      if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)
-          && (loopDone || dyser_inst::Send_Recv_Latency > 0)) {
-        insertDyRecv(op, dy_inst, dyRecvLat);
-      }
-      return dy_inst;
+    if (getenv("DUMP_MAFIA_DYSER_EXEC") != 0) {
+      std::cout << "      "; dumpInst(dy_inst);
     }
+
+    keepTrackOfInstOpMap(dy_inst, op);
+    add_inst_checked(dy_inst);
+
+    if (emitDyRecv && SI->isADySEROutput(op) && !allUsesAreStore(op)
+        && (loopDone || dyser_inst::Send_Recv_Latency > 0)) {
+      insertDyRecv(op, dy_inst, dyRecvLat);
+    }
+    return dy_inst;
+  }
 
     bool allUsesAreStore(Op* op) {
       for (auto UI = op->u_begin(), UE = op->u_end(); UI != UE; ++UI) {

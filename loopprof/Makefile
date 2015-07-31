@@ -1,19 +1,24 @@
 CC := /s/gcc-4.8.2/bin/gcc
 CXX := /s/gcc-4.8.2/bin/g++
+#CC  := /s/gcc-5.1/bin/gcc
+#CXX := /s/gcc-5.1/bin/g++
 
 OPTI = -O3
 
 GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
 -include ../make.config
 
+boost_dir=/s/boost-1.54.0
+#boost_dir=/unsup/boost-1.58.0
 
 SRC := pathprof.cpp gzstream.cpp op.cpp bb.cpp loopinfo.cpp functioninfo.cpp lpanalysis.cpp
-CFLAGS :=  -std=c++11 ${OPTI} -ggdb -gdwarf-3 -g -I. -Wall -Werror -Wno-unused-local-typedefs -pedantic -fPIC -rdynamic -I$(GEM5_DIR)/src  -I$(GEM5_DIR)/src -DSTANDALONE_CRITPATH -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -I../include
-LIBS := -lz -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -lboost_serialization
+CFLAGS :=  -std=c++11 ${OPTI} -ggdb -gdwarf-3 -g -I. -Wall -Werror -Wno-unused-local-typedefs -Wno-deprecated-declarations  -pedantic -fPIC -rdynamic -I$(GEM5_DIR)/src  -I$(GEM5_DIR)/src -DSTANDALONE_CRITPATH -I${boost_dir}/include -L${boost_dir}/lib -I../include 
+LIBS := -lz -I${boost_dir}/include -L${boost_dir}/lib -lboost_serialization -I/unsup/gperftools-2.0/inc -L/unsup/gperftools-2.0/lib -lprofiler 
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 #LDFLAGS := $(EXFLAGS) -ltcmalloc_minimal -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/ -L. -Wl,-rpath,$(shell pwd)
 #LDFLAGS := $(EXFLAGS) -ltcmalloc -L/unsup/gperftools-2.0/amd64_rhel6/lib/ -Wl,-rpath,/unsup/gperftools-2.0/amd64_rhel6/lib/ -L. -Wl,-rpath,$(shell pwd) -Wl,-rpath,/s/boost-1.54.0/lib 
-LDFLAGS := $(EXFLAGS)  -L. -Wl,-rpath,$(shell pwd) -Wl,-rpath,/s/boost-1.54.0/lib 
+LDFLAGS := $(EXFLAGS)  -L. -Wl,-rpath,$(shell pwd) -Wl,-rpath,${boost_dir}/lib  -Wl,-rpath,/unsup/gperftools-2.0/lib/ 
+
 
 quiet	= quiet_
 
@@ -29,11 +34,12 @@ quiet_cmd_ccld_out_o = "	[CCLD]			$@"
 quiet_cmd_ccld_out_o_driver = "	[CC_DRIVER]			$@"
 	cmd_ccld_out_o_driver	 = $(CXX) $(CFLAGS) $(LDFLAGS) $(SHLDFLAGS) -o $@ $<  $(LIBS) -lloopprof
 
-all: loopprof archive-test
+all: loopprof 
+	#archive-test
 
-archive-test: archive-test.cpp libloopprof.so
-	@echo $($(quiet)cmd_ccld_out_o_driver)
-	@$(cmd_ccld_out_o_driver)
+#archive-test: archive-test.cpp libloopprof.so
+#	@echo $($(quiet)cmd_ccld_out_o_driver)
+#	@$(cmd_ccld_out_o_driver)
 
 loopprof: loopprof.cpp libloopprof.so ../critpath/exec_profile.cpp
 	@echo $($(quiet)cmd_ccld_out_o_driver) ../critpath/exec_profile.cpp

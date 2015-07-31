@@ -116,12 +116,23 @@ public: //screw this multi-inheritance nonsense  : )
                             bool nonStrideAccessLegal,
                             double acceptableIncrFactor) {
     // no loop.
-    if (!li)
+    if (!li) {
       return false;
+    }
 
     // no inner loop.
     if (!li->isInnerLoop()) {
       return false;
+    }
+
+    //Isterate through all functions called, and make sure they are all things we
+    //are okay with calling  Functions we allow:
+    //SinCos
+    for(auto i=li->calls_begin(),e=li->calls_end();i!=e;++i) {
+      FunctionInfo* fi = *i;
+      if(!fi->isSinCos()) {
+        return false;       
+      }
     }
 
     // if control flow is going to increase number of instructions too much,

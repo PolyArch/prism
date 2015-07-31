@@ -251,9 +251,11 @@ public:
       f2bb[bb->src_number()].insert(bb->line_number());
     }
     for(auto i : f2bb) {
-      out << "\"" << static_func_names[i.first] << "\"";
-      for(auto j : i.second) {
-        out << " " << j;
+      if(static_func_names.size() > (unsigned)i.first) {
+        out << "\"" << static_func_names[i.first] << "\"";
+        for(auto j : i.second) {
+          out << " " << j;
+        }
       }
     }
   }
@@ -460,7 +462,8 @@ private:
   static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
     bool valid = true; 
     do {
-      valid = std::getline( iss, thing , c);
+      valid = iss.good();
+      std::getline( iss, thing , c);
     } while(valid && thing.size() == 0);
     return valid;
   }

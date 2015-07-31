@@ -63,9 +63,24 @@ void FunctionInfo::ascertainBBs() {
         //iterate through successors of fallBB, and put them on smallBB
         for(auto si=fallBB->succ_begin(),se=fallBB->succ_end();si!=se;++si) {
           BB* succ_bb = *si;
-          succ_bb->removePred(fallBB);
-          //cout << "splitting fall->x to small->x \n";
-          smallBB->trace(succ_bb);
+
+          //TODO/WARNING: There is a slight issue here where, because we are changing
+          //the definition of a BB (isBB()) over time, we actually mess up the tail
+          //map.  This causes some basic blocks to think they loop back to themselves
+          //when they don't.  This is a complication caused by the joint PIN+dynamic
+          //CFG approach we are using currently.  To fix for now, I'm just checking that
+          //the succ_bb is not within the range of the fallBB.  If it is, then it should
+          //really be handled by the connections between fall->nextSmallest.
+          //Sorry for the confusing note.
+
+          succ_bb->removePred(fallBB);  //safe to remove in either case (see above note)
+
+          if(succ_bb->head().first < fallBB->head().first ||
+             succ_bb->head().first > fallBB->tail().first) {
+
+            //cout << "splitting fall->x to small->x \n";
+            smallBB->trace(succ_bb);
+          }
         }
         fallBB->clear_succ();
 

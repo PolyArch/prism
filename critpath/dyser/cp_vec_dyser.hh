@@ -4,23 +4,6 @@
 
 #include "cp_dyser.hh"
 
-
-static unsigned floor_to_pow2(unsigned num)
-{
-  if (num & (num-1)) {
-    num = num - 1;
-    num |= (num >> 1);
-    num |= (num >> 2);
-    num |= (num >> 4);
-    num |= (num >> 8);
-    num |= (num >> 16);
-    num += 1;
-    num >>= 1;
-  }
-  return num;
-}
-
-
 namespace DySER {
   class cp_vec_dyser : public cp_dyser {
 
@@ -50,6 +33,39 @@ namespace DySER {
       if (strcmp(name, "dyser-force-vectorize") == 0)
         forceVectorize = true;
     }
+
+    virtual float estimated_benefit(LoopInfo* li) {
+      if(!li->isInnerLoop()) {
+        return 0.0f;
+      }
+
+      if(!canDySERize(li)) {
+        return 0.0f;
+      }
+
+      uint64_t totalIterCount = li->getTotalIters();
+      uint64_t totalDynamicInst = li->numInsts();
+      uint64_t totalStaticInstCount = li->getStaticInstCount();
+      uint64_t totalInstInSB = totalIterCount * totalStaticInstCount;
+      
+      if(totalInstInSB ==0) {
+        return 0.0f;
+      }
+
+      bool no_vec = !canVectorize(li, nonStrideAccessLegal,_dyser_inst_incr_factor);
+
+      if(no_vec) {
+        float speedup = 1.1f;
+        return speedup;
+      } 
+
+      float avg_insts_per_iter = totalDynamicInst / (float) totalIterCount;
+      float speedup = avg_insts_per_iter / 1.05f /
+                       ( totalStaticInstCount / (float) _dyser_vec_len ); 
+
+      return speedup;
+    }
+
 
     bool shouldCompleteThisLoop(LoopInfo *CurLoop,
                                 unsigned CurLoopIter) override
@@ -94,6 +110,7 @@ namespace DySER {
                                          unsigned curLoopIter,
                                          bool loopDone) override
     {
+      assert(0);
       if (!(curLoopIter && ((curLoopIter % _dyser_vec_len) == 0))) {
         cp_dyser::completeDySERLoopWithIT(DyLoop,
                                           CurLoopIter, loopDone);
@@ -175,10 +192,20 @@ namespace DySER {
 #endif
     }
 
-    virtual void completeDySERLoopWithLI(LoopInfo *LI,
-                                         int curLoopIter,
-                                         bool loopdone) override
-    {
+    virtual void completeDySERLoopWithLI(LoopInfo *LI, int curLoopIter,
+                                         bool loopdone) override {
+
+      if(TRACE_DYSER_MODEL) {
+        std::cout << "completeDySERLoop -- VECTOR, iter:" << curLoopIter;
+        if(loopdone) {
+          std::cout << ", loop DONE";
+        } else {
+          std::cout << " loop not done";
+        }
+        std::cout<< "\n";
+      }
+
+
       if (getenv("MAFIA_DYSER_LOOP_ARG") != 0) {
         if (canVectorize(LI, nonStrideAccessLegal, _dyser_inst_incr_factor)) {
           std::cout << "Vectorizable: curLoopIter:" << curLoopIter << "\n";
@@ -248,7 +275,7 @@ namespace DySER {
           if (isOpMerged(op)) {
             continue;
           }
-          InstPtr inst = createInst(op->img, 0, op);
+          InstPtr inst = createInst(op->img, 0, op,false);
           updateInstWithTraceInfo(op, inst, false);
           //dumpInst(inst);
 
@@ -320,10 +347,10 @@ namespace DySER {
                 insert_sliced_inst(SI, op, inst, loopdone);
               } else {
                 for (unsigned i = 0; i < _dyser_vec_len-1; ++i) {
-                  InstPtr tmpInst = createInst(op->img, 0, op);
+                  InstPtr tmpInst = createInst(op->img, 0, op, false);
                   insert_sliced_inst(SI, op, tmpInst, loopdone);
                   updateInstWithTraceInfo(op, inst, false);
-                  //getCPDG()->addInst(inst, inst->_index); //Tony aded this
+                  //this->cpdgAddInst(inst, inst->_index); //Tony aded this
                 }
                 insert_sliced_inst(SI, op, inst, loopdone);
                 this->keepTrackOfInstOpMap(inst, op);

@@ -37,41 +37,40 @@ protected:
   uint64_t _last_index;
   bool _elide_mem = false;
   bool _isInOrder = false;
-  bool _setInOrder = false;
   bool _scale_freq = false;
   //careful, these are not necessarily the defaults...
   //we will try to load the values from m5out/config.ini
   //as the defaults through the prof class
-  int FETCH_WIDTH = 4;
-  int D_WIDTH = 4;
-  int ISSUE_WIDTH = 4;
-  int PEAK_ISSUE_WIDTH = 6;
-  int WRITEBACK_WIDTH = 4;
-  int COMMIT_WIDTH = 4;
-  int SQUASH_WIDTH = 4;
+  unsigned FETCH_WIDTH = 4;
+  unsigned D_WIDTH = 4;
+  unsigned ISSUE_WIDTH = 4;
+  unsigned PEAK_ISSUE_WIDTH = 6;
+  unsigned WRITEBACK_WIDTH = 4;
+  unsigned COMMIT_WIDTH = 4;
+  unsigned SQUASH_WIDTH = 4;
 
-  int IQ_WIDTH = 64;
-  int ROB_SIZE = 192;
-  int LQ_SIZE = 32;
-  int SQ_SIZE = 32;
+  unsigned IQ_WIDTH = 64;
+  unsigned ROB_SIZE = 192;
+  unsigned LQ_SIZE = 32;
+  unsigned SQ_SIZE = 32;
 
-  int FETCH_TO_DISPATCH_STAGES = 4;
-  int COMMIT_TO_COMPLETE_STAGES = 2;
-  int INORDER_EX_DEPTH = 4; 
+  unsigned FETCH_TO_DISPATCH_STAGES = 4;
+  unsigned COMMIT_TO_COMPLETE_STAGES = 2;
+  unsigned INORDER_EX_DEPTH = 4; 
 
-  int N_ALUS=6;
-  int N_MUL=1;
-  int N_FPU=2;
-  int N_MUL_FPU=2;
-  int RW_PORTS=2;
+  unsigned N_ALUS=6;
+  unsigned N_MUL=1;
+  unsigned N_FPU=2;
+  unsigned N_MUL_FPU=2;
+  unsigned RW_PORTS=2;
 
-  int L1_MSHRS=4;
+  unsigned L1_MSHRS=4;
 
-  int IBUF_SIZE=32;
-  int PIPE_DEPTH=16;      
-  int PHYS_REGS=256;
+  unsigned IBUF_SIZE=32;
+  unsigned PIPE_DEPTH=16;      
+  unsigned PHYS_REGS=256;
 
-  int CORE_CLOCK=2000;
+  unsigned CORE_CLOCK=2000;
 
   bool applyMaxLatToAccel=true;
   int _max_mem_lat=1073741824; //some big numbers that will never make sense
@@ -84,7 +83,6 @@ protected:
   bool _enable_revolver=false;
   bool _prev_cycle_revolver_active=false;
   bool _revolver_active=false;
-
 
   //  std::map<LoopInfo*,std::pair<std::vector<BB*>,int> > revolver_prof_map;
   std::unordered_map<LoopInfo*,int> _revolver_profit;
@@ -691,11 +689,10 @@ public:
   }
 
   void setInOrder(bool inOrder) {
-    assert(!_setInOrder),
     _isInOrder=inOrder;
-    _setInOrder=true;
   }
 
+  virtual void initialize() {}
   virtual void setupComplete() {}
 
   virtual void set_elide_mem(bool elideMem) {
@@ -706,7 +703,7 @@ public:
     }
   } 
 
-  bool isInOrder() {assert(_setInOrder); return _isInOrder;}
+  bool isInOrder() {return _isInOrder;}
 
   virtual void setWidth(int i,bool scale_freq, bool match_simulator, 
                         bool revolver, int mem_ports, int num_L1_MSHRs) {

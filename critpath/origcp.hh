@@ -58,7 +58,7 @@ protected:
       return;
 
     Inst_t& inst = static_cast<Inst_t&>(getCPDG()->queryNodes(index));
-    outs() << index + Prof::get().skipInsts << "(" << img._seq <<  "): ";
+    outs() << index + Prof::get().skipInsts/* << "(" << img._seq <<  ")" */ <<": ";
     outs() << inst.cycleOfStage(0) << " ";
     outs() << inst.cycleOfStage(1) << " ";
     outs() << inst.cycleOfStage(2) << " ";
@@ -88,35 +88,35 @@ protected:
   virtual void setDispatchCycle(Inst_t& inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(inst, Inst_t::Fetch,
                            inst, Inst_t::Dispatch,
-                           img._dc);
+                           /*img._dc*/4);
   }
 
   virtual void setReadyCycle(Inst_t& inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(inst, Inst_t::Dispatch,
                            inst, Inst_t::Ready,
-                           img._rc - img._dc);
+                           /*img._rc - img._dc*/1);
   }
 
   virtual void setExecuteCycle(Inst_t &inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(inst, Inst_t::Ready,
                            inst, Inst_t::Execute,
-                           img._ec - img._rc);
+                           /*img._ec - img._rc*/1);
   }
   virtual void setCompleteCycle(Inst_t &inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(inst, Inst_t::Execute,
                            inst, Inst_t::Complete,
-                           img._cc - img._ec);
+                           img._ep_lat);
   }
   virtual void setCommittedCycle(Inst_t &inst, const CP_NodeDiskImage &img) {
     getCPDG()->insert_edge(inst, Inst_t::Complete,
                            inst, Inst_t::Commit,
-                           img._cmpc - img._cc);
+                           /*img._cmpc - img._cc*/2);
   }
   virtual void setWritebackCycle(Inst_t &inst, const CP_NodeDiskImage &img) {
     if(inst._isstore) {
       getCPDG()->insert_edge(inst, Inst_t::Commit,
                              inst, Inst_t::Writeback,
-                             img._xc - img._cmpc);
+                             img._st_lat);
     }
   }
  

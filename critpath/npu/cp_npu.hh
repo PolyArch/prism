@@ -68,6 +68,7 @@ namespace npu {
 
   private:
     std::map<Op*, InstPtr> _op2InstPtr;
+    InstPtr prev_npu_inst=NULL;
   public:
     virtual void addDeps(InstPtr &inst, Op *op = NULL) {
       if (op) {
@@ -138,11 +139,19 @@ namespace npu {
             continue;
           InstPtr depInst = _op2InstPtr[I->first];
           assert(depInst.get());
-          getCPDG()->insert_edge(*depInst,
-                                 depInst->eventComplete(),
+          getCPDG()->insert_edge(*depInst,depInst->eventComplete(),
                                  *inst, Inst_t::Ready,
                                  0, E_NPUPR);
         }
+
+        //Tony: make sure we don't get free NPU pipelining!
+        if(prev_npu_inst!=NULL) {
+           getCPDG()->insert_edge(*prev_npu_inst,prev_npu_inst->eventComplete(),
+                                 *inst, Inst_t::Ready,
+                                 1, E_NPUPR);
+        }
+        prev_npu_inst=inst;
+
         addDeps(inst);
         pushPipe(inst);
         inserted(inst);

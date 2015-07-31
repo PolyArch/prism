@@ -10,6 +10,11 @@
 #include "loopinfo.hh"
 #include "beret_inst.hh"
 
+// Stuff that's required for Super BERET
+// Model of wb lanes
+// CFUs as resources
+// memory dependence prediction
+
 // CP_BERET
 class cp_beret : public ArgumentHandler,
       public CP_DG_Builder<dg_event, dg_edge_impl_t<dg_event>> {
@@ -213,7 +218,7 @@ public:
            << "(depth:" << loopInfo->depth() << " hpi:" << hpi
            << "hp_len: " << loopInfo->instsOnPath(hpi)  
            << (loopInfo->isInnerLoop() ? " inner " : " outer ")
-           << " lbr:" << loopInfo->getLoopBackRatio(hpi)
+           << " hot_path_heat:" << loopInfo->pathHeatRatio(hpi)
            << " iters:" << loopInfo->getTotalIters()
            << " insts:" << loopInfo->numInsts()
            << ")";
@@ -222,7 +227,7 @@ public:
   
       if(loopInfo->isInnerLoop()
          && hpi != -2 //no hot path
-         && loopInfo->getLoopBackRatio(hpi) >= 0.7
+         && loopInfo->pathHeatRatio(hpi) >= 0.7
          && loopInfo->getTotalIters() >= 2
          && loopInfo->instsOnPath(hpi) <= (int)_beret_max_ops
          && !loopInfo->containsCallReturn()
@@ -571,6 +576,8 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
   //Debugging
   uint64_t last_iter_switch_cycle=0,last_replay_cycle=0;
 
+  
+
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
 
@@ -698,12 +705,12 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         }
         break;
       default:
-        assert(0); //not sure what to do
+        assert(0 && "invalid state");
         break;
     }
 
-    
-
+    // --------------------------------------------------------------------------
+    // --------------------------- Insert the Instruction -----------------------
     switch(beret_state) {
       case CPU: {
         //base cpu model
@@ -748,7 +755,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         getCPDG()->addInst(b_inst,index);
 
         //this sets the latency for a beret instruction
-        int lat=epLat(img._cc-img._ec,b_inst.get(),img._isload,
+        int lat=epLat(img._ep_lat,b_inst.get(),img._isload,
                img._isstore,img._cache_prod,img._true_cache_prod,true);
 
         //HACK: Some instructions are internally uop loops... this is annoying.
@@ -758,7 +765,7 @@ virtual void printEdgeDep(std::ostream& outs, BaseInst_t& inst, int ind,
         //inside updateLat, and call it a day.  maybe TODO, fix?
 
         b_inst->updateLat(lat);
-        int st_lat=stLat(img._xc-img._wc,img._cache_prod,
+        int st_lat=stLat(img._st_lat,img._cache_prod,
                          img._true_cache_prod,true/*is accelerated*/);
         b_inst->updateStLat(st_lat);
 

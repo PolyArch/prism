@@ -11,6 +11,8 @@
 #include "nla_inst.hh"
 #include "cp_utils.hh"
 
+#include <math.h>
+
 class NLARegionStats {
   public:
     uint64_t times_started=0;
@@ -30,25 +32,37 @@ class cp_nla : public ArgumentHandler,
 
   typedef dg_inst<T, E> Inst_t;
 
-enum NLA_STATE {
-  CPU,
-  NLA
-};
+  enum NLA_STATE {
+    CPU,
+    NLA
+  };
 
 public:
   cp_nla() : CP_DG_Builder<T,E>() {
     nla_state=CPU;
-    getCPDG()->setCritListener(this);
+    _cpdg=NULL;
+  }
+
+  virtual void setupComplete() override {
+     CP_DG_Builder::setupComplete();
+     getCPDG()->setCritListener(this);  
   }
 
   virtual ~cp_nla() { 
   }
 
+  virtual void setGraph(dep_graph_impl_t<Inst_t,T,E>* cpdg) override {
+    _cpdg=cpdg;
+  }   
+
   virtual bool removes_uops() {return true;}
   virtual dep_graph_t<Inst_t,T,E>* getCPDG() {
-    return &cpdg;
+    if(_cpdg==NULL) {
+      _cpdg=new dep_graph_impl_t<Inst_t,T,E>();
+    }
+    return _cpdg;
   };
-  dep_graph_impl_t<Inst_t,T,E> cpdg;
+  dep_graph_impl_t<Inst_t,T,E>* _cpdg;
 
   //std::map<LoopInfo*,LoopInfo::SubgraphVec> li2sgmap;
   //std::map<LoopInfo*,LoopInfo::SubgraphSet> li2ssmap;
@@ -95,8 +109,15 @@ public:
   unsigned _nla_config_time=1,_nla_iops=2;
   unsigned _nla_dataflow_cfu=0,_nla_dataflow_pure=0;
 
-  bool _nla_dataflow_ctrl=true;
   bool _no_gams=false;
+
+  bool _nla_dataflow_ctrl=false;     //SEED Mode
+  bool _nla_trace_ctrl=false;       //Trace-based control mode, switch to cpu on fail
+
+  bool _nla_spec_ctrl=false;        //Pure speculative execution, doesn't correspond to
+                                    //a HW realization yet, or maybe ever
+  bool _nla_ser_ctrl=false;
+
 
   bool _serialize_sgs=false;        //Subgraph execution is serialized
   bool _issue_inorder=false;        //Subgraphs are issued in dependence order
@@ -104,7 +125,9 @@ public:
   bool _cfus_delay_reads=false;     //CFUs don't execute untill all inputs ready
   bool _mem_dep_predictor=false;    //should I predict memory?
   bool _software_mem_alias=true;    //software calculates mem deps
-  bool _no_exec_speculation=true;   //no execution speculation
+
+  bool _position_based_firing=true; //position-based dataflow firing
+
   bool _exclusive_cfus=false;       //impose exclusive constraints on CFU use
   bool _pipelined_cfus=true;        //impose pipeline constraints on CFU use
   bool _inorder_per_sg=true;        //no execution speculation
@@ -112,8 +135,8 @@ public:
   bool _nla_ser_loops=false;         //serialize loop entry/exit
   int  _nla_loop_iter_dist=4;       //number of allowable loops in parallel
   int  _wb_networks=2;              //writeback networks total
-  int  _target_cinsts=256;            //writeback networks total
-
+  int  _target_cinsts=256;            //target number of compound insts
+ 
   bool  _optimistic_stack=true;      //optimistic stack
 
   bool _predict_power_gating=true;  //predict time and shut off core?
@@ -135,12 +158,11 @@ public:
     ArgumentHandler::parse("nla-cfus-delay-writes",    name,arg,_cfus_delay_writes   );
     ArgumentHandler::parse("nla-cfus-delay-reads",     name,arg,_cfus_delay_reads    );
     ArgumentHandler::parse("nla-mem-dep-predictor",    name,arg,_mem_dep_predictor   );
-    ArgumentHandler::parse("nla-software-mem-alias",   name,arg,_software_mem_alias   );
-    ArgumentHandler::parse("nla-no-exec-speculation",  name,arg,_no_exec_speculation );
+    ArgumentHandler::parse("nla-software-mem-alias",   name,arg,_software_mem_alias  );
     ArgumentHandler::parse("nla-exclusive-cfus",       name,arg,_exclusive_cfus      );
     ArgumentHandler::parse("nla-pipelined-cfus",       name,arg,_pipelined_cfus      );
     ArgumentHandler::parse("nla-wb-networks",          name,arg,_wb_networks         );
-    ArgumentHandler::parse("nla-dataflow-ctrl",        name,arg,_nla_dataflow_ctrl   );
+
     ArgumentHandler::parse("nla-inorder-per-sg",       name,arg,_inorder_per_sg      );
 
     ArgumentHandler::parse("nla-ser-loops",            name,arg,_nla_ser_loops       );
@@ -151,7 +173,14 @@ public:
     ArgumentHandler::parse("nla-allow-store-fwd",      name,arg,_allow_store_fwd     );
 
     ArgumentHandler::parse("no-gams",name,_no_gams);
+
+    ArgumentHandler::parse("nla-ser-ctrl",             name,arg,_nla_ser_ctrl        );
+    ArgumentHandler::parse("nla-dataflow-ctrl",        name,arg,_nla_dataflow_ctrl   );
+    ArgumentHandler::parse("nla-trace-ctrl",           name,arg,_nla_trace_ctrl      );
+    ArgumentHandler::parse("nla-spec-ctrl",            name,arg,_nla_spec_ctrl       );
+
   }
+
 
 #if 0
   virtual void setDefaultsFromProf() override {
@@ -161,9 +190,9 @@ public:
     PathProf::FuncMap::iterator i,e;
     for(i=Prof::get().fbegin(),e=Prof::get().fend();i!=e;++i) {
       FunctionInfo& fi = *i->second;
-      FunctionInfo::LoopList::iterator li,le;
-      for(li=fi.li_begin(),le=fi.li_end();li!=le;++li) {
-        LoopInfo* loopInfo = li->second;
+      FunctionInfo::LoopList::iterator _li,le;
+      for(_li=fi.li_begin(),le=fi.li_end();_li!=le;++_li) {
+        LoopInfo* loopInfo = _li->second;
         loops.insert(std::make_pair(loopInfo->numInsts(),loopInfo));
       }
     } 
@@ -275,22 +304,23 @@ public:
   std::map<Op*,std::shared_ptr<NLAInst>> nlaInstMap;
   unsigned nla_state;
   bool prev_transition=false;
-  LoopInfo* li=NULL;  // the current loop info
+  LoopInfo* _li=NULL;  // the current loop info
   LoopInfo* _prev_li=NULL;  // the current loop info
+  std::vector<std::tuple<CP_NodeDiskImage,uint64_t,Op*>> replay_queue;
   uint64_t _curNLAStartCycle=0, _curNLAStartInst=0;
   uint64_t _totalNLACycles=0, _totalNLAInsts=0;
 
 //  T* nlaEndEv;
-  std::shared_ptr<T> nlaEndEv;
+  std::shared_ptr<T> nlaEndEv; // The final nla control op
+  std::shared_ptr<T> nlaOverEv; // The final nla op to complete
+
 
   //Start Instructions to NLA region
   std::shared_ptr<Inst_t> nla_config_inst;
   std::shared_ptr<Inst_t> nla_start_inst;
   
-  //possible config insts
-  std::shared_ptr<Inst_t> func_transition_inst;
+  //possible config inst
   std::shared_ptr<Inst_t> nla_done_inst;
-
 
   std::shared_ptr<NLAInst> prevNLAInst;
   std::vector<std::shared_ptr<NLAInst>> curNLAInsts;
@@ -305,13 +335,13 @@ public:
   virtual void monitorFUUsage(uint64_t id, uint64_t numCycles, int usage) override {
     //Oh god this i/sets hacky
     if(id==(uint64_t)&_wb_networks) {
-      _regionStats[li].network_activity[usage]+=numCycles;
+      _regionStats[_li].network_activity[usage]+=numCycles;
     } else {
       if(_cfu_set) {
         for(auto i=_cfu_set->cfus_begin(),e=_cfu_set->cfus_end();i!=e;++i) {
           CFU* cfu = *i;
           if(id==(uint64_t)cfu) {
-            _regionStats[li].cfu_used[cfu->ind()]+=numCycles;
+            _regionStats[_li].cfu_used[cfu->ind()]+=numCycles;
             break;
           }
         }
@@ -337,10 +367,29 @@ public:
 
   bool should_power_gate_core() {
     return _predict_power_gating && 
-           (running_avg_cycles[li] > _power_gating_factor * _cpu_wakeup_cycles);
+           (running_avg_cycles[_li] > _power_gating_factor * _cpu_wakeup_cycles);
   } 
  
-//  LoopInfo* debug_old_li=NULL;
+
+  virtual float estimated_benefit(LoopInfo* li) {
+    if(!li->hasSubgraphs(!_nla_trace_ctrl)) { // true --> SEED, false --> BERET
+      return 0.0f;
+    }
+
+    if(_nla_trace_ctrl) {
+      SGSched& sched = li->sgSchedBeret();
+      float heat = li->pathHeatRatio(li->getHotPathIndex());
+
+      return pow(heat,1.65f) * (sched.cfu_set()->numCFUs() / (float)ISSUE_WIDTH);
+    } else {
+      SGSched& sched = li->sgSchedNLA();
+
+      //TODO;FIXME: Needs fixin
+      return  (0.9f * sched.cfu_set()->numCFUs()) / (float)ISSUE_WIDTH;
+    }
+    assert(0); return 0.0f;
+  }
+
 
   void insert_inst(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     //std::cout << op->func()->nice_name() << " " << op->cpc().first << " " << op->cpc().second << " " << op->bb()->rpoNum() << "\n";
@@ -369,26 +418,26 @@ public:
 
         //Started NLA Loop
         if(prev_bb!=op->bb() || op->bb_pos() != prev_bb_pos+1) {
-          li = op->func()->getLoop(op->bb());
+          _li = op->func()->getLoop(op->bb());
 
           std::shared_ptr<Inst_t> prevInst = getCPDG()->peekPipe_sh(-1);
 
-          if(li &&  li->hasSubgraphs(true) && prevInst) {
-            //cout << "entering: " << li->nice_name_full() 
-            //     << " " << li->sgSchedNLA().numSubgraphs() << "\n";
+          if(has_sg_schedule() && prevInst) {
+            //cout << "entering: " << _li->nice_name_full() 
+            //     << " " << _li->sgSchedNLA().numSubgraphs() << "\n";
 
-            setupCFUs(li->sgSchedNLA().cfu_set());
+            setupCFUs(sg_schedule().cfu_set());
             nla_state=NLA;
 
-            _id2li[li->id()]=li; //just do this for now, maybe there is a better way
+            _id2li[_li->id()]=_li; //just do this for now, maybe there is a better way
 
             _timesStarted+=1;
-            _regionStats[li].times_started+=1;
+            _regionStats[_li].times_started+=1;
 
-            int numSGs = li->sgSchedNLA().numSubgraphs();
+            int numSGs = sg_schedule().numSubgraphs();
 
-            int numInstsInInner = li->innerLoopStaticInsts(); //conservative
-            int numInstsTotal = li->inlinedStaticInsts();
+            int numInstsInInner = _li->innerLoopStaticInsts(); //conservative
+            int numInstsTotal = _li->inlinedStaticInsts();
 
             if(numSGs < _target_cinsts && numSGs != 0) {
               int opt1 = _target_cinsts/numSGs;
@@ -400,9 +449,9 @@ public:
               }
 
               int max_opt = std::max(opt1,opt2);
-              _regionStats[li].unroll_factor=std::min(32,max_opt);
+              _regionStats[_li].unroll_factor=std::min(32,max_opt);
 
-              assert(_regionStats[li].unroll_factor>=1);
+              assert(_regionStats[_li].unroll_factor>=1);
             }
 
             _curNLAStartCycle=prevInst->cycleOfStage(prevInst->eventComplete());
@@ -412,16 +461,32 @@ public:
             //need to pick between most recent possible config:
             nla_config_inst = NULL;
 
-            if(_prev_li==NULL || li!=_prev_li) {
-              //control dep instruction
-              if(host_ctrl_inst_map.count(bb)) {
-                nla_config_inst = host_ctrl_inst_map[bb];
-              }
-  
+            if(_prev_li==NULL || _li!=_prev_li) {
+
               //func xfer
-              if(func_transition_inst  && (!nla_config_inst || 
-                              func_transition_inst->_index > nla_config_inst->_index)) {
-                nla_config_inst = func_transition_inst;
+              nla_config_inst = func_transition_inst;
+              assert(func_transition_inst);
+
+              //control dep instruction
+              //if(host_ctrl_inst_map.count(bb)) {
+              //  nla_config_inst = host_ctrl_inst_map[bb];
+              //}
+
+              for(auto i = f->pdom_begin(bb), e = f->pdom_end(bb); i != e; ++i) {
+                BB* control_bb = (*i).first;
+                Op* last_op = control_bb->lastOp();
+                if(last_op) {
+                  BaseInstPtr last_inst = getInstForOp(last_op);
+                  if(last_inst && last_inst->isPipelineInst()) {
+                    InstPtr control_inst = static_pointer_cast<Inst_t>(last_inst);
+                    
+                    assert(control_inst);
+
+                    if(!nla_config_inst||control_inst->_index > nla_config_inst->_index){
+                      nla_config_inst = control_inst;
+                    }
+                  }
+                }
               }
   
               //nlaEndEv
@@ -472,51 +537,87 @@ public:
           FunctionInfo* program_fi = op->func();
           bool transitioned=false;
 
-          if(program_fi==li->func()) {       //if in original function
-            transitioned = !li->inLoop(bb);  //transition out if not in loop
+          if(program_fi==_li->func()) {       //if in original function
+            transitioned = !_li->inLoop(bb);  //transition out if not in loop
 //            cout << "same_func: " << "transition b/c BB" << bb->rpoNum() 
-//                 << " was not in loop " << li->nice_name() << "\n";
+//                 << " was not in loop " << _li->nice_name() << "\n";
           } else {                                                //else, transition
-            transitioned = !li->sgSchedNLA().inFuncs(program_fi); //if not in funcs
-//            cout << "diff_func: " << "transition func " << program_fi->nice_name()
-//                 << " was not in loop " << li->nice_name() << "\n";
+            transitioned = !sg_schedule().inFuncs(program_fi); //if not in funcs
+//                 cout << "diff_func: " << "transition func " << program_fi->nice_name()
+//                 << " was not in loop " << _li->nice_name() << "\n";
           }
 
 
-          Op* prev_op = _prev_op; //cp_dg_builder manages
-          if(_curSubgraphs.size() > 0 &&
-              (bb->pred_size()==0 || fall_through==false || transitioned
-             ||   (prev_op && (
-             prev_op->isCondCtrl() || prev_op->isIndirectCtrl() || 
-             prev_op->isCall() || prev_op->isReturn() || 
-             (prev_op->isCtrl()&&op->bb_pos()!=0)) 
-              ) )) {
+          if(_curSubgraphs.size() > 0) {
 
-            schedule_cfus(prevNLAInst);  
+            bool needs_graph_construction=false;
+            Op* prev_op = _prev_op; //cp_dg_builder manages
 
-            /*cout << "\n";
-            if(bb->pred_size()==0)  cout << "BB Pred ==0\n";
-            //if(fall_through==false) cout << "fall_through==false\n";
-            if(transitioned) cout << "transitioned==0\n";
-            if(prev_op && prev_op->isCondCtrl()) cout << "prev_op->isCondCtrl\n";
-            if(prev_op && prev_op->isIndirectCtrl()) cout << "prev_op isIndirect\n";
-            if(prev_op && prev_op->isCall()) cout << "prev_op IsCall\n";
-            cout << "prev_id:" << prev_op->id();
-            if(prevNLAInst) {
-              cout << " ind:" << prevNLAInst->_index << "\n";
+            if(!_nla_trace_ctrl) { // In normal dataflow control mode
+               if(bb->pred_size()==0 || fall_through==false || 
+                   (prev_op && (
+                 prev_op->isCondCtrl() || prev_op->isIndirectCtrl() || 
+                 prev_op->isCall() || prev_op->isReturn() || 
+                 (prev_op->isCtrl()&&op->bb_pos()!=0)) 
+                  ) ) {
+  
+                 needs_graph_construction=true;
+              }
+            } else {  //Trace Control! 
+              // Check if we looped back
+              if(_li->loop_head()==bb && op->bb_pos()==0) {
+                needs_graph_construction=true;
+                replay_queue.clear();
+              }
+              //TODO: check for mispredict
+              if(transitioned==false) {
+                LoopInfo::BBvec& bbvec = _li->getHotPath();
+                auto it = std::find(bbvec.begin(),bbvec.end(),bb);
+                if(it==bbvec.end()) {
+                  transitioned=true;
+                }
+              }
             }
-            cout << "sg-size:" << _sgMap.size() << "  -----------------------\n"; */
 
-            T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
-            if(clean_event) {
-              uint64_t clean_cycle=clean_event->cycle();
-              cleanLSQEntries(clean_cycle);
-              cleanUp(clean_cycle);
+            //Also want to clear the replay queue if exited from last bb in trace
+            if(prev_op) {
+              BB* prev_bb = prev_op->bb();
+              LoopInfo::BBvec& bbvec = _li->getHotPath();
+              auto it = std::find(bbvec.begin(),bbvec.end(),prev_bb);
+              if(it==--bbvec.end()) { //is prev_bb last in trace
+                replay_queue.clear();
+              }
+            }
+
+            needs_graph_construction |= transitioned;
+
+            if(needs_graph_construction) {
+              schedule_cfus(prevNLAInst);  
+
+              /*cout << "\n";
+              if(bb->pred_size()==0)  cout << "BB Pred ==0\n";
+              //if(fall_through==false) cout << "fall_through==false\n";
+              if(transitioned) cout << "transitioned==0\n";
+              if(prev_op && prev_op->isCondCtrl()) cout << "prev_op->isCondCtrl\n";
+              if(prev_op && prev_op->isIndirectCtrl()) cout << "prev_op isIndirect\n";
+              if(prev_op && prev_op->isCall()) cout << "prev_op IsCall\n";
+              cout << "prev_id:" << prev_op->id();
+              if(prevNLAInst) {
+                cout << " ind:" << prevNLAInst->_index << "\n";
+              }
+              cout << "sg-size:" << _sgMap.size() << "  -----------------------\n"; */
+
+              T* clean_event = getCPDG()->getHorizon(); //clean at last possible moment
+              if(clean_event) {
+                uint64_t clean_cycle=clean_event->cycle();
+                cleanLSQEntries(clean_cycle);
+                cleanUp(clean_cycle);
+              }
             }
           }
 
           if(transitioned) {
-            //cout << "leaving: " << li->nice_name_full()  << "\n";
+            //cout << "leaving: " << _li->nice_name_full()  << "\n";
             //need to connect bb up
             nla_state=CPU;
             nlaEndEv=prevNLAInst->endCFU();
@@ -545,16 +646,61 @@ public:
         getCPDG()->addInst(sh_inst,index);
 
         if(nlaEndEv) { //First instruction
+          //std::cout << "first cpu after nla:" << op->id() << " i:" << index << " added\n";
+
           uint64_t transition_cycles=8/_nla_iops; //change this to transfer live ins.
           if(_cpu_power_gated) {
             transition_cycles+=_cpu_wakeup_cycles;
           } 
 
-          getCPDG()->insert_edge(*nlaEndEv,
-                         *sh_inst, Inst_t::Fetch, transition_cycles, E_NCPU);
+          if(replay_queue.size() > 0) { 
+            assert(_nla_trace_ctrl);
 
+            //cout << " --------------------------------------------REPLAY!\n";
+            supress_errors(true);
+            //Replay BERET on CPU
+            for(unsigned i=0; i < replay_queue.size();++i) {
+              CP_NodeDiskImage& img = std::get<0>(replay_queue[i]);
+              uint64_t& index = std::get<1>(replay_queue[i]);
+              Op* op = std::get<2>(replay_queue[i]);
+
+              InstPtr sh_inst = createInst(img,index,op);
+              if(i==0) {
+                getCPDG()->insert_edge(*nlaEndEv, 
+                                       *sh_inst,Inst_t::Fetch,transition_cycles,E_NCPU);
+                getCPDG()->insert_edge(*nlaOverEv, 
+                                       *sh_inst, Inst_t::Dispatch, 1, E_NCPU);
+
+              }
+              getCPDG()->addInst(sh_inst,index);
+              addDeps(sh_inst,op); //regular add deps
+              pushPipe(sh_inst);
+              inserted(sh_inst);
+              //last_replay_cycle=sh_inst->cycleOfStage(Inst_t::Fetch);
+            }
+            supress_errors(false);
+            //Done Replaying up to the instruction before the bad instruction!
+            //The CPU execution is now caught up.
+            replay_queue.clear();
+ 
+          } else {
+//            cout << "NLAEND:" << nlaEndEv->cycle() << "\n";
+//            cout << "NLAOVER:" << nlaOverEv->cycle() << "\n";
+//            cout << prevNLAInst->_op->id() << ": complete:";
+//            cout << prevNLAInst->cycleOfStage(NLAInst::Complete) << "\n";
+//            cout << "max: " << getCPDG()->getMaxCycles() << "\n";
+
+
+            getCPDG()->insert_edge(*nlaEndEv, 
+                                   *sh_inst, Inst_t::Fetch, transition_cycles, E_NCPU);
+            getCPDG()->insert_edge(*nlaOverEv, 
+                                   *sh_inst, Inst_t::Dispatch, 1, E_NCPU);
+
+          }
           nlaEndEv = NULL;
+          nlaOverEv = NULL;
           nla_done_inst = sh_inst;
+
         } else { //after this instruction, lets turn power gating back off, regardless
                  //of what ever else happened
           _cpu_power_gated=false;
@@ -623,7 +769,7 @@ public:
         }
 
 
-        if(!li->sgSchedNLA().opScheduled(op)) {
+        if(!sg_schedule().opScheduled(op)) {
           //if(op->plainMove()) {
           createDummy(img,index,op);
           //}
@@ -647,7 +793,7 @@ public:
         nla_inst->iter=iter;
 
         //I can also now keep track of this in recent instructions.
-        unsigned iter_dist =  _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+        unsigned iter_dist =  _nla_loop_iter_dist * _regionStats[_li].unroll_factor;
         int mod_iter = -1;  
         if(iter!=-1) {
           mod_iter  = iter % iter_dist;
@@ -681,15 +827,15 @@ public:
         //find loop lateches -- this currently segfaults!
         // innermostLoopFor can't be gauranteed not to fail
         //if(op->bb()->lastOp() == op) {
-        //  LoopInfo* li = op->func()->innermostLoopFor(op->bb());
-        //  if(li->isLatch(op->bb())) {
+        //  LoopInfo* _li = op->func()->innermostLoopFor(op->bb());
+        //  if(_li->isLatch(op->bb())) {
         //    
         //  }
         //}
 
         getCPDG()->addInst(nla_inst,index);
         curNLAInsts.push_back(nla_inst);               
-        addNLADeps(nla_inst,op,li);
+        addNLADeps(nla_inst,op,_li);
 
         if(nla_inst->_isload || nla_inst->_isstore) {
           prevMemNode=nla_inst;
@@ -700,7 +846,7 @@ public:
         //1. only one cache_producer_for_a_line per basic block (should be fair)
         //2. first to access in program order was the first to access in the
         //original simulation.  (same assumption as OOO model)
-        if(nla_inst->_isload) {
+       if(nla_inst->_isload) {
           uint64_t cache_line1 = cache_mask(nla_inst->_eff_addr);
           uint64_t cache_line2 = cache_mask(nla_inst->_eff_addr+nla_inst->_acc_size);
           _cache_reorder_map[cache_line1].add_orig1(nla_inst);
@@ -710,9 +856,9 @@ public:
           }
         }
 
-        int lat=epLat(img._cc-img._ec,nla_inst.get(),img._isload,
+        int lat=epLat(img._ep_lat,nla_inst.get(),img._isload,
                       img._isstore,img._cache_prod,img._true_cache_prod,true);
-        int st_lat=stLat(img._xc-img._wc,img._cache_prod,
+        int st_lat=stLat(img._st_lat,img._cache_prod,
                          img._true_cache_prod,true/*is accelerated*/);
 
         if(op && (ignoreMem(*nla_inst) || op->ctrlMove() ) ) {
@@ -729,6 +875,10 @@ public:
         keepTrackOfInstOpMap(nla_inst,op); 
         _prev_op=op; 
 
+        if(_nla_trace_ctrl) {
+          replay_queue.push_back(std::make_tuple(img,index,op));
+        }
+
         break;
       } default:
         assert(0); //never reaches here
@@ -743,11 +893,11 @@ public:
 
   void doneNLA(uint64_t curCycle) {
     uint64_t cycle_diff = curCycle-_curNLAStartCycle;
-    _regionStats[li].total_cycles+=cycle_diff;
+    _regionStats[_li].total_cycles+=cycle_diff;
     _totalNLACycles+=cycle_diff; 
     accelLogHisto[mylog2(cycle_diff)]++;
-    running_avg_cycles[li]=running_avg_cycles[li]/2+cycle_diff/2;
-    _prev_li=li;
+    running_avg_cycles[_li]=running_avg_cycles[_li]/2+cycle_diff/2;
+    _prev_li=_li;
   }
 
   virtual uint64_t finish() {
@@ -978,7 +1128,7 @@ private:
       } else {        
         _dyn_cfu_size[sg->insts.size()]++;
       }
-//      std::cout << "  sgind:" << sg->static_sg->id() << " insts:" << sg->insts.size() << " ops:" << sg->ops_in_subgraph.size() << " static:" << sg->static_sg->size() << "li" << li->id() << "\n";
+//      std::cout << "  sgind:" << sg->static_sg->id() << " insts:" << sg->insts.size() << " ops:" << sg->ops_in_subgraph.size() << " static:" << sg->static_sg->size() << "_li" << _li->id() << "\n";
 
       //for tracking
       sg->startCFU->_op = sg->insts.begin()->lock()->_op;
@@ -991,14 +1141,14 @@ private:
       if(nla_start_inst) {
         getCPDG()->insert_edge(*nla_start_inst, Inst_t::Commit,
                                *sg->startCFU, 8/_nla_iops,
-                               //li->sgSchedNLA().numSubgraphs(),
+                               //sg_schedule().numSubgraphs(),
                                E_NCPU); //TODO fix xfer
       }
 
       if(nla_config_inst) {
         getCPDG()->insert_edge(*nla_config_inst, Inst_t::Complete,
                                *sg->startCFU, /*8/_nla_iops*/ 
-                               li->sgSchedNLA().numSubgraphs(),
+                               sg_schedule().numSubgraphs(),
                                E_NCFG);
       }
 
@@ -1009,43 +1159,46 @@ private:
         }
       }
 
-      if(_no_exec_speculation) { // serialize instructions after control
-        if(_nla_dataflow_ctrl) {
-          std::shared_ptr<NLAInst> nla_inst = sg->insts.begin()->lock();
-          BB* bb = nla_inst->_op->bb();
+      if(_nla_dataflow_ctrl) {
+        std::shared_ptr<NLAInst> nla_inst = sg->insts.begin()->lock();
+        BB* bb = nla_inst->_op->bb();
 
-          if(ctrl_inst_map.count(bb) ) {
-            getCPDG()->insert_edge(*ctrl_inst_map[bb], NLAInst::Complete,
-                                   *sg->startCFU, 0,E_NCTL);
+        if(ctrl_inst_map.count(bb) ) {
+          getCPDG()->insert_edge(*ctrl_inst_map[bb], NLAInst::Complete,
+                                 *sg->startCFU, 0,E_NCTL);
 
-/*            BB* dep_bb = ctrl_inst_map[bb]->_op->bb();
-            cout << "Func: " << bb->func()->nice_name() 
-                  << " BB Dep: " << dep_bb->rpoNum()
-             << " " 
-             << ctrl_inst_map[bb]->_op->id() << " -c-> " << nla_inst->_op->id() << " "
-             << ctrl_inst_map[bb]->_index << "->" << nla_inst->_index << "\n";*/
+           /*  BB* dep_bb = ctrl_inst_map[bb]->_op->bb();
+          cout << "Func: " << bb->func()->nice_name() 
+                << " BB Dep: " << dep_bb->rpoNum()
+           << " " 
+           << ctrl_inst_map[bb]->_op->id() << " -c-> " << nla_inst->_op->id() << " "
+           << ctrl_inst_map[bb]->_index << "->" << nla_inst->_index << "\n";*/
 
-          } else if(prev_ctrl_inst) {
-             getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
-                                    *sg->startCFU, 0, E_NCTL);
-
-/*             BB* dep_bb = prev_ctrl_inst->_op->bb();
-             cout << "Func: " << bb->func()->nice_name() 
-                  << " BB Dep: " << dep_bb->rpoNum()
-             << " " 
-             << prev_ctrl_inst->_op->id() << " -c-> " << nla_inst->_op->id() << " "
-             << prev_ctrl_inst->_index << "->" << nla_inst->_index << " (FAIL!!!!!!!!!)\n";*/
-          }
         } else if(prev_ctrl_inst) {
-          getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
-                                 *sg->startCFU, 0, E_NCTL);
-        }
+           getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
+                                  *sg->startCFU, 0, E_NCTL);
 
-      } else { //Speculative -- TODO: FIXME: fix before running speculative NLA
+           /* BB* dep_bb = prev_ctrl_inst->_op->bb();
+           cout << "Func: " << bb->func()->nice_name() 
+                << " BB Dep: " << dep_bb->rpoNum()
+           << " " 
+           << prev_ctrl_inst->_op->id() << " -c-> " << nla_inst->_op->id() << " "
+           << prev_ctrl_inst->_index << "->" << nla_inst->_index << " (FAIL!!!!!)\n";*/
+        }
+      } else if(_nla_ser_ctrl) {
+        getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
+                               *sg->startCFU, 0, E_NCTL);
+      } else if (_nla_trace_ctrl) {
+        //Super Beret Mode
+        //do nothing?
+      } else if (_nla_spec_ctrl) {
+        //Speculative -- TODO: FIXME: fix before running speculative NLA
         if(prev_ctrl_inst && prev_ctrl_inst->_ctrl_miss) {
           getCPDG()->insert_edge(*prev_ctrl_inst, NLAInst::Complete,
                                  *sg->startCFU, 10, E_NCTL); 
         }
+      } else {
+        assert(0&&"pick an nla control mechanism please");
       }
 
       if(_nla_ser_loops && prev_ctrl_inst) {
@@ -1148,7 +1301,7 @@ struct sg_time_sort {
     std::shared_ptr<NLAInst> begin_nla_inst = sg->insts.begin()->lock();
     cur_li =begin_nla_inst->_op->func()->innermostLoopFor(begin_nla_inst->_op->bb());
     int iter = begin_nla_inst->iter;
-    int iter_dist =  _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+    int iter_dist =  _nla_loop_iter_dist * _regionStats[_li].unroll_factor;
     int mod_iter  = iter % iter_dist;
 
     //1. Apply remaining static constraints
@@ -1260,26 +1413,37 @@ struct sg_time_sort {
 
         if(_wb_networks != 0) {
           bool needs_forwarding=false;
-          for(auto i=nla_inst->_op->adj_u_begin(),e=nla_inst->_op->adj_u_end();i!=e;++i){
-            Op* uop = *i;
-            if(!li->sgSchedNLA().opScheduled(uop)) {
-              continue;
-            }
-            if(sg->static_sg->getCFUNode(uop)==NULL) {
-              needs_forwarding=true; 
-              break;
+          if(!_nla_trace_ctrl && nla_inst->_op->isCtrl()) {
+            needs_forwarding=true;
+          }
+          if(!needs_forwarding  && !nla_inst->_op->ctrlMove()) {
+            for(auto i=nla_inst->_op->adj_u_begin(),e=nla_inst->_op->adj_u_end();
+                i!=e;++i){
+              Op* uop = *i;
+              if(!sg_schedule().opScheduled(uop)) {
+                continue;
+              }
+              if(sg->static_sg->getCFUNode(uop)==NULL //Not in my sg
+                 || uop->bb_pos() <= nla_inst->_op->bb_pos() //logically before me
+                 ) {
+                needs_forwarding=true;
+                break;
+              }
             }
           }
 
           (*nla_inst)[NLAInst::Forward].reCalculate();
           
 
-          if(needs_forwarding && !nla_inst->_op->ctrlMove()) {
+          if(needs_forwarding) {
             NLAInst* dep_inst = static_cast<NLAInst*>(
                    addResource((uint64_t)&_wb_networks /*hacky hack hack*/,
                    nla_inst->cycleOfStage(NLAInst::Forward),
                    1/*latency*/, _wb_networks/*maxunits*/, nla_inst));
-  
+
+            //Print the ops that are producing outputs
+            //std::cout << " " << nla_inst->_op->id() << "\n";
+
             if (dep_inst) {
               getCPDG()->insert_edge(*dep_inst, NLAInst::Forward,
                                      *nla_inst, NLAInst::Forward, 
@@ -1299,11 +1463,11 @@ struct sg_time_sort {
 
 
         _totalNLAInsts+=1;
-        _regionStats[li].total_insts+=1;
+        _regionStats[_li].total_insts+=1;
 
         if(_serialize_sgs || _issue_inorder) {
           countAccelSGRegEnergy(nla_inst->_op,
-                                sg->static_sg,li->sgSchedNLA()._opset,
+                                sg->static_sg,sg_schedule()._opset,
                                 _nla_fp_ops,_nla_mult_ops,_nla_int_ops,
                                 _nla_regfile_reads,_nla_regfile_freads,
                                 _nla_regfile_writes,_nla_regfile_fwrites);
@@ -1311,7 +1475,7 @@ struct sg_time_sort {
           uint64_t temp_reads=0,temp_writes=0,temp_freads=0,temp_fwrites=0;
 
           countAccelSGRegEnergy(nla_inst->_op,
-                                sg->static_sg,li->sgSchedNLA()._opset,
+                                sg->static_sg,sg_schedule()._opset,
                                 _nla_fp_ops,_nla_mult_ops,_nla_int_ops,
                                 temp_reads,temp_writes,temp_freads,temp_fwrites);
           _nla_network_reads+=temp_reads + temp_freads;
@@ -1331,11 +1495,11 @@ struct sg_time_sort {
       prev_end_cfu=sg->endCFU;
  
       sg->endCFU->reCalculate();
-      _regionStats[li].total_cinsts+=1;
+      _regionStats[_li].total_cinsts+=1;
 
       sg->endCFU->done(++n_index);
 
-      //LoopInfo* li = Prof::get().curFrame()->curLoop();
+      //LoopInfo* _li = Prof::get().curFrame()->curLoop();
       //int iter = Prof::get().curFrame()->getLoopIterNum();
 
 
@@ -1353,6 +1517,7 @@ struct sg_time_sort {
           //cout << "update last: " 
           //  << sg->endCFU->_index << " " << sg->endCFU->_op->id() << " "
           //  << iter << " " << mod_iter << " " << sg->endCFU->cycle() << "\n";
+          nlaOverEv=sg->endCFU;
         }
       }
 
@@ -1452,8 +1617,8 @@ struct sg_time_sort {
 
   bool error_with_dummy_inst=false;
   int dynSGindex=0;
-  void addNLADeps(std::shared_ptr<NLAInst>& n, Op* op, LoopInfo* li) {
-    Subgraph* sg = li->sgSchedNLA().sgForOp(op);
+  void addNLADeps(std::shared_ptr<NLAInst>& n, Op* op, LoopInfo* _li) {
+    Subgraph* sg = sg_schedule().sgForOp(op);
     assert(sg);
 
 //    std::cout << "op:" << op->id() << " sgind:" << sg->id() << " func:" << op->func()->nice_name() << "\n";
@@ -1467,7 +1632,7 @@ struct sg_time_sort {
     if(!dynSubgraph || dynSubgraph->ops_in_subgraph.count(op) == 1) {
       n->dynSubgraph = std::make_shared<DynSubgraph>(sg,dynSGindex++,n->_index); 
       _sgMap[sg] = n->dynSubgraph;
-      n->dynSubgraph->setCumWeights(curWeights()); //&_regionStats[li].cum_weights);
+      n->dynSubgraph->setCumWeights(curWeights()); //&_regionStats[_li].cum_weights);
 
 /*      if(!dynSubgraph) {
         cout << "----new ";
@@ -1512,8 +1677,6 @@ struct sg_time_sort {
     n->ex_edge = getCPDG()->insert_edge(*n, NLAInst::Execute,
                             *n, NLAInst::Complete,/*op->avg_lat()*/1, E_EP);
 
-    getCPDG()->insert_edge(*n, NLAInst::Complete,*n->endCFU(),   0, E_CFUE);
-
 
     int fwd_lat=_nla_fwd_lat;
     if(n->_op->ctrlMove()) {
@@ -1522,6 +1685,10 @@ struct sg_time_sort {
 
     getCPDG()->insert_edge(*n, NLAInst::Complete,
                            *n, NLAInst::Forward, fwd_lat, E_NFWD);
+
+    //TODO: Complete or forward?
+    getCPDG()->insert_edge(*n, NLAInst::Forward,*n->endCFU(),   0, E_CFUE);
+
 
     n->st_edge = getCPDG()->insert_edge(*n, NLAInst::Forward,
                                         *n, NLAInst::Writeback, 0, E_WB);
@@ -1654,7 +1821,7 @@ struct sg_time_sort {
                 }
               }
 
-              unsigned iter_dist =  _nla_loop_iter_dist * _regionStats[li].unroll_factor;
+              unsigned iter_dist =  _nla_loop_iter_dist * _regionStats[_li].unroll_factor;
   
               if((unsigned)nearest_dep_len >= iter_dist) { //skip if dep. already enforced
                 should_skip=true;
@@ -1741,7 +1908,7 @@ struct sg_time_sort {
     }*/
   }
 
-  virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n) override {
+  virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n,int edge_type=E_MDep) override {
     if(!prev_node.isPipelineInst() &&  !n.isPipelineInst()) {
       assert(&prev_node != &n);
 
@@ -1760,9 +1927,9 @@ struct sg_time_sort {
                           false,"hard-mem",prev_nla_inst,nla_n);
 
           getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                                 *(nla_n.startCFU()),  1, E_MDep);
+                                 *(nla_n.startCFU()),  1, edge_type);
         } else {
-          CP_DG_Builder::insert_mem_dep_edge(prev_node,n);
+          CP_DG_Builder::insert_mem_dep_edge(prev_node,n,edge_type);
         } 
       } else { //hypothetical model
         if(prev_nla_inst.dynSubgraph!=nla_n.dynSubgraph) {
@@ -1770,13 +1937,13 @@ struct sg_time_sort {
                           false,"hard-mem",prev_nla_inst,nla_n);
 
           getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                                 nla_n,nla_n.beginExecute(),  1, E_MDep); //extra lat
+                                 nla_n,nla_n.beginExecute(),  1, edge_type); //extra lat
         } else {
-          CP_DG_Builder::insert_mem_dep_edge(prev_node,n);
+          CP_DG_Builder::insert_mem_dep_edge(prev_node,n,edge_type);
         } 
       }
     } else {
-      CP_DG_Builder::insert_mem_dep_edge(prev_node,n);
+      CP_DG_Builder::insert_mem_dep_edge(prev_node,n,edge_type);
     }
   }
 
@@ -1921,6 +2088,11 @@ struct sg_time_sort {
   {
     CriticalPath::setupMcPAT(filename,nm); //do base class
 
+    // Set Default Control Model Here
+    if(!(_nla_ser_ctrl|_nla_dataflow_ctrl|_nla_trace_ctrl|_nla_spec_ctrl)) {
+      _nla_dataflow_ctrl=true;
+    }
+
     printAccelMcPATxml(filename,nm);
     ParseXML* mcpat_xml= new ParseXML(); 
     mcpat_xml->parse((char*)filename);
@@ -1970,7 +2142,7 @@ struct sg_time_sort {
     core->float_regfile_reads  = (uint64_t)(_nla_regfile_freads ); 
     core->float_regfile_writes = (uint64_t)(_nla_regfile_fwrites); 
 
-    if(_no_exec_speculation) {
+    if(_position_based_firing) {
       core->imu_reads=_nla_operand_reads+_nla_operand_freads;
       core->imu_writes=_nla_operand_writes+_nla_operand_fwrites;
       core->nla_network_accesses=_nla_network_writes;
@@ -1990,19 +2162,21 @@ struct sg_time_sort {
     //     LSQ->stats_t.readAc.access  = XML->sys.core[ithCore].load_instructions;
     //     LSQ->stats_t.writeAc.access = XML->sys.core[ithCore].store_instructions;
 
-    core->load_instructions     = _nla_loads/4;
-    core->store_instructions    = _nla_stores/4;
+    //To optimistic I think, especially since we'll actually need dependence tracking
+    //core->load_instructions     = _nla_loads/4;
+    //core->store_instructions    = _nla_stores/4;
+
+    core->load_instructions     = _nla_loads;
+    core->store_instructions    = _nla_stores;
 
     accAccelEnergyEvents();
   }
 
   virtual double accel_leakage() override {
 
-    //TODO: This is crappy right now -- make better later?
-    if(_cfu_set && li && li->hasSubgraphs(true/*NLA*/) ) {
-
-      //NLARegionStats& r = _regionStats[li];
-      SGSched& sgsched = li->sgSchedNLA();
+    if(_cfu_set && has_sg_schedule() ) {
+      //NLARegionStats& r = _regionStats[_li];
+      SGSched& sgsched = sg_schedule();
       bool lc = mc_accel->XML->sys.longer_channel_device;
 
       int imus_on=0;
@@ -2029,8 +2203,8 @@ struct sg_time_sort {
         }
       }
       if(nALUs_on) {
-        nALUs_on=std::min(nALUs_on*1/2,1); //correct for split of SHF/ALU
-        //Plus, this makes static/dynamic ratio more consistent with synthesis results
+        nALUs_on=std::min(nALUs_on*1/2,1); //estimate of split of SHF/ALU,
+        //making static/dynamic ratio more consistent with synthesis results
       }
 
       float ialu = RegionStats::get_leakage(mc_accel->cores[0]->exu->exeu,lc)* nALUs_on;
@@ -2071,9 +2245,27 @@ struct sg_time_sort {
 
   virtual int is_accel_on() {
     if(nla_state==NLA) {
-      return li->id();
+      return _li->id();
     } else {
       return 0;
+    }
+  }
+
+  bool has_sg_schedule() {
+    if(_li==NULL) {
+      return false;
+    }
+    return _li->hasSubgraphs(!_nla_trace_ctrl);  // true --> SEED, false --> BERET
+  }
+
+  SGSched& sg_schedule() {
+    assert(_li);
+    assert(has_sg_schedule());
+
+    if(_nla_trace_ctrl) {
+      return _li->sgSchedBeret();
+    } else {
+      return _li->sgSchedNLA();
     }
   }
 
@@ -2191,7 +2383,7 @@ struct sg_time_sort {
       sa(core_node,"instruction_window_size",32);
       //sa(core_node,"fp_instruction_window_size",8);
 
-      if(_no_exec_speculation) {
+      if(_position_based_firing) {
         sa(core_node,"imu_reads",_nla_operand_reads_acc+_nla_operand_freads_acc);
         sa(core_node,"imu_writes",_nla_operand_writes_acc+_nla_operand_fwrites_acc);
       } else {

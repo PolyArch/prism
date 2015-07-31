@@ -21,6 +21,7 @@
   X(NSpc, "NSpc","non-speculative inst")                \
   X(RDep, "RDep","Register Dependence")                 \
   X(MDep, "MDep","Memory Dependnece")                   \
+  X(PDep, "PDep","Predicted Memory Dependnece")         \
   X(EPip, "EPip","Execution Pipeline BW")               \
   X(EE,   "EE",  "Execute to Execute")                  \
   X(IBW,  "IBW", "Issue Width")                         \

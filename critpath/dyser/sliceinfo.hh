@@ -3,6 +3,7 @@
 #define SLICEINFO_HH
 
 #include <map>
+#include <set>
 #include "loopinfo.hh"
 #include "exec_profile.hh"
 
@@ -20,6 +21,8 @@ namespace DySER {
     std::map<Op*, bool> InvariantInput;
     std::map<Op*, bool> IsOutput;
 
+    std::map<Op*, std::set<Op*>> edges;
+
     unsigned _cs_size = 0;
 
     std::map<uint64_t, std::set<Op*> > pc2Ops;
@@ -30,8 +33,138 @@ namespace DySER {
 
     std::map<Op*, Op*> coalescedMemNodes;
     std::set<Op*> coalescedMemFirstNodes;
+    std::map<Op*,std::set<Op*>> coalescedMemList;
+
     LoopInfo *LI = 0;
-  public:
+
+    public:
+
+    //helper function to print node
+    void print_dot_node(std::ostream& out, Op* op, bool load_slice, bool comp_slice) {
+      out << "\"" << op->id() << "\" [";
+      std::string extra("");
+   
+#if 0
+      if(critEdges && (*critEdges)[op][op].size()!=0) {
+        stringstream ss;
+        ss << "\\n";
+        for(const auto& i : (*critEdges)[op][op]) {
+          unsigned type = i.first;
+          double weight = i.second;
+          if(/*type == E_RDep || */weight < weight_min) {
+            continue;
+          }
+          ss << edge_name[type] << ":" << weight << "\\n";
+        }
+    
+        extra=ss.str();
+      }
+#endif
+      out << op->dotty_name_and_tooltip(extra);
+    
+      if(load_slice && comp_slice) {
+        out << ",style=filled, color=mediumorchid1";
+      } else if (load_slice) {
+        out << ",style=filled, color=lightblue";
+      } else if (comp_slice) {
+        out << ",style=filled, color=lightcoral";
+      } else {
+        out << ",style=filled, color=white";
+      }
+      
+      out << "]\n";
+    }
+
+    void toDotFile(std::ostream& out) {
+      out << "digraph GA{\n";
+  
+      out << " graph [fontname = \"helvetica\"];\n";
+      out << " node  [fontname = \"helvetica\"];\n";
+      out << " edge  [fontname = \"helvetica\"];\n";  
+      out << "labelloc=\"t\";\n";
+      out <<  "label=\"" << LI->nice_name_full();
+ 
+      out << "\";\n"; //end label
+
+      std::set<Op*> seenOps;
+
+      for(auto I=LI->body_begin(),E=LI->body_end();I!=E;++I) {
+        BB* bb = *I;
+        out << "subgraph"
+            << "\"cluster_bb" << bb->rpoNum() << "\"{"       
+            << "label=\"BB " << bb->rpoNum() << "\"\n";
+    
+        out << "style=\"filled,rounded\"\n";
+        out << "color=lightgrey\n";
+
+        for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+          Op* op = *II;
+
+          if(op->isMem()) {
+            Op* f_op = getFirstMemNode(op);
+  
+            if(coalescedMemList.count(f_op)) {
+              out << "subgraph"
+                << "\"cluster_mem" << op->id() << "\"{"       
+                << "label=\"mem" << op->id() << "\"\n";
+              out << "style=\"filled,rounded\"\n";
+              out << "color=cornsilk\n";
+
+              for(auto i = coalescedMemList[op].begin(), e=coalescedMemList[op].end();
+                  i!=e;++i) {
+                Op* c_op = *i;
+                seenOps.insert(c_op);
+                print_dot_node(out,c_op,IsInLoadSlice[c_op],!IsInLoadSlice[c_op]);
+              }
+              out << "}\n";
+            } 
+          }
+
+          if(seenOps.count(op)==0) {
+            print_dot_node(out,op,IsInLoadSlice[op],!IsInLoadSlice[op]);
+          }
+          
+          for(auto ui=op->u_begin(),ue=op->u_end();ui!=ue;++ui) {
+            Op* uop = *ui;
+            edges[op].insert(uop);
+          }
+        }
+
+        for(auto si=bb->succ_begin(),  se=bb->succ_end(); si!=se; ++si) {
+          BB* succ_bb = *si;
+          if(!LI->inLoop(succ_bb)) {
+            continue;
+          }
+
+          if(bb->len() > 0 && succ_bb->len() > 0) {
+            out << "\"" << bb->lastOp()->id() << "\"->" 
+                << "\"" << succ_bb->firstOp()->id() << "\" [";
+   
+            out << "ltail=\"cluster_bb" << bb->rpoNum() << "\" ";
+            out << "lhead=\"cluster_bb" << succ_bb->rpoNum() << "\" ";
+            out << "arrowhead=open arrowsize=1.5 weight=1 penwidth=4 color=blue ];\n";
+          }
+        }
+        out << "}\n";
+
+     }
+
+     //print edges:
+     for(const auto& item : edges) {
+       Op* op = item.first;
+       for(Op* uop : item.second) {
+         out << op->id() << " -> " << uop->id() << " ["; 
+         if(!LI->reachable_in_iter(op,uop)) {
+           out << "color=red,constraint=false";
+         }
+         out << "]\n";
+       }
+     }
+
+
+     out << "}\n";
+
+   }
 
     static bool mapInternalControlToDySER;
     static bool useRPOIndexForOutput;
@@ -50,18 +183,23 @@ namespace DySER {
       return true;
     }
 
+    //What is this supposed to do?
+    //Why 
     Op *getFirstMemNode(Op *op) {
       Op *curOp = op;
       unsigned numIter = 0;
       while (numIter < coalescedMemNodes.size()) {
         std::map<Op*, Op*>::iterator I = coalescedMemNodes.find(curOp);
-        if (I == coalescedMemNodes.end())
+        if (I == coalescedMemNodes.end()) {
           return curOp;
+        }
         curOp = I->second;
         ++numIter;
       }
-      if (numIter >= coalescedMemNodes.size())
+      if (numIter >= coalescedMemNodes.size()) {
+        //std::cout << op->id() << " not " << curOp->id() << "\n";
         return op;
+      }
       return curOp;
     }
 
@@ -426,8 +564,17 @@ namespace DySER {
           coalescedMemNodes[(*I)->getCoalescedOp()] = *I;
         } else {
           coalescedMemFirstNodes.insert(*I);
+          coalescedMemList[*I].insert(*I);
         }
       }
+
+      for (auto I = OpList.begin(), E = OpList.end(); I != E; ++I) {
+        Op* op = *I;
+        Op* first_op = getFirstMemNode(op);
+
+        coalescedMemList[first_op].insert(op);
+      }
+
 
       if (dumpIOInfo) {
         //Tony put this here to hide this
@@ -517,6 +664,11 @@ namespace DySER {
        SliceInfo *Info = new SliceInfo(LI, dyser_size,can_vec);
       _info_cache[LI] = Info;
       return Info;
+    }
+
+    static bool has(LoopInfo* LI, unsigned dyser_size) {
+      auto I = _info_cache.find(LI);
+      return (I != _info_cache.end());
     }
 
     static SliceInfo* get(LoopInfo *LI, unsigned dyser_size) {
@@ -625,26 +777,7 @@ namespace DySER {
     }
 
 
-    bool shouldDySERize(bool vectorizable) {
-      if (vectorizable) {
-        // try dyserization -- vectorizable provides more benefits
-        return true;
-      }
-      int Total = OpList.size();
-      int InSize =  getNumInputs();
-      int OutSize = getNumOutputs();
-      int lssize =  getNumLoadSlice();
-
-      if (InSize == 0 || OutSize == 0) {
-        // no input or output -- no dyser
-        return false;
-      }
-
-      if (InSize + OutSize > (Total - lssize))
-        return false;
-
-      return true;
-    }
+    bool shouldDySERize(bool vectorizable);
 
   };
 } // end namespace dyser

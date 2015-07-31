@@ -66,11 +66,11 @@ public:
     _mem_prod=img._mem_prod;
     _cache_prod=img._cache_prod;
     _true_cache_prod=img._true_cache_prod;
-    _ex_lat=img._cc-img._ec;
+    _ex_lat=img._ep_lat;
     _serialBefore=img._serialBefore;
     _serialAfter=img._serialAfter;
     _nonSpec=img._nonSpec;
-    _st_lat=img._xc-img._wc;
+    _st_lat=img._st_lat;
     _pc=img._pc;
     _upc=img._upc;
     _floating=img._floating;

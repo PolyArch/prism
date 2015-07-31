@@ -376,6 +376,7 @@ struct RegisterCP
              bool EnableByDefault = false,
              bool isBaseline = false,
              bool EnableIfRequested = false) {
+    cp_obj.initialize();
     cp_obj.setInOrder(attachInorder);
     CPRegistry::get()->register_cp(std::string(N),
                                    &cp_obj,

@@ -47,6 +47,7 @@ namespace std {
   };
 }
 
+#define UN1 ((uint64_t)-1)
 
 
 /*
@@ -602,13 +603,24 @@ public:
   }
 
   //get a token from a stream
+  //static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
+  //  bool valid = true; 
+  //  do {
+  //    valid = std::getline( iss, thing , c);
+  //  } while(valid && thing.size() == 0);
+  //  return valid;
+  //}
+
+  //get a token from a stream
   static bool getToken(std::istringstream& iss, std::string& thing, char c=' ') {
     bool valid = true; 
     do {
-      valid = std::getline( iss, thing , c);
+      valid = iss.good();
+      std::getline( iss, thing , c);
     } while(valid && thing.size() == 0);
     return valid;
   }
+
 
   char _is_clear_xor=-1;
   bool is_clear_xor() {
@@ -649,7 +661,8 @@ public:
      uint64_t pc = _cpc.first;
      int upc = _cpc.second;
       std::string disasm =  ExecProfile::getDisasm(pc, upc);
-      _is_sigmoid = disasm.find("SIGMOID") != std::string::npos;
+      //_is_sigmoid = disasm.find("SIGMOID") != std::string::npos;
+      _is_sigmoid = disasm.find("RSQRTSS") != std::string::npos;
     } 
     return _is_sigmoid;
   }
@@ -872,11 +885,15 @@ public:
     } 
   }
 
-  Deps::iterator adj_d_begin() {
+  void check_adj_d_empty() {
     if(_adjDeps.empty()) {
       Deps skipped;
       dSet(_adjDeps,skipped);
     }
+  }
+
+  Deps::iterator adj_d_begin() {
+    check_adj_d_empty();
     return _adjDeps.begin();
   }
   Deps::iterator adj_d_end() {return _adjDeps.end();}
@@ -986,6 +1003,7 @@ public:
 //        out << dep_op->id() << ",";
 //      }
 
+      check_adj_d_empty();
       out << "<";
       for(unsigned i = 0; i < MAX_SRC_REGS; ++i) {
         if(i!=0) {

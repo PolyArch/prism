@@ -336,6 +336,10 @@ template<class Archive>
     ar & _sgSchedBeret;
     ar & _sgSchedNLA;
     ar & _calledToMap;
+
+    for(const auto i : _calledToMap) {
+      _calledTo.insert(i.first.second);
+    }
   }
 
   void serializeSubgraphs();
@@ -413,6 +417,9 @@ public:
     return _noutputs;
   }
 
+  CallToSet::iterator calls_begin() {return _calledTo.begin();}
+  CallToSet::iterator calls_end() {return _calledTo.end();}
+
   bool containsCallReturn() {
     for(auto bbi=_loopBody.begin(),bbe=_loopBody.end();bbi!=bbe;++bbi) {  
       BB* bb = *bbi;
@@ -436,6 +443,7 @@ public:
 
   std::string nice_name();
   std::string nice_name_full();
+  std::string nice_name_full_filename();
   std::string nice_name_full_quoted() {
    return std::string("\"") + nice_name_full() + std::string("\"");  
   }
@@ -467,7 +475,10 @@ public:
   BBvec::reverse_iterator rpo_rbegin()   { return _rpo.rbegin(); }
   BBvec::reverse_iterator rpo_rend()     { return _rpo.rend(); }
 
+  //Return the dataflow control version
   SGSched& sgSchedNLA() {return _sgSchedNLA;}
+
+  //Return the "Trace" control version
   SGSched& sgSchedBeret() {return _sgSchedBeret;}
 
   
@@ -546,9 +557,9 @@ void add_rec_edge(std::vector<std::vector<int>>& dist,
                               int max_beret_ops, int max_mem_ops);
 
 
-  bool printGamsPartitionProgram(std::string filename, CFU_set* cfu_set=NULL, 
-                                 bool gams_details=false, bool no_gams=false, 
-                                 int max_beret_ops=6, int max_mem_ops=2, bool NLA=false);
+  bool scheduleBERET(std::string filename, CFU_set* cfu_set=NULL, 
+                     bool gams_details=false, bool no_gams=false, 
+                     int max_beret_ops=6, int max_mem_ops=2);
 
   bool printGamsPartitionProgram(std::string filename, 
     BBvec& bbVec, SGSched& sgSched,
@@ -597,8 +608,8 @@ void add_rec_edge(std::vector<std::vector<int>>& dist,
 
   int getHotPathIndex();
   BBvec& getHotPath();
-  float getLoopBackRatio(int i){
-    return _iterCount[i] / ((float)_totalIterCount);
+  float pathHeatRatio(int i){
+    return _iterCount[i] / (float)(_totalIterCount+_loopEntries);
   }
 
   int instsOnPath(int i) {
@@ -616,6 +627,9 @@ void add_rec_edge(std::vector<std::vector<int>>& dist,
 
   LoopSet::iterator iloop_begin() {return _immInnerLoops.begin();} 
   LoopSet::iterator iloop_end() {return _immInnerLoops.end();} 
+
+  CallToMap::iterator callto_begin() {return _calledToMap.begin();}
+  CallToMap::iterator callto_end()   {return _calledToMap.end();}
 
   bool kinda_inner();
 
@@ -650,7 +664,7 @@ void add_rec_edge(std::vector<std::vector<int>>& dist,
         std::cout << "Warning: totalInstInSB is zero. please investigate...\n";
         messagePrinted = true;
       }
-      return false;
+      return false; //?
     }
 
     return (totalDynamicInst)/((double)totalInstInSB);
@@ -689,6 +703,14 @@ void add_rec_edge(std::vector<std::vector<int>>& dist,
 
   bool isLatch(BB* bb) { return _loopLatches.count(bb)!=0;}
   bool inLoop(BB* bb) { return _loopBody.count(bb)!=0;}
+  bool hasNonLoopSuccessor(BB* bb) {
+    for(auto i=bb->succ_begin(), e=bb->succ_end();i!=e;++i) {
+      if(!inLoop(*i)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   bool useOutsideLoop(Op* op) {
     for(auto di = op->u_begin(), de = op->u_end(); di!=de; ++di) {
@@ -782,9 +804,13 @@ void add_rec_edge(std::vector<std::vector<int>>& dist,
               return false;
             }
           } else { //this is not the inner loop
-            if(*di_cur==0) { //skip dependences that go between loop boundaries
-              break; //go to next loop dependence
+
+            if(*di_cur==0) { //dependence is inside this iteration
+              continue; //go to next loop level
+            } else { //this crosses outer loops, no problem
+              break; //done, next dependence
             }
+
           }
         }
       }

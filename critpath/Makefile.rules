@@ -4,16 +4,27 @@
 
 CC :=  /s/gcc-4.8.2/bin/gcc
 CXX := /s/gcc-4.8.2/bin/g++
+#CC :=  /s/gcc-5.1/bin/gcc
+#CXX := /s/gcc-5.1/bin/g++
+
+
+#CC  :=  /s/intelcompilers-2015/bin/icc
+#CXX :=  /s/intelcompilers-2015/bin/icpc
+
 
 GEM5_DIR = /p/vertical/afs-huge0/MaFIA/src/gem5
 OPTI = -O3
 
+#oost_dir=/unsup/boost-1.58.0
+boost_dir=/s/boost-1.54.0
+
+
 # By default gcc-4.8.1 generated debug information in dwarf-4
 # g3 generates include extra information (about macro definition etc.,)
 DEBUG_FLAGS = -gdwarf-3 -g3 -ggdb
-WARN_FLAGS = -Wall -Werror -pedantic -Wno-unused-local-typedefs
+WARN_FLAGS = -Wall -Werror -pedantic -Wno-unused-local-typedefs -Wno-deprecated-declarations
 
-INCLUDES = -I. -I$(LEVEL)/ -I$(LEVEL)../include  -I$(GEM5_DIR)/src -I$(LEVEL)/../loopprof -I/s/boost-1.54.0/include -I$(LEVEL)/mcpat -I$(LEVEL)/mcpat/cacti
+INCLUDES = -I. -I$(LEVEL)/ -I$(LEVEL)../include  -I$(GEM5_DIR)/src -I$(LEVEL)/../loopprof -I/${boost_dir}/include -I$(LEVEL)/mcpat -I$(LEVEL)/mcpat/cacti -I/unsup/gperftools-2.0/inc 
 
 CFLAGS = -std=c++11 $(OPTI) $(DEBUG_FLAGS) $(WARN_FLAGS) $(INCLUDES) -fPIC $(EXTRA_FLAGS)
 

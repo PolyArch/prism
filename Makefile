@@ -2,7 +2,8 @@
 
 .PHONY: all clean  cp lp base simd dyser ccores beret static
 
-all: mcpat cp nla simd base dyser ccores beret super npu disasm verbose
+all: mcpat lp cp nla simd base dyser ccores beret super multi
+#npu disasm verbose 
 
 mcpat:
 	+make -C critpath/mcpat
@@ -39,12 +40,15 @@ disasm:
 
 verbose:
 	+make -C critpath/verbose
+
 npu:
 	+make -C critpath/npu
 
+multi:
+	+make -C critpath/multi
+
 
 clean_simple:
-	+make -C 
 	+make -C loopprof clean
 	+make -C critpath clean
 	+make -C critpath/simd clean
@@ -55,6 +59,7 @@ clean_simple:
 	+make -C critpath/super clean
 	+make -C critpath/npu clean
 	+make -C critpath/nla clean
+	+make -C critpath/multi clean
 	+make -C critpath -f Makefile.static clean
 
 clean:
@@ -71,6 +76,7 @@ clean:
 	+make -C critpath/nla clean
 	+make -C critpath/disasm clean
 	+make -C critpath/verbose clean
+	+make -C critpath/multi clean
 	+make -C critpath -f Makefile.static clean
 
 

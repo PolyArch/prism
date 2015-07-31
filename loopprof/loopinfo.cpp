@@ -1332,14 +1332,17 @@ obj/;
     << "display y.l\n";
 }
 
-bool LoopInfo::printGamsPartitionProgram(std::string filename, CFU_set* cfu_set,
-    bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops, bool NLA) {
+
+bool LoopInfo::scheduleBERET(std::string filename, CFU_set* cfu_set,
+    bool gams_details,bool no_gams, int max_beret_size, int max_mem_ops) {
 
     _sgSchedBeret.reset();  
+    _sgSchedBeret.setCFUSet(cfu_set);
+
     BBvec& bbVec = getHotPath();
     return printGamsPartitionProgram(filename,
       bbVec, _sgSchedBeret, 
-      cfu_set, gams_details, no_gams,NLA);
+      cfu_set, gams_details, no_gams,false/*its not nla*/);
 }
 
 
@@ -1473,7 +1476,7 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       bool worked=true;
   
       for(auto const& bb : bbVec) {
-        if(bb->len() + cursize > MAX_GAMS_SIZE) {
+        if(bb->len() + cursize > MAX_GAMS_SIZE && newBBVec.size() >0) {
           //std::cout << "aux scheduling, len:" << cursize << "\n";
           worked &= printGamsPartitionProgram(filename,newBBVec,sgSched,cfu_set, 
                              gams_details, no_gams, max_beret_size, max_mem_ops, NLA);
@@ -1697,12 +1700,13 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
 
 
-    if(!NLA) {
+    if(!NLA) { //Non-NLA is control free (speculatively), these deps aren't important
       out << "scalar LAT_F/1/;\n";
       out << "scalar O_LAT/0/;\n";
+      out << "parameter P(v,v)//";
     }
 
-    if(NLA) {
+    if(NLA) { // Figure out the important non-speculative dependences
       std::vector<Op*> long_loop_recs;
       std::vector<rec_chain> rec_chains;
       int orig_rec_len = 0;
@@ -2473,6 +2477,13 @@ std::string LoopInfo::nice_name_full() {
   nice_name_tree(ss);
   return func()->nice_name() + ss.str();
 }
+
+std::string LoopInfo::nice_name_full_filename() {
+  stringstream ss;
+  nice_name_tree(ss);
+  return func()->nice_filename() + ss.str();
+}
+
 
 bool LoopInfo::is_revolverable() {
   if(!isInnerLoop()) {

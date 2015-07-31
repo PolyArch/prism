@@ -28,10 +28,10 @@ int main(int argc, char *argv[])
   bool ooo_model=true;
   int  noMcPAT=0;
   int  allModels=0;
-  int inorderWidth=0;
+  int inorderWidth=2;
   bool revolver=false;
   bool match_sim=false;
-  int oooWidth=0;
+  int oooWidth=4;
   bool traceOutputs = false;
   int gen_loop_prof = 0;
   int nm = 0;
@@ -51,6 +51,7 @@ int main(int argc, char *argv[])
   bool isStdOutTerminal = (ttyname(1) != 0);
   int mem_ports=-1;
   int num_L1_MSHRs=-1;
+  bool skip_end=false;
 
   //This needs to be here
   system("mkdir -p mcpat/");
@@ -62,6 +63,7 @@ int main(int argc, char *argv[])
       {"no-registry", no_argument, 0, 'n'},
       {"scale-frequency", no_argument, 0, 's'},
       {"max-insts", required_argument, 0, 'm'},
+      {"fast-forward", required_argument, 0, 'f'},
       {"loop-prof-max-insts", required_argument, 0, 'l'},
       {"models", required_argument, 0, 'x'}, //inorder, ooo, both
       {"no-mcpat", no_argument, &noMcPAT, 1},
@@ -87,6 +89,7 @@ int main(int argc, char *argv[])
       {"match-sim", no_argument, 0, 15},
 
       {"num-mshrs", required_argument, 0, 16},
+      {"skip-end", no_argument, 0, 17},
 
       {0,0,0,0}
     };
@@ -96,8 +99,10 @@ int main(int argc, char *argv[])
 
 
   uint64_t max_inst = (uint64_t)-1;
+  uint64_t fast_forward = (uint64_t)0;
   uint64_t loop_prof_max_inst = max_inst;
   bool registry_off = false;
+  int temp;
 
   while (1) {
     int option_index = 0;
@@ -118,14 +123,14 @@ int main(int argc, char *argv[])
                                     optarg);
       break;
     case 2:
-      inorderWidth = atoi(optarg);
-      if (!inorderWidth)
-        inorderWidth = 2;
+      temp = atoi(optarg);
+      if (temp)
+        inorderWidth = temp;
       break;
     case 3:
-      oooWidth = atoi(optarg);
-      if (!oooWidth)
-        oooWidth = 4;
+      temp = atoi(optarg);
+      if (temp)
+        oooWidth = temp;
       break;
     case 4:
       traceOutputs = true;
@@ -162,6 +167,7 @@ int main(int argc, char *argv[])
     case 'h':
       std::cout << argv[0] << " [options] file\n";
       return(0);
+    case 'f': fast_forward = atoi(optarg); break;
     case 'm': max_inst = atoi(optarg); break;
     case 'l': loop_prof_max_inst = atoi(optarg); break;
     case 'n': registry_off = true; break;
@@ -189,6 +195,10 @@ int main(int argc, char *argv[])
         num_L1_MSHRs = -1;
       }
       break;
+    case 17:
+      skip_end=true;
+      break;
+
     case 'p': {
       progress_granularity_set = true;
       progress_granularity = atoi(optarg);
@@ -266,14 +276,11 @@ int main(int argc, char *argv[])
 
   CPRegistry::get()->setDefaults();
 
-  if(inorderWidth > 0) {
-    CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,
-                                match_sim,revolver,mem_ports, num_L1_MSHRs);
-  }
-  if(oooWidth > 0) {
-    CPRegistry::get()->setWidth(oooWidth, false,scale_freq,
+  CPRegistry::get()->setWidth(inorderWidth, true,scale_freq,
+                               match_sim,revolver,mem_ports, num_L1_MSHRs);
+  CPRegistry::get()->setWidth(oooWidth, false,scale_freq,
                                 match_sim,revolver, mem_ports, num_L1_MSHRs);
-  }
+
   CPRegistry::get()->setTraceOutputs(traceOutputs);
   CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat,elide_mem);
 
@@ -329,6 +336,12 @@ int main(int argc, char *argv[])
 
     if (inf.eof())
       break;
+
+    if(count<fast_forward) {
+      ++count;
+      continue;
+    }
+
 
     if (count == 0)
       img._fc = 0;
@@ -388,7 +401,7 @@ int main(int argc, char *argv[])
     }
   }
   std::cout << "\n";
-  numCycles += img._cmpc;
+  //numCycles += img._cmpc;
 
   gettimeofday(&end, 0);
   uint64_t start_time = start.tv_sec*1000000 + start.tv_usec;
@@ -402,6 +415,10 @@ int main(int argc, char *argv[])
   inf.close();
   std::cout << "Num of records              :" << count << "\n";
 
+
+  if(skip_end) {
+    return 0;
+  }
 
   if (!registry_off) {
     system("mkdir -p stats/");

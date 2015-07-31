@@ -7,7 +7,10 @@
 
 #include <vector>
 
-#include "cpnode.hh"
+//#include "cpnode.hh"
+#define STANDALONE_CRITPATH 1
+#include "cpu/crtpath/crtpathnode.hh"
+
 #include "op.hh"
 
 #include <iostream>
@@ -76,7 +79,7 @@ public:
         out << edge_name[i] << ":" << std::setprecision(3) << weight/total_weight << ",";
       }
     }
-    //out << " (total: " << total_weight << ")";
+    out << " (total: " << total_weight << ")";
   }
 };
 
@@ -121,7 +124,7 @@ public:
 template<typename T, typename E>
 class dg_inst_base {
 public:
-  uint64_t _index=-1;
+  uint64_t _index=0;
   bool _done = false;
   uint16_t _opclass = 0;
   bool _isload = false;
@@ -145,6 +148,8 @@ public:
   uint16_t _st_lat = 0;
   uint64_t _eff_addr = 0;
   uint8_t _hit_level = 0, _miss_level = 0, _acc_size=0;
+  uint8_t _type = 0; //type of instruction for debugging
+
 
   virtual T &operator[](const unsigned i) =0;
 
@@ -174,10 +179,49 @@ protected:
   }
 
   dg_inst_base() : _index(0) {}
+
+  std::set<std::shared_ptr<dg_inst_base<T,E>>> _savedInsts;
+
 public:
+  void open_this_one() {
+    for(unsigned j = 0; j < numStages(); ++j) {
+     (*this)[j]._crit_path_opened=true;
+    }
+  }
+
+//  virtual void open_for_backtrack() {
+//    this->open_this_one();
+//  }
+
+  virtual void open_for_backtrack() {
+    for(const auto& i : _savedInsts) {
+      i->open_this_one();
+    }
+    this->open_this_one();
+  }
+
+
+  virtual bool savedIn(std::shared_ptr<dg_inst_base<T,E>> inst) {
+    for(const auto& saved_inst : _savedInsts) {
+      if(saved_inst == inst) {
+        return true;
+      }
+      if(saved_inst->savedIn(inst)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  virtual void saveInst(std::shared_ptr<dg_inst_base<T,E>> inst) {
+    _savedInsts.insert(inst);
+  }
+
+
+
   virtual uint64_t finalCycle() {
     uint64_t max=0;
-    for(int i = 0; i < numStages(); ++i) {
+    for(unsigned i = 0; i < numStages(); ++i) {
       if(max<cycleOfStage(i)) {
         max=cycleOfStage(i);
       }
@@ -185,7 +229,7 @@ public:
     return max;
   }
   virtual void setCumWeights(CumWeights* cm) {
-    for(int i = 0; i < numStages(); ++i) {
+    for(unsigned i = 0; i < numStages(); ++i) {
       (*this)[i]._cum_weights=cm;
       (*this)[i]._index=_index; //fun?
       (*this)[i]._op=_op; //fun?
@@ -193,7 +237,7 @@ public:
   }
 
   virtual void done(uint64_t n_index) {
-     for(int i = 0; i < numStages(); ++i) {
+     for(unsigned i = 0; i < numStages(); ++i) {
       (*this)[i].done(n_index); //fun?
     }
   }
@@ -221,11 +265,13 @@ protected:
   oplist_t _mem_operands;
 
 public:
-  void addOperandInst(std::shared_ptr< dg_inst_base<T, E> > op) {
-    _operands.push_back(op);
+  void addOperandInst(std::shared_ptr< dg_inst_base<T, E> > inst) {
+    assert(inst);
+    _operands.push_back(inst);
   }
-  void addMemOperandInst(std::shared_ptr< dg_inst_base<T, E> > op) {
-    _mem_operands.push_back(op);
+  void addMemOperandInst(std::shared_ptr< dg_inst_base<T, E> > inst) {
+    assert(inst);
+    _mem_operands.push_back(inst);
   }
 
   void clearOperandInsts() {
@@ -363,7 +409,6 @@ public:
 
 protected:
   T events[NumStages];
-  std::set<std::shared_ptr<dg_inst_base<T,E>>> _savedInsts;
 
 public:
   bool iqOpen=false;
@@ -373,10 +418,6 @@ public:
     /*for (int i = 0; i < NumStages; ++i) {
       events[i].remove_all_edges();
     }*/
-  }
-
-  virtual void saveInst(std::shared_ptr<dg_inst_base<T,E>> inst) {
-    _savedInsts.insert(inst);
   }
 
   //Copy events from another Inst_t
@@ -458,11 +499,11 @@ public:
     this->_mem_prod=img._mem_prod;
     this->_cache_prod=img._cache_prod;
     this->_true_cache_prod=img._true_cache_prod;
-    this->_ex_lat=img._cc-img._ec;
+    this->_ex_lat=img._ep_lat;
     this->_serialBefore=img._serialBefore;
     this->_serialAfter=img._serialAfter;
     this->_nonSpec=img._nonSpec;
-    this->_st_lat=img._xc-img._wc;
+    this->_st_lat=img._st_lat;
     this->_floating=img._floating;
     this->_iscall=img._iscall;
     this->_eff_addr=img._eff_addr;
@@ -480,18 +521,18 @@ public:
     _pc=img._pc;
     _upc=img._upc;
     this->_op=op;
-   /* 
+   
     for (int i = 0; i < NumStages; ++i) {
       events[i].set_inst(this);
-      if (img._isload)
-        events[i].setLoad();
-      if (img._isstore)
-        events[i].setStore();
-      if (img._isctrl)
-        events[i].setCtrl();
-      events[i].prop_changed();
+     // if (img._isload)
+     //   events[i].setLoad();
+     // if (img._isstore)
+     //   events[i].setStore();
+     // if (img._isctrl)
+     //   events[i].setCtrl();
+     // events[i].prop_changed();
     }
-    */
+    
   }
 
   void set_ex_lat(uint16_t lat) {this->_ex_lat=lat;}
@@ -515,6 +556,7 @@ public:
   }
 
   bool isMem() {return this->_isload || this->_isstore;}
+
 };
 
 // Implementation of DYNOP Type, inerits from generic node
@@ -533,7 +575,7 @@ public:
   uint64_t _index=-2;
   uint64_t _n_index=0;
   Op* _op = NULL;
-  dg_inst<NodeTy, E> *_inst;
+  dg_inst_base<NodeTy, E> *_inst;
   CumWeights* _cum_weights;
   bool _dirty=false;
   bool _crit_path_counted=false;
@@ -558,8 +600,8 @@ public:
     //_edges.clear();
   }
 
-  void set_inst(dg_inst<NodeTy, E> *n){
-    //_inst = n;
+  void set_inst(dg_inst_base<NodeTy, E> *n){
+    _inst = n;
   }
 
   bool isLastArrivingEdge(EPtr edge) {
@@ -741,6 +783,8 @@ public:
   virtual ~dep_graph_t() {};
   virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,uint64_t index) = 0;
 
+  virtual void addInstChecked(std::shared_ptr<dg_inst_base<T,E>> dg,uint64_t index) = 0;
+
   virtual T* getHorizon() = 0;
 
   virtual E* insert_edge(T& event1, T& event2,
@@ -776,7 +820,6 @@ public:
   virtual bool hasIdx(uint64_t idx) = 0;
   virtual void setCritListener(CritEdgeListener<E>* cel) = 0;
 
-
   virtual CumWeights* cumWeights() = 0;
 
   virtual std::shared_ptr< dg_inst_base<T, E> > queryInst(uint64_t idx) = 0;
@@ -801,6 +844,9 @@ public:
 #define BSIZE 16384 //16384 //max number of insts to keep for data/mem dependence
 #define HSIZE  6356 //6356
 #define PSIZE   512 //max number in-flight instructions, biggest ROB size
+#define RSIZE  1024
+#define CSIZE (BSIZE-HSIZE-RSIZE)
+
 
 template<typename Inst_t, typename T, typename E>
 class dep_graph_impl_t : public dep_graph_t<Inst_t,T,E> {
@@ -820,7 +866,8 @@ protected:
   //InstVec _vec;
   typedef  std::shared_ptr<dg_inst_base<T, E> > dg_inst_base_ptr;
   dg_inst_base_ptr  _vec[BSIZE];
-  uint64_t _latestIdx;
+  uint64_t _latestIdx, _latestCleanIdx=0;
+
 
   CumWeights _cum_weights;
   CritEdgeListener<E>* _crit_edge_listener=NULL;
@@ -830,7 +877,7 @@ protected:
   // a node with which to attach dependencies to ensure that the horizon is not
   // crossed.
   //uint64_t _horizonCycle=0;
-  //uint64_t _horizonIndex=((uint64_t)-1);
+  uint64_t _horizonIndex=((uint64_t)-1);
   dg_inst_base_ptr _horizonInst;
 
   typename std::shared_ptr<Inst_t> _pipe[PSIZE];
@@ -920,6 +967,28 @@ public:
 
       if(horizon_warning_printed==false) {
         //make sure we still have the instruction
+        if(queryInst(_horizonInst->index()) != _horizonInst) {
+          std::cerr << "ERROR: horizon inst lost\n";
+          std::cerr << "min idx for func: " << min_index << "\n";
+          std::cerr << "_horizonIdx: " << _horizonIndex << "\n";
+          std::cerr << "Horizon Idx Inst op: " << queryInst(_horizonIndex)->_op->id() << "\n";
+          std::cerr << "==" << queryInst(_horizonIndex)->_op->getUOPName() << "\n";
+          std::cerr << "ptr: " << &*queryInst(_horizonIndex) << "\n";
+          std::cerr << "index: " << queryInst(_horizonIndex)->_index << "\n";
+
+
+          std::cerr << "Horizon Inst: " << _horizonInst->index() << "\n"
+                    << "Horizon Inst op: " << _horizonInst->_op->id() << "\n"
+                    << "==: " << _horizonInst->_op->getUOPName() << "\n"
+                    << "ptr: " << &*_horizonInst << "\n";
+          std::cerr << "Horizon Idx Inst: " << queryInst(_horizonInst->index())->index() << "\n";
+          std::cerr << "Horizon Idx Inst op: " << queryInst(_horizonInst->index())->_op->id() << "\n";
+           std::cerr << "==" << queryInst(_horizonInst->index())->_op->getUOPName() << "\n";
+           std::cerr << "ptr: " << &*queryInst(_horizonInst->index()) << "\n";
+
+
+         
+        }
         assert(queryInst(_horizonInst->index()) == _horizonInst); 
       }
 
@@ -931,7 +1000,7 @@ public:
          horizonIndex < min_index + BSIZE; ++horizonIndex) {
          num_iters++; 
          dg_inst_base_ptr new_hor_inst = _vec[horizonIndex%BSIZE];
-         if(!new_hor_inst || new_hor_inst->isDummy()) {
+         if(!new_hor_inst || new_hor_inst->isDummy() || (horizonIndex!=new_hor_inst->_index)) {
            continue;
          }
          uint64_t new_hor_cycle = new_hor_inst->cycleOfStage(new_hor_inst->eventInception());
@@ -941,19 +1010,45 @@ public:
 
          if(new_hor_cycle >= horizonCycle && _horizonInst != new_hor_inst) {
            if(0) { //debugging code
-           std::cerr << "orig: 0, min: "
-                     << (int64_t)min_index - (int64_t)_horizonInst->index();
-           std::cerr << ", latest:" << (int64_t)_latestIdx - (int64_t)_horizonInst->index()
-                     << ", new:" << new_hor_inst->index() - _horizonInst->index()
-                     << "(" << horizonCycle << "to " << new_hor_cycle
-                     << "; iters=" << num_iters << ")\n";
+             std::cerr << "orig: 0, min: "
+                       << (int64_t)min_index - (int64_t)_horizonInst->index();
+             std::cerr << ", latest:" << (int64_t)_latestIdx - (int64_t)_horizonInst->index()
+                       << ", new:" << new_hor_inst->index() - _horizonInst->index()
+                       << "(" << horizonCycle << "to " << new_hor_cycle
+                       << "; iters=" << num_iters << ")\n";
            }
            _horizonInst = new_hor_inst;
+           _horizonIndex = horizonIndex;
            return;
          }
       }
-      //Horizon Failed! -- Investigate!
+
+      //Horizon Failed! -- Investigate! ------------------------------------
       if(horizon_warning_printed==false) {
+
+        int num_iters=-1;
+        for(uint64_t cur_idx = min_index-1;
+           cur_idx < min_index + BSIZE; ++cur_idx, ++num_iters) {
+           std::cerr << num_iters << "," <<cur_idx << ": ";
+           dg_inst_base_ptr cur_inst = _vec[cur_idx%BSIZE];
+           if(!cur_inst) {
+             std::cerr << "null";
+           } else if(cur_inst->isDummy()) {
+             std::cerr << " " << cur_inst->_index << " ";
+             std::cerr << "dummy\n";
+             continue;
+           } else {
+              uint64_t incep_cycle = cur_inst->cycleOfStage(cur_inst->eventInception());
+              uint64_t commit_cycle = cur_inst->cycleOfStage(cur_inst->eventCommit());
+
+              std::cerr << " " << cur_inst->_index << " ";
+              std::cerr << _vec[cur_idx%BSIZE]->_op->id() 
+                        << " " << incep_cycle << " " << commit_cycle 
+                        << " " << (cur_inst->isPipelineInst()?"pipe":"accel");
+           }
+           std::cerr << "\n";
+        }
+
         std::cerr << "ERROR, no horizon instruction available! (cycle " 
                   << horizonCycle << ", highest_found:" << highest_hor_cand << ")\n";
         std::cerr << "orig horizon: " << _horizonInst->index() 
@@ -966,6 +1061,7 @@ public:
         //_horizonInst=NULL;
         return;
       }
+
    }
 
    virtual T* getHorizon() {
@@ -974,6 +1070,12 @@ public:
      } 
 
      uint64_t horizonIndex = _horizonInst->index();
+
+     if(queryInst(horizonIndex) != _horizonInst) {
+       std::cout << "horizon idx: " << _horizonInst->index() << "\n";
+       std::cout << "op:" << _horizonInst->_op->id() << "\n";
+     }
+
      assert(queryInst(horizonIndex) == _horizonInst); 
      //make sure we still have the instruction
 
@@ -1015,8 +1117,13 @@ public:
             }
 
             std::cout << std::setw(5) << edge_name[edge->type()] 
-                      << " index:" << edge->src()->_index
-                      << " n_index:" << edge->src()->_n_index;
+                      << " index:" << std::setw(11) << edge->src()->_index
+                      << " n_index:" << std::setw(11) << edge->src()->_n_index;
+
+
+            if(edge->src()->_inst) {
+              std::cout << "inst_ptr: " << std::setw(5) << &*edge->src()->_inst ;
+            }
              
             if(edge->src()->_op) {
               std::cout << "\top:" << edge->src()->_op->id();
@@ -1149,7 +1256,6 @@ public:
     assert(weightOf.size()==0);
   }
 
-#define RSIZE 1024
 
   T* backtrack_from(T* node, std::unordered_set<T*>& seen, 
                        std::unordered_set<T*>& temp, uint64_t stop,
@@ -1211,19 +1317,15 @@ public:
     //2. Find last instruction between start and stop
     // Do 1 if vec[latest_ind] has instruction
     if(_vec[latest_ind] && _vec[latest_ind]->index() == latest) {
-     for(uint64_t i = reserve_ind; i!=stop_ind; ++i,i=(i==BSIZE?0:i)) {
-        //if(i==BSIZE) {
-        //  i=0;
-        //}
+      for(uint64_t i = reserve_ind; i!=stop_ind; ++i,i=(i==BSIZE?0:i)) {
         if(!_vec[i]) {
           continue;
         }
-        for(int j = 0; j < _vec[i]->numStages(); ++j) {
-          (*_vec[i])[j]._crit_path_opened=true;
-        }
+        _vec[i]->open_for_backtrack();
       }
 
       T* cur_node = & (*_vec[latest_ind])[_vec[latest_ind]->eventComplete()];
+      //std::cout << "latest" << cur_node->cycle() << "\n";
 
       T* cycle_start=NULL;
       std::unordered_set<T*> seen;
@@ -1234,11 +1336,9 @@ public:
      
     //Fall back on option 2 if it didn't work 
     if(!node) {
+//      std::cout << "backtracking didn't work so well\n";
+
       for(uint64_t i = start_ind; i!=stop_ind; ++i,i=(i==BSIZE?0:i)) {
-//        if(i==BSIZE) {
-//          i=0;
-//        }
-  
         dg_inst_base_ptr inst = _vec[i];
        
         if(inst) { 
@@ -1253,35 +1353,43 @@ public:
     assert(node);
     critpath(node);
 
-    //debug:
-    /*
-    double total_weight=0; //should roughly equal number of cycles in program
-    for(int i = 0; i < E_NUM; ++i) {
-      double weight =weightOfEdge(i,Weighted);
-      total_weight+=weight;
-    }
-
-    std::cout << "Range: " << start << "->" << stop << ", cycle: " << _vec[start_ind]->cycleOfStage(_vec[start_ind]->eventComplete()) << "->" << node->cycle() <<"; total_weight: " << total_weight <<"\n";
+    /*std::cout << "Range: " << start << "->" << stop << ", cycle: " << _vec[start_ind]->cycleOfStage(_vec[start_ind]->eventComplete()) << "->" << node->cycle() <<"; total_weight: " << total_weight <<"\n";
     */
 
 //    std::cout << "clearing: " << start << " " << stop-RSIZE << " " << latest << "\n";
-    for(uint64_t i = start_ind; i!=reserve_ind; ++i,i=(i==BSIZE?0:i)) {
-//      if(i==BSIZE) {
-//        i=0;
-//      }
+//    std::cout << "start_ind: " << start_ind << " " << reserve_ind << "\n";
 
+    int j=0;
+    for(uint64_t i = start_ind; i!=reserve_ind; ++i,i=(i==BSIZE?0:i),++j) {
+/*      std::cout << "clear:" << i;
+      if(_vec[i]) {
+        std::cout << " " << _vec[i]->_index << "\n";
+      } else {
+        std::cout << " NULL VEC\n";
+      }
+*/
       _vec[i]=0;      
     }
+//    std::cout << "elemennts deleted: " << j << "\n";
   }
- 
-  virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg,
-                       uint64_t index) {
+
+  void check_update_horizon(std::shared_ptr<dg_inst_base<T,E>> dg, uint64_t index) {
+    if(_latestIdx==0 && index > 1000) {
+      _latestCleanIdx=index-1;
+    }
+//    bool debug_cond=index>790000;
+//
+//    if(debug_cond) {
+//      std::cerr << "add to index: " << index << "   cycle: " 
+//                << dg->cycleOfStage(dg->eventInception()) << "\n";
+//    }
+
     //Not forcing this anymore
     //assert(index <= _latestIdx+1 && index + BSIZE >= _latestIdx);
     assert(index + BSIZE >= _latestIdx);
     //assert(index == dg->_index);
 
-    int vec_ind = index%BSIZE;
+    //int vec_ind = index%BSIZE;
     //if (_vec[vec_ind].get() != 0) {
     //  remove_instr(_vec[vec_ind].get());
     //}
@@ -1292,20 +1400,60 @@ public:
 
       if((index>=HSIZE && index > _latestIdx) ) {
         updateHorizon(index-HSIZE);
-        //std::cout << "horizon = " << _horizonCycle << "\n";
+
+
+//        if(debug_cond) {
+//          if(_horizonInst) {
+//            uint64_t horizonCycle = _horizonInst->cycleOfStage(_horizonInst->eventInception());
+//            uint64_t horizonIndex = _horizonInst->_index;
+//            std::cerr << "horizon = c:" << horizonCycle << ", i:" << horizonIndex << " " << _latestIdx - horizonIndex << "\n";
+//          } else {
+//            std::cerr << "no horizon\n";
+//          }
+//        }
         //assert(_horizonInst->index() > (index-HSIZE));  -- we are allowing the horizon to get pushed out
 
-        //I'm going to stomp on a node, time to analyze the graph so far
-        if(_vec[vec_ind]) {
-          analyzeGraph(_vec[vec_ind]->index(), index-HSIZE, _latestIdx);
+        if(index>=_latestCleanIdx+CSIZE+RSIZE+HSIZE) {
+           analyzeGraph(_latestCleanIdx, _latestCleanIdx+CSIZE+RSIZE,_latestIdx);
+          _latestCleanIdx=_latestCleanIdx+CSIZE;
         }
-
+        //I'm going to stomp on a node, time to analyze the graph so far
+        //if(_vec[vec_ind]) {
+        //  analyzeGraph(_vec[vec_ind]->index(), index-HSIZE, _latestIdx);
+        //}
       }
     }
 
     if(index>_latestIdx) {
       _latestIdx=index;
     }
+  }
+
+  //If the vector values are the same, just push back
+  virtual void addInstChecked(std::shared_ptr<dg_inst_base<T,E>> dg, uint64_t index) {
+     assert(index!=0);
+
+     check_update_horizon(dg,index);
+
+     int vec_ind = index%BSIZE;
+     if(_vec[vec_ind] && _vec[vec_ind]->index()==index) {
+       if(_vec[vec_ind] == dg || _vec[vec_ind]->savedIn(dg)) { 
+          //don't add twice -- do nothing
+          return;
+       } else {
+          dg->saveInst(_vec[vec_ind]); //save old instruction
+       }
+
+     } 
+     _vec[vec_ind]=dg;
+  }
+
+
+  virtual void addInst(std::shared_ptr<dg_inst_base<T,E>> dg, uint64_t index) {
+//    std::cout << "index ---- " << index << " " << "type:" << (int)dg->_type << "  ptr:" << &*dg << "dg->_index: " << dg->_index << "\n";
+    check_update_horizon(dg,index);
+
+    int vec_ind = index%BSIZE;
     _vec[vec_ind]=dg;
   }
 

@@ -122,13 +122,13 @@ public:
       }
 
     } else {
-      N_ALUS=std::min(std::max(1,ISSUE_WIDTH*3/4),6);
+      N_ALUS=std::min(std::max(1u,ISSUE_WIDTH*3/4),6u);
       if(ISSUE_WIDTH==2) {
         N_ALUS=2;
       }
-      N_FPU=std::min(std::max(1,ISSUE_WIDTH/2),4);
-      RW_PORTS=std::min(std::max(1,ISSUE_WIDTH/2),3);
-      N_MUL=std::min(std::max(1,ISSUE_WIDTH/2),2);
+      N_FPU=std::min(std::max(1u,ISSUE_WIDTH/2),4u);
+      RW_PORTS=std::min(std::max(1u,ISSUE_WIDTH/2),3u);
+      N_MUL=std::min(std::max(1u,ISSUE_WIDTH/2),2u);
 
       if(ISSUE_WIDTH==1) {
         std::cout << "Single issue ooo?";
@@ -198,7 +198,7 @@ public:
           FETCH_TO_DISPATCH_STAGES=5;
           COMMIT_TO_COMPLETE_STAGES=2;
           PIPE_DEPTH=18;
-          PHYS_REGS=168;
+          PHYS_REGS=180;
           IQ_WIDTH=48;
           LQ_SIZE = 42;
           SQ_SIZE = 72;
@@ -207,12 +207,33 @@ public:
           FETCH_TO_DISPATCH_STAGES=6;
           COMMIT_TO_COMPLETE_STAGES=3;
           PIPE_DEPTH=19;
-          PHYS_REGS=168;
-          IQ_WIDTH=60;
+          PHYS_REGS=220;
+          IQ_WIDTH=64;
           LQ_SIZE = 42;
           SQ_SIZE = 72;
-          ROB_SIZE=192;
-        }
+          ROB_SIZE=228;
+        } else if(ISSUE_WIDTH==16) {
+          FETCH_TO_DISPATCH_STAGES=7;
+          COMMIT_TO_COMPLETE_STAGES=4;
+          PIPE_DEPTH=20;
+          PHYS_REGS=240;
+          IQ_WIDTH= 80;
+          LQ_SIZE = 64;
+          SQ_SIZE = 96;
+          ROB_SIZE=280;
+        } else if(ISSUE_WIDTH<16) {
+          cout << "Nonstandard issue width, please check params!\n";
+        } else if(ISSUE_WIDTH>16) { 
+          cout << "ISSUE > 16?  Ok, check params!\n";
+          FETCH_TO_DISPATCH_STAGES=4;
+          COMMIT_TO_COMPLETE_STAGES=2;
+          PIPE_DEPTH=17;
+          PHYS_REGS=168;
+          IQ_WIDTH=250;
+          LQ_SIZE =150;
+          SQ_SIZE =150;
+          ROB_SIZE=500;
+        } 
         
         if(match_simulator) {
           CORE_CLOCK=2000;
@@ -231,14 +252,15 @@ public:
       LQ.resize(LQ_SIZE);
       SQ.resize(SQ_SIZE);
 
-      IBUF_SIZE=std::max(FETCH_TO_DISPATCH_STAGES*ISSUE_WIDTH,16);
+      IBUF_SIZE=std::max(FETCH_TO_DISPATCH_STAGES*ISSUE_WIDTH,16u);
       PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
     }
 
     if(mem_ports!=-1) {
       RW_PORTS=mem_ports;
-      cout << "Override RW_PORTS: " << RW_PORTS << "\n";
     }
+    cout << "Override RW_PORTS: " << RW_PORTS << "\n";
+
 
     if(num_L1_MSHRs!=-1) {
       L1_MSHRS=num_L1_MSHRs;
@@ -251,6 +273,11 @@ public:
   //Functions to surpress and enable errors
   virtual void supress_errors(bool val) {
     _supress_errors=val;
+  }
+
+  virtual void set_func_trans_inst(std::shared_ptr<Inst_t> t_inst){
+    assert(t_inst);
+    func_transition_inst=t_inst;
   }
 
 
@@ -375,6 +402,14 @@ public:
     } 
   }
 
+  //Returns the estimated benefit of the model versus the baseline core
+  virtual float estimated_benefit(LoopInfo* li) {
+    return 1.0f;
+  }
+
+  virtual void setGraph(dep_graph_impl_t<Inst_t,T,E>*) {}
+
+
   Op* _prev_op=NULL;
   //Public function which inserts functions from the trace
   virtual void insert_inst(const CP_NodeDiskImage &img,
@@ -387,7 +422,6 @@ public:
     inserted(sh_inst);
   }
 
-
   virtual void pushPipe(std::shared_ptr<Inst_t>& sh_inst) {
     if(_elide_mem && sh_inst->isAccelerated) {
       if(sh_inst->_op && (sh_inst->_op->shouldIgnoreInAccel() ||
@@ -395,6 +429,8 @@ public:
         return;
       }
     }
+
+    insertLSQ(sh_inst);
 
     Inst_t* depInst = getCPDG()->peekPipe(-1);
     if(depInst) {
@@ -533,8 +569,7 @@ protected:
   //std::map<Inst_t *, Op*> _inst2Op;
 
   virtual InstPtr createInst(const CP_NodeDiskImage &img, 
-                             uint64_t index, Op *op, bool track=true)
-  {
+                             uint64_t index, Op *op, bool track=true) {
     InstPtr ret = InstPtr(new Inst_t(img, index, op));
     if (track && op) {
       keepTrackOfInstOpMap(ret, op);
@@ -650,6 +685,7 @@ protected:
 
 
   virtual void keepTrackOfInstOpMap(BaseInstPtr ret, Op *op) {
+    assert(ret);
     _op2InstPtr[op] = ret;
     ret->setCumWeights(curWeights());
 
@@ -735,13 +771,12 @@ protected:
   float avg_rob_head;
   float rob_growth_rate;
 
-  int lq_head_at_dispatch;
-  int sq_head_at_dispatch;
+  unsigned lq_head_at_dispatch;
+  unsigned sq_head_at_dispatch;
 
   int pipe_index;
   uint16_t lq_size_at_dispatch[PSIZE];
   uint16_t sq_size_at_dispatch[PSIZE];
-
 
   uint64_t maxIndex;
   uint64_t _curCycle;
@@ -749,10 +784,12 @@ protected:
   uint64_t _latestCleaned=0;
 
   std::unordered_set<uint64_t> fu_monitors;
+ 
+  std::shared_ptr<Inst_t> func_transition_inst;
 
   virtual void print_edge_weights(std::ostream& out, AnalysisType analType) override {
     getCPDG()->cumWeights()->print_edge_weights(out,analType);
-/*    double total_weight=0; //should roughly equal number of cycles in program
+    /* double total_weight=0; //should roughly equal number of cycles in program
     for(int i = 0; i < E_NUM; ++i) {
       double weight = getCPDG()->weightOfEdge(i,analType);
       total_weight+=weight;
@@ -784,10 +821,10 @@ protected:
 
         if(upperUse->first > firstUse->first) {
           if(fu_monitors.count(pair.first)) {
-            uint64_t prev_cycle=-1;
+            uint64_t prev_cycle;
             int prev_usage;
             for(auto i=firstUse; i!=upperUse; ++i) {
-              if(prev_cycle!=-1) {
+              if(i!=firstUse) {
                 monitorFUUsage(pair.first,i->first-prev_cycle,prev_usage);
               }
               prev_cycle=i->first;
@@ -905,8 +942,6 @@ protected:
     maxIndex = inst->index();
     _curCycle = inst->cycleOfStage(Inst_t::Fetch);
 
-    insertLSQ(inst);
-
     //add to activity
     for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
       uint64_t cyc = inst->cycleOfStage(i);
@@ -933,7 +968,7 @@ protected:
                      uint64_t& extraLat,
                      bool not_coalescable=false) { 
 
-    int maxUnits = L1_MSHRS;
+    unsigned maxUnits = L1_MSHRS;
     rechecks=0; 
 
     uint64_t cur_cycle=min_cycle;
@@ -1468,8 +1503,20 @@ protected:
       if(predict_taken && lat==0/* TODO: check this*/) {
         lat+=1;
       }
-
     }
+
+    if(_revolver_active) {
+      lat=0;
+    }
+
+    //static int total_icache=0, total_ff=0;
+    //total_icache+=n._icache_lat;
+    //total_ff+=lat;
+
+    //if(lat!=0) {
+    //  std::cout << "ILAT: " << n._icache_lat << " " << lat << "(" << total_icache << ", " << total_ff << ")\n";
+    //}
+
 
     getCPDG()->insert_edge(*depInst, Inst_t::Fetch,
                            n, Inst_t::Fetch,lat,E_FF);
@@ -1619,10 +1666,10 @@ protected:
     int blocking_dispatch=i;
 
     if(numInstsNotInRob + lq_size_at_dispatch[((pipeLoc-blocking_dispatch))%PSIZE]
-         > LQ_SIZE) {
+         > (int)LQ_SIZE) {
       Inst_t* depInst = getCPDG()->peekPipe(-blocking_dispatch); 
       getCPDG()->insert_edge(*depInst, Inst_t::Dispatch,
-                              n, Inst_t::Fetch, 2, E_LQTF); //3 cycles emperical
+                              n, Inst_t::Fetch, 2, E_LQTF); //2-3 cycles emperical
     }
 
     return n;
@@ -1749,14 +1796,15 @@ protected:
           if(ops_with_missing_deps.count(n._op)==0) {
             ops_with_missing_deps.insert(n._op);
             std::cerr << "WARNING: OP:" << n._op->id() 
+                      << " BB:" << n._op->bb()->rpoNum()
+                      << " ind:" << n.index()
                       << ", func:" << n._op->func()->nice_name()
                       << " is missing an op (-" << prod << ")\n";
           }
         }
         continue;
       }
-      BaseInst_t& depInst =
-        getCPDG()->queryNodes(n.index()-prod);
+      BaseInst_t& depInst = getCPDG()->queryNodes(n.index()-prod);
 
       getCPDG()->insert_edge(depInst, depInst.eventComplete(),
                              n, Inst_t::Ready, 0, E_RDep);
@@ -1767,9 +1815,16 @@ protected:
 
   // Memory Dependence
   virtual void checkMemoryDependence(Inst_t &n) {
+    static bool memory_dependence_error=false;
     if ( (n._mem_prod > 0 && n._mem_prod < n.index() )  ) {
-      BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
-      addTrueMemDep(dep_inst,n);
+
+      if(getCPDG()->hasIdx(n.index()-n._mem_prod)) {
+        BaseInst_t& dep_inst=getCPDG()->queryNodes(n.index()-n._mem_prod);
+        addTrueMemDep(dep_inst,n);
+      } else if (memory_dependence_error == false) {
+        memory_dependence_error=true;
+        std::cerr << "MEMORY DEPENDENCE ERROR\n";
+      }
     }
   }
 
@@ -1813,27 +1868,27 @@ protected:
       BaseInstPtr sh_inst = getInstForOp(dep_op);
 
       if(sh_inst) {
-        insert_mem_dep_edge(*sh_inst,n);
+        insert_mem_dep_edge(*sh_inst,n,E_PDep);
       }
     } 
   }
 
 
-  virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n)
+  virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n, int edge_type=E_MDep)
   {
     assert(&prev_node != &n);
     if (prev_node._isstore && n._isload) {
       // RAW true dependence
       getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                             n, n.eventReady(), 0, E_MDep);
+                             n, n.eventReady(), 0, edge_type);
     } else if (prev_node._isstore && n._isstore) {
       // WAW dependence (output-dep)
       getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                             n, n.eventComplete(), 0, E_MDep);
+                             n, n.eventComplete(), 0, edge_type);
     } else if (prev_node._isload && n._isstore) {
       // WAR dependence (load-store)
       getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
-                             n, n.eventReady(), 0, E_MDep);
+                             n, n.eventReady(), 0, edge_type);
     }
   }
 
@@ -2091,7 +2146,7 @@ protected:
       int squash_cycles = squashCycles(insts_to_squash)/2;
       int recheck_cycles = squash_cycles;
 #else
-      int insts_to_squash=std::max(1,FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH-3);//13
+      int insts_to_squash=std::max(1u,FETCH_TO_DISPATCH_STAGES*FETCH_WIDTH-3);//13
       int recheck_cycles=FETCH_TO_DISPATCH_STAGES*2+1; //9;
 
 #endif
@@ -2253,10 +2308,10 @@ protected:
     //getCPDG()->insert_edge(*depInst, Inst_t::Commit,
     //                       n, Inst_t::Execute, -INORDER_EX_DEPTH, E_EPip);
    
-    uint64_t cycles_between=depInst->cycleOfStage(Inst_t::Commit) -
-                            depInst->cycleOfStage(Inst_t::Execute);
+    int cycles_between=(int64_t)depInst->cycleOfStage(Inst_t::Commit) -
+                       (int64_t)depInst->cycleOfStage(Inst_t::Execute);
 
-    if(cycles_between > INORDER_EX_DEPTH) {
+    if(cycles_between > (int)INORDER_EX_DEPTH) {
       getCPDG()->insert_edge(*depInst, Inst_t::Execute,
                                     n, Inst_t::Execute, 
                              cycles_between-INORDER_EX_DEPTH, E_EPip);
@@ -2564,8 +2619,8 @@ protected:
         uint64_t complete_cycle = n.cycleOfStage(Inst_t::Complete);
         uint64_t max_cycles = ((complete_cycle-rob_insert_cycle)*ISSUE_WIDTH*.9)/SQUASH_WIDTH + 2;
 
-        if(squash_cycles > max_cycles) {
-          squash_cycles=max_cycles;
+        if(squash_cycles > (int)max_cycles) {
+          squash_cycles=(int)max_cycles;
         }
 
 
@@ -2573,7 +2628,7 @@ protected:
         //because it can't commit while squashing
         getCPDG()->insert_edge(n, Inst_t::Complete,
                                n, Inst_t::Commit,squash_cycles+1,E_SQUA);
-
+        
         prev_squash_penalty=squash_cycles;
     }
     return n;

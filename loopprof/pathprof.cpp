@@ -694,7 +694,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     LoopInfo* loopInfo = I->second;
     /*
     cout << "loopinfo: " << loopInfo->id() << " ";
-    cout << loopInfo->getLoopBackRatio(loopInfo->getHotPathIndex()) << " ";
+    cout << loopInfo->pathHeatRatio(loopInfo->getHotPathIndex()) << " ";
     cout << loopInfo->getTotalIters() << "\n"; */
 
     //generate this only for 
@@ -709,7 +709,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
          << "(depth:" << loopInfo->depth() << " hpi:" << hpi
          << "hp_len: " << loopInfo->instsOnPath(hpi)  
          << (loopInfo->isInnerLoop() ? " inner " : " outer ")
-         << " lbr:" << loopInfo->getLoopBackRatio(hpi)
+         << " hot_path_heat:" << loopInfo->pathHeatRatio(hpi)
          << " iters:" << loopInfo->getTotalIters()
          << " insts:" << loopInfo->numInsts()
          << ")";
@@ -719,7 +719,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
     // BERET Scheduling
     if(loopInfo->isInnerLoop()
        && hpi != -2 //no hot path
-       && loopInfo->getLoopBackRatio(hpi) >= 0.7
+       && loopInfo->pathHeatRatio(hpi) >= 0.55
        && loopInfo->getTotalIters() >= 10
        && !loopInfo->containsCallReturn()
        ) {
@@ -728,13 +728,13 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
 
       worked = false;
       if(size_based_cfus) {
-//        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
-//                   NULL,
-//                   gams_details,no_gams);
+        //worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
+        //           NULL,
+        //           gams_details,no_gams);
       } else {
-//        worked = loopInfo->printGamsPartitionProgram(part_gams_str.str(),
-//                   &_beret_cfus,
-//                   gams_details,no_gams);
+        worked = loopInfo->scheduleBERET(part_gams_str.str(),
+                   &_beret_cfus,
+                   gams_details,no_gams);
       }
       if(worked) {
         sched_stats << " -- Beretized";
@@ -758,8 +758,8 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
 //    if(!loopInfo->containsCallReturn()) {
       bool attempted=false;
       if(size_based_cfus) {
-        worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams, 
-                                       attempted, total_dyn_insts);
+        //worked = loopInfo->scheduleNLA(NULL, gams_details, no_gams, 
+        //                               attempted, total_dyn_insts);
       } else {
         worked = loopInfo->scheduleNLA(&_beret_cfus, gams_details, no_gams,
                                        attempted, total_dyn_insts);
@@ -904,7 +904,7 @@ void PathProf::processOpPhase2(CPC prevCPC, CPC newCPC, bool isCall, bool isRet,
   //cout << "," << op->id();
 
 
-  op->executed(img._cc-img._ec);
+  op->executed(img._ep_lat);
   op->setOpclass(img._opclass);
   //We must add in all the dependencies
   for(unsigned i = 0; i < MAX_SRC_REGS; ++i) {
