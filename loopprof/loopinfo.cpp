@@ -962,6 +962,7 @@ for (depth = 0 to 4,
 *display close_dep;
 
 Bvv.fx(v1,v2)$(not possDep(v1,v2))=1;
+Bvv.fx(v1,v2)$(not close_dep(v1,v2))=1;
 
 )HERE";
 
@@ -1340,9 +1341,14 @@ bool LoopInfo::scheduleBERET(std::string filename, CFU_set* cfu_set,
     _sgSchedBeret.setCFUSet(cfu_set);
 
     BBvec& bbVec = getHotPath();
-    return printGamsPartitionProgram(filename,
+    bool ret = printGamsPartitionProgram(filename,
       bbVec, _sgSchedBeret, 
       cfu_set, gams_details, no_gams,false/*its not nla*/);
+
+    if(!ret) {
+      _sgSchedBeret.reset();
+    }
+    return ret;
 }
 
 
@@ -1394,7 +1400,7 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
   //funcsSeen.insert(func()); hopefully shouldn't see myself
 
   if(containsCallReturn()) {
-    if(inlinedStaticInsts() < 1536) { //little more than we want, fudge for removed ops
+    if(inlinedStaticInsts() < 1280) { //little more than we want, fudge for removed ops
 //      uint64_t my_dyn = numInsts();
 //      if(((double)my_dyn)/((double)total_dyn) < 0.1 ){
 //        sgSched.reset();
@@ -1405,6 +1411,9 @@ bool LoopInfo::scheduleNLA(CFU_set* cfu_set, SGSched& sgSched,
       inlinedBBs(funcsSeen,totalVec);
       
     } else {
+      //Warn about this
+      std::cerr << "TOO_LARGE_REGION: " << nice_name_full() << "\t(insts:" << inlinedStaticInsts() << ", " << "total %" << totalDynamicInlinedInsts() << ")\n"; 
+
       sgSched.reset();
       return false;
     }
@@ -1629,8 +1638,18 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
       streamK << op->id() << "." << CFU_node::kindName(CFU_node::kindOf(op->opclass()));
       streamL << op->id() << " " << op->avg_lat();
 
-      //put data dependence between ctrlFree memory dependences
-      for(auto di=op->m_cf_begin(),de=op->m_cf_end();di!=de;++di) {
+      // IF NLA -> put data dependence between ctrlFree memory dependences
+      // IF BERET -> put data dependence between all memory dependences
+
+      Op::Deps::iterator di,de;
+      if(NLA) {
+        di=op->m_cf_begin(); 
+        de=op->m_cf_end();
+      } else { //BERET
+        di=op->m_begin(); 
+        de=op->m_end();      
+      }
+      for(;di!=de;++di) {
         Op* mop = *di;
         if(mop->isLoad() && op->isLoad()) {
           continue;
@@ -1917,6 +1936,14 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
     }
   }
 
+  for(auto op : opSet) {
+    if(sgSched.opScheduled(op)) {
+      std::cerr << "ERROR: OP SCHEDULED TWICE! id:" << op->id() << "\n";
+    }
+    sgSched.insertOp(op);
+  } 
+
+
   if(ops_in_a_subgraph!=countOps) {
     //GAMS Couldn't Do It
     // do it manually
@@ -2030,54 +2057,51 @@ bool LoopInfo::printGamsPartitionProgram(std::string filename,
 
   }
 
-  for(auto op : opSet) {
-    sgSched.insertOp(op);
-  } 
   assert(sgSched.numSubgraphs() >= (int)orig_sgs);
   assert(sgSched.opSet().size() == countOps + orig_size);
   
   return true;
 }
 
-//No one uses this, don't remember what its for
-bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
-  set<Op*> seen;
-  seen.insert(worklist.begin(),worklist.end());
-
-  while(!worklist.size()==0) {
-    Op* op = worklist.back();
-    worklist.pop_back();
-    seen.insert(op);
-    if(!from) { //flow to
-      for(auto i=op->u_begin(),e=op->u_end();i!=e;++i) {
-        Op* use_op = *i;
-        if(!dependenceInPath(op,use_op)) {
-          continue;
-        }
-        if(use_op == dest_op) {
-          return true;
-        }
-        if(seen.count(use_op) == 0) {
-          worklist.push_back(use_op);
-        }
-      }
-    } else {
-      for(auto i=op->d_begin(),e=op->d_end();i!=e;++i) {
-        Op* dep_op = *i;
-        if(!dependenceInPath(dep_op,op)) {
-          continue;
-        }
-        if(dep_op == dest_op) {
-          return true;
-        }
-        if(seen.count(dest_op) == 0 ) {
-          worklist.push_back(dest_op);
-        }
-      }
-    }
-  }
-  return false;
-}
+////No one uses this, don't remember what its for
+//bool LoopInfo::canFlowOP(vector<Op*>& worklist, Op* dest_op, bool from) {
+//  set<Op*> seen;
+//  seen.insert(worklist.begin(),worklist.end());
+//
+//  while(!worklist.size()==0) {
+//    Op* op = worklist.back();
+//    worklist.pop_back();
+//    seen.insert(op);
+//    if(!from) { //flow to
+//      for(auto i=op->u_begin(),e=op->u_end();i!=e;++i) {
+//        Op* use_op = *i;
+//        if(!dependenceInPath(op,use_op)) {
+//          continue;
+//        }
+//        if(use_op == dest_op) {
+//          return true;
+//        }
+//        if(seen.count(use_op) == 0) {
+//          worklist.push_back(use_op);
+//        }
+//      }
+//    } else {
+//      for(auto i=op->d_begin(),e=op->d_end();i!=e;++i) {
+//        Op* dep_op = *i;
+//        if(!dependenceInPath(dep_op,op)) {
+//          continue;
+//        }
+//        if(dep_op == dest_op) {
+//          return true;
+//        }
+//        if(seen.count(dest_op) == 0 ) {
+//          worklist.push_back(dest_op);
+//        }
+//      }
+//    }
+//  }
+//  return false;
+//}
 
 //the are already serialized
 void LoopInfo::serializeSubgraphs() {

@@ -29,10 +29,11 @@ void DynSubgraph::addDep(std::shared_ptr<DynSubgraph> a,
                    const char* m, NLAInst& i1, NLAInst& i2) {
   assert(a!=b);
 
-  /*
-  std::cout <<   i1._op->id() << " d:" << i1._index << " sg:" << a->static_sg->id() 
-    << " -> " << i2._op->id() << " d:" << i2._index << " sg:" << b->static_sg->id()
-    << "(" << m << ")\n";*/
+//  std::cout <<   i1._op->id() << " d:" << i1._index 
+//            << " sg:" << a->static_sg->id() << " dyn_ind:" << a->dyn_ind 
+//    << " -> " << i2._op->id() << " d:" << i2._index 
+//            << " sg:" << b->static_sg->id() << " dyn_ind:" << b->dyn_ind
+//    << "(" << m << ")\n";
 
   bool bs_use_has_a=false,as_dep_has_b=false;
   for(auto& i : b->use_subgraphs) {

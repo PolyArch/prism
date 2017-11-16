@@ -96,9 +96,13 @@ public:
   CP_OPDG_Builder() : CP_DG_Builder<T, E> () {}
   virtual ~CP_OPDG_Builder() {}
 
+  InstPtr lastInst() {
+    return getCPDG()->peekPipe_sh(-1);
+  }
+
   void pushPipe(InstPtr &inst) {
     CP_DG_Builder<T, E>::pushPipe(inst);
-    _lastInst = inst;
+    //_lastInst = inst;
     if (getenv("DUMP_MAFIA_PIPE"))
       this->dumpInst(inst);
   }
@@ -165,6 +169,10 @@ public:
           || n.hasOperandInsts()))
       return CP_DG_Builder<T, E>::checkRegisterDependence(n);
 
+    /*if(n._op && n._op->is_clear_xor()) {
+      return n;
+    } */
+
     if (usePipeDependence()) { //Tony:  HIGHLY QUESTIONABLE!
       const int NumProducer = MAX_SRC_REGS; // X86 dep
       for (int i = 0; i < NumProducer; ++i) {
@@ -227,7 +235,17 @@ public:
     for (auto I = op->d_begin(), IE = op->d_end(); I != IE; ++I) {
       Op *DepOp = *I;
       BaseInstPtr depInst = this->getInstForOp(DepOp);
-      assert(&n!=&(*depInst));
+
+      //assert(&n!=&(*depInst));
+      if(&n!=&(*depInst)) {
+        static bool error_printed=false;
+        if(!error_printed) {
+          std::cerr << "weird dependence on op: " << long_op_name(DepOp) << "\n";
+          error_printed=true;
+          continue;
+        }
+      }
+
       if (!depInst.get()) {
         continue;
       }
@@ -278,7 +296,7 @@ public:
   }
 
 protected:
-  InstPtr _lastInst = 0;
+  //InstPtr _lastInst = 0;
 
 
   template <class _F, class _S, class _T>
@@ -410,9 +428,9 @@ protected:
       this->cpdgAddInst(inst, index);
     } else {
       //I guess some instruction got skipped?
-//      std::cerr << "no entry for: " << op->id() <<
-//                  " " << index << " " << op->getUOPName();
-//      std::cerr<<"\n";
+      //std::cerr << "no entry for: " << op->id() <<
+      //            " " << index << " " << op->getUOPName();
+      //std::cerr<<"\n";
 
        //  ExecProfile::getDisasm(op->cpc().first,op->cpc().second);
         

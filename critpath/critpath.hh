@@ -29,18 +29,85 @@ public:
   }
 };
 
+
+
+
+
+struct MemEvents {
+  //icache
+  uint64_t icache_read_accesses=0, icache_read_misses=0, icache_conflicts=0;
+
+  //dcache
+  uint64_t l1_hits=0, l1_misses=0, l2_hits=0, l2_misses=0;
+  uint64_t l1_wr_hits=0, l1_wr_misses=0, l2_wr_hits=0, l2_wr_misses=0;
+
+  //icache
+  uint64_t icache_read_accesses_acc=0, icache_read_misses_acc=0, icache_conflicts_acc=0;
+
+  //dcache
+  uint64_t l1_hits_acc=0, l1_misses_acc=0, l2_hits_acc=0, l2_misses_acc=0;
+  uint64_t l1_wr_hits_acc=0, l1_wr_misses_acc=0, l2_wr_hits_acc=0, l2_wr_misses_acc=0;
+};
+
+struct CoreEvents { 
+  //------- energy events -----------
+  uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
+  uint64_t committed_branch_insts=0, mispeculatedInstructions=0;
+  uint64_t committed_load_insts=0, committed_store_insts=0;
+  uint64_t squashed_insts=0;
+
+  uint64_t int_ops=0,mult_ops=0,fp_ops=0;
+  uint64_t func_calls=0;
+  uint64_t idleCycles=0;
+  uint64_t nonPipelineCycles=0;
+
+  //ooo-pipeline
+  uint64_t regfile_reads=0, regfile_writes=0;
+  uint64_t regfile_freads=0, regfile_fwrites=0;
+  uint64_t rob_reads=0, rob_writes=0;
+  uint64_t iw_reads=0, iw_writes=0, iw_freads=0, iw_fwrites=0;
+  uint64_t rename_reads=0, rename_writes=0;
+  uint64_t rename_freads=0, rename_fwrites=0;
+  uint64_t btb_read_accesses=0, btb_write_accesses=0;
+
+  //------- energy events accumulated -----------
+  uint64_t committed_insts_acc=0, committed_int_insts_acc=0, committed_fp_insts_acc=0;
+  uint64_t committed_branch_insts_acc=0, mispeculatedInstructions_acc=0;
+  uint64_t committed_load_insts_acc=0, committed_store_insts_acc=0;
+  uint64_t squashed_insts_acc=0;
+
+  uint64_t int_ops_acc=0,mult_ops_acc=0,fp_ops_acc=0;
+  uint64_t func_calls_acc=0;
+  uint64_t idleCycles_acc=0;
+  uint64_t nonPipelineCycles_acc=0;
+
+  //ooo-pipeline
+  uint64_t regfile_reads_acc=0, regfile_writes_acc=0;
+  uint64_t regfile_freads_acc=0, regfile_fwrites_acc=0;
+  uint64_t rob_reads_acc=0, rob_writes_acc=0;
+  uint64_t iw_reads_acc=0, iw_writes_acc=0, iw_freads_acc=0, iw_fwrites_acc=0;
+  uint64_t rename_reads_acc=0, rename_writes_acc=0;
+  uint64_t rename_freads_acc=0, rename_fwrites_acc=0;
+  uint64_t btb_read_accesses_acc=0, btb_write_accesses_acc=0;
+
+};
+
+
 // abstract class for all critical path
 class CriticalPath {
 protected:
   std::string _run_name = "";
   std::string _name = "";
-  uint64_t _last_index;
   bool _elide_mem = false;
   bool _isInOrder = false;
   bool _scale_freq = false;
   //careful, these are not necessarily the defaults...
   //we will try to load the values from m5out/config.ini
   //as the defaults through the prof class
+  
+  MemEvents*  _mev = NULL;
+  CoreEvents* _cev = NULL;
+
   unsigned FETCH_WIDTH = 4;
   unsigned D_WIDTH = 4;
   unsigned ISSUE_WIDTH = 4;
@@ -90,66 +157,10 @@ protected:
   std::set<BB*> _revolver_prev_trace;
   LoopInfo* _cur_revolver_li=NULL;
 
-  //Runtime CPU States
-  bool _cpu_power_gated=false;
-
-  //------- energy events -----------
-  uint64_t committed_insts=0, committed_int_insts=0, committed_fp_insts=0;
-  uint64_t committed_branch_insts=0, mispeculatedInstructions=0;
-  uint64_t committed_load_insts=0, committed_store_insts=0;
-  uint64_t squashed_insts=0;
-
-  uint64_t int_ops=0,mult_ops=0,fp_ops=0;
-  uint64_t func_calls=0;
-  uint64_t idleCycles=0;
-  uint64_t nonPipelineCycles=0;
-
-  //icache
-  uint64_t icache_read_accesses=0, icache_read_misses=0, icache_conflicts=0;
-
-  //dcache
-  uint64_t l1_hits=0, l1_misses=0, l2_hits=0, l2_misses=0;
-  uint64_t l1_wr_hits=0, l1_wr_misses=0, l2_wr_hits=0, l2_wr_misses=0;
-
-  //ooo-pipeline
-  uint64_t regfile_reads=0, regfile_writes=0;
-  uint64_t regfile_freads=0, regfile_fwrites=0;
-  uint64_t rob_reads=0, rob_writes=0;
-  uint64_t iw_reads=0, iw_writes=0, iw_freads=0, iw_fwrites=0;
-  uint64_t rename_reads=0, rename_writes=0;
-  uint64_t rename_freads=0, rename_fwrites=0;
-  uint64_t btb_read_accesses=0, btb_write_accesses=0;
-
-  //------- energy events accumulated -----------
-  uint64_t committed_insts_acc=0, committed_int_insts_acc=0, committed_fp_insts_acc=0;
-  uint64_t committed_branch_insts_acc=0, mispeculatedInstructions_acc=0;
-  uint64_t committed_load_insts_acc=0, committed_store_insts_acc=0;
-  uint64_t squashed_insts_acc=0;
-
-  uint64_t int_ops_acc=0,mult_ops_acc=0,fp_ops_acc=0;
-  uint64_t func_calls_acc=0;
-  uint64_t idleCycles_acc=0;
-  uint64_t nonPipelineCycles_acc=0;
+  virtual void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) = 0;
 
   uint64_t cycles_acc=0;
 
-  //icache
-  uint64_t icache_read_accesses_acc=0, icache_read_misses_acc=0, icache_conflicts_acc=0;
-
-  //dcache
-  uint64_t l1_hits_acc=0, l1_misses_acc=0, l2_hits_acc=0, l2_misses_acc=0;
-  uint64_t l1_wr_hits_acc=0, l1_wr_misses_acc=0, l2_wr_hits_acc=0, l2_wr_misses_acc=0;
-
-  //ooo-pipeline
-  uint64_t regfile_reads_acc=0, regfile_writes_acc=0;
-  uint64_t regfile_freads_acc=0, regfile_fwrites_acc=0;
-  uint64_t rob_reads_acc=0, rob_writes_acc=0;
-  uint64_t iw_reads_acc=0, iw_writes_acc=0, iw_freads_acc=0, iw_fwrites_acc=0;
-  uint64_t rename_reads_acc=0, rename_writes_acc=0;
-  uint64_t rename_freads_acc=0, rename_fwrites_acc=0;
-  uint64_t btb_read_accesses_acc=0, btb_write_accesses_acc=0;
-
-  virtual void insert_inst(const CP_NodeDiskImage &img, uint64_t index,Op* op) = 0;
 
   //cur_fi will always be on
   //cur_li will either be null or have a loop
@@ -157,6 +168,7 @@ protected:
   LoopInfo* cur_li;
   int cur_is_acc;
 
+  //Accessed only from critpath.hh
   uint64_t n_br=0;
   uint64_t n_br_miss=0;
   uint64_t n_mem=0;
@@ -212,14 +224,17 @@ protected:
 
       double dtlb_en = mc_proc->cores[0]->mmu->dtlb->rt_power.readOp.dynamic; //energy
       double itlb_en = mc_proc->cores[0]->mmu->itlb->rt_power.readOp.dynamic; //energy
-
-      double core_en = mc_proc->core.rt_power.readOp.dynamic; //energy
+      double core_en_raw = mc_proc->core.rt_power.readOp.dynamic; //energy
 
       //this contains the icache_en
       double ifu_en = mc_proc->cores[0]->ifu->rt_power.readOp.dynamic; //energy
 
-      core_en = core_en - dcache_en - itlb_en - dtlb_en; //add back later
+      double core_en = core_en_raw - dcache_en - itlb_en - dtlb_en; //add back later
 
+      if(core_en < -10 || core_en > 100000)  {
+        assert(0);
+      }
+       
       //adujust differently depending on whether core is active
       if(revolver_active) {
         icache_en = 0; //set to zero b/c we add it back later
@@ -227,6 +242,11 @@ protected:
       } else {
         core_en = core_en - icache_en; //add back the icache_en later
       }
+
+      if(core_en< 0) {
+        core_en=0;
+      }
+
 
       double l2_en =mc_proc->l2.rt_power.readOp.dynamic;
       double ex_freq = mc_proc->XML->sys.target_core_clockrate*1e6;
@@ -282,6 +302,7 @@ protected:
       total += core_en + icache_en + dcache_en + itlb_en + dtlb_en + l2_en+
         stateful_core_leakage_en+nonstateful_core_leakage_en+cache_leakage_en+
         accel_en+accel_leakage_en;
+ 
     }
 
     static const int pc=8;
@@ -404,12 +425,14 @@ public:
       cycleMapLoop[cur_li].fill(cycle_diff,insts_diff,mc_proc,
                                 n_br,  n_br_miss, n_flt, n_mem, n_l1_miss, n_l2_miss,
                                 accel_region_en(),accel_leakage(),
-                                cur_is_acc,_cpu_power_gated,_prev_cycle_revolver_active);
+                                cur_is_acc,cpu_power_gated(),
+                                _prev_cycle_revolver_active);
     } else {
       cycleMapFunc[cur_fi].fill(cycle_diff,insts_diff,mc_proc,
                                 n_br,  n_br_miss, n_flt, n_mem, n_l1_miss, n_l2_miss,
                                 accel_region_en(),accel_leakage(),
-                                cur_is_acc,_cpu_power_gated,_prev_cycle_revolver_active);
+                                cur_is_acc,cpu_power_gated(),
+                                _prev_cycle_revolver_active);
     }
 
     n_br=0;
@@ -423,6 +446,8 @@ public:
   }
 
   virtual void print_edge_weights(std::ostream& out, AnalysisType analType) { } 
+
+  virtual bool cpu_power_gated() {return false;}
 
   virtual void check_update_cycles(Op* op) {
     if(op->bb_pos()!=0) {
@@ -527,15 +552,20 @@ public:
 
 private:
   bool TraceOutputs = false;
-  std::ofstream out;
-  bool triedToOpenOutOnce = false;
+  int TraceCycleGranularity=false;
+  uint64_t last_traced_index=0, last_traced_cycle=0;
+  std::ofstream out,outc;
+  bool triedToOpenOutOnce = false, triedToOpenOutCycleOnce=false;
 
 protected:
   bool getTraceOutputs() const { return TraceOutputs; }
+  int getTraceCycleGranularity() const { return TraceCycleGranularity; }
+
 
   std::ofstream &outs() {
-    if (out.good() && triedToOpenOutOnce)
+    if (out.good() && triedToOpenOutOnce) {
       return out;
+    }
 
     triedToOpenOutOnce = true;
     std::string trace_out = _name;
@@ -554,10 +584,52 @@ protected:
     return out;
   }
 
-  virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img, Op* op)
-  {
-    if (!TraceOutputs)
+  std::ofstream &outcs() {
+    if (outc.good() && triedToOpenOutCycleOnce) {
+      return outc;
+    }
+
+    triedToOpenOutCycleOnce = true;
+    std::string trace_out = _name;
+    if (trace_out == "") {
+      char buf[64];
+      sprintf(buf, "stats/%p.cyc-trace", (void*)this);
+      trace_out = std::string(buf);
+    } else {
+      trace_out = std::string("stats/");
+      if(!_run_name.empty()) {
+        trace_out+=_run_name+".";
+      }
+      trace_out+= _name + ".cyc-trace";
+    }
+    std::cout << "opening cycle trace file: \"" << trace_out << "\"\n";
+    outc.open(trace_out.c_str(), std::ofstream::out | std::ofstream::trunc | ios::binary);
+    if (!outc.good()) {
+      std::cerr << "Cannot open file: " << trace_out << "\n";
+    }
+    int num = TraceCycleGranularity;
+    outc.write(reinterpret_cast<const char *>(&num), sizeof(num));
+    return outc;
+  }
+
+  void traceCycleOut(uint64_t index, const CP_NodeDiskImage &img, Op* op) {
+    if (!TraceCycleGranularity) {
       return;
+    }
+    if(index >= last_traced_index + TraceCycleGranularity) {
+      uint64_t new_cycle = this->numCycles();
+      int cycle_diff =  new_cycle - last_traced_cycle;
+      outcs().write(reinterpret_cast<const char *>(&cycle_diff), sizeof(cycle_diff));
+      last_traced_cycle=new_cycle;
+      last_traced_index=index;
+    }
+  }
+
+
+  virtual void traceOut(uint64_t index, const CP_NodeDiskImage &img, Op* op) {
+    if (!TraceOutputs) {
+      return;
+    }
 
     outs() << (img._isctrl ? "C" : "");
     outs() << (img._isreturn ? "Ret" : "");
@@ -609,6 +681,7 @@ public:
   void setRunName(std::string run_name) {
     _run_name=run_name;
   }
+
   virtual void printResults(std::ostream& out,
                             std::string name,
                             uint64_t baseline_cycles) {
@@ -643,8 +716,9 @@ public:
   virtual void loopsgDots(std::ostream& out, std::string &name) {}
 
 
-  void setTraceOutputs(bool t) {
+  void setTraceOutputs(bool t, int c) {
     TraceOutputs = t;
+    TraceCycleGranularity = c;
   }
 
   void setName(std::string &name) {
@@ -688,7 +762,7 @@ public:
   virtual ~CriticalPath() {
   }
 
-  void setInOrder(bool inOrder) {
+  virtual void setInOrder(bool inOrder) {
     _isInOrder=inOrder;
   }
 
@@ -712,7 +786,6 @@ public:
 
   virtual void insert(const CP_NodeDiskImage &img, uint64_t index, Op* op) {
     insert_inst(img,index,op);
-    _last_index=index;
     
     n_br+=img._isctrl;
     n_br_miss+=img._ctrl_miss;
@@ -731,10 +804,17 @@ public:
     if(out.good()) {
       traceOut(index, img, op);
     }
+    if(outc.good()) {
+      traceCycleOut(index, img, op);
+    }
+
   }
 
   virtual uint64_t numCycles() = 0;
-  virtual uint64_t finish() {return numCycles();} //default does nothing
+  virtual uint64_t finish() {
+    outc.flush();
+    return numCycles();
+  } 
 
   virtual void calcAccelEnergy(std::string fname_base,int nm) {
     return;

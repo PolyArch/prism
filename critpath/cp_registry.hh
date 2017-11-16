@@ -107,9 +107,9 @@ public:
     }
   }
 
-  void setTraceOutputs(bool t) {
+  void setTraceOutputs(bool t, int c) {
     for (auto i = cpmap.begin(); i != cpmap.end(); ++i) {
-      i->second->setTraceOutputs(t);
+      i->second->setTraceOutputs(t,c);
     }
   }
 

@@ -836,7 +836,7 @@ public:
   virtual void no_horizon() = 0;
 
   virtual void commitNode(uint64_t index)  = 0;
-  virtual void finish(uint64_t index) = 0;
+  virtual void finish() = 0;
   virtual void cleanup() = 0;
 };
 
@@ -1596,7 +1596,7 @@ public:
   }
 
   void commitNode(uint64_t index) {}
-  void finish(uint64_t index) {
+  void finish() {
     //remove_nodes_until(index -1);
   }
 protected:

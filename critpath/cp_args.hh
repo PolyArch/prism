@@ -6,6 +6,16 @@
 #include <stdlib.h>
 #include <iostream>
 #include <sstream>
+#include <vector>
+
+static void split(std::string& input, std::vector<std::string>& vec) {
+  std::istringstream ss(input);
+  std::string token;
+
+  while(std::getline(ss, token, ',')) {
+    vec.push_back(token);
+  }
+}
 
 class ArgumentHandler {
 public:
@@ -41,6 +51,17 @@ public:
   static bool parse(const char* argname, const char* name, bool& arg) {
     if(strlen(name)==strlen(argname) && strcmp(name, argname) == 0 ) {
       arg=true;
+      return true;
+    }
+    return false;
+  }
+
+  static bool parse(const char* argname, const char* name, const char* optarg,
+                    std::vector<std::string>& vec) {
+    if(strlen(name)==strlen(argname) && strcmp(name, argname) == 0 ) {
+      vec.clear();
+      std::string s_optarg(optarg);
+      split(s_optarg,vec);
       return true;
     }
     return false;

@@ -76,7 +76,7 @@ public: //screw this multi-inheritance nonsense  : )
           hasNonStridedMemAccess = true;
         }
 #endif
-        else if (stride > 32) { // Tony: more than 64 bytes -- very liberal
+        else if (stride > 64) { // Tony: more than 64 bytes -- very liberal
           hasNonStridedMemAccess = true;
         }
 

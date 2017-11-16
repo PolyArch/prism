@@ -178,7 +178,6 @@ public:
     ArgumentHandler::parse("nla-dataflow-ctrl",        name,arg,_nla_dataflow_ctrl   );
     ArgumentHandler::parse("nla-trace-ctrl",           name,arg,_nla_trace_ctrl      );
     ArgumentHandler::parse("nla-spec-ctrl",            name,arg,_nla_spec_ctrl       );
-
   }
 
 
@@ -360,9 +359,9 @@ public:
     //Add monitors too
     for(auto i=cfu_set->cfus_begin(),e=cfu_set->cfus_end();i!=e;++i) {
       CFU* cfu = *i;
-      fu_monitors.insert((uint64_t)cfu); //NEATO
+      _cs->fu_monitors.insert((uint64_t)cfu); //NEATO
     }
-    fu_monitors.insert((uint64_t)&_wb_networks); //Total insanity
+    _cs->fu_monitors.insert((uint64_t)&_wb_networks); //Total insanity
   }
 
   bool should_power_gate_core() {
@@ -371,7 +370,7 @@ public:
   } 
  
 
-  virtual float estimated_benefit(LoopInfo* li) {
+  virtual float estimated_benefit_raw(LoopInfo* li) {
     if(!li->hasSubgraphs(!_nla_trace_ctrl)) { // true --> SEED, false --> BERET
       return 0.0f;
     }
@@ -380,14 +379,22 @@ public:
       SGSched& sched = li->sgSchedBeret();
       float heat = li->pathHeatRatio(li->getHotPathIndex());
 
-      return pow(heat,1.65f) * (sched.cfu_set()->numCFUs() / (float)ISSUE_WIDTH);
-    } else {
-      SGSched& sched = li->sgSchedNLA();
+      return pow(heat,1.75f) * (sched.cfu_set()->numCFUs() / (float)ISSUE_WIDTH);
+    } 
 
-      //TODO;FIXME: Needs fixin
-      return  (0.9f * sched.cfu_set()->numCFUs()) / (float)ISSUE_WIDTH;
-    }
-    assert(0); return 0.0f;
+    SGSched& sched = li->sgSchedNLA();
+
+    //TODO;FIXME: Needs fixin
+    return  (0.7f * sched.cfu_set()->numCFUs()) / (float)ISSUE_WIDTH;
+  }
+
+
+  virtual float estimated_benefit(LoopInfo* li) {
+     double spdup = estimated_benefit_raw(li);
+
+     double insts = li->totalDynamicInlinedInsts();
+    
+     return insts / ( (insts/spdup) + li->getLoopEntries()*10);
   }
 
 
@@ -464,8 +471,8 @@ public:
             if(_prev_li==NULL || _li!=_prev_li) {
 
               //func xfer
-              nla_config_inst = func_transition_inst;
-              assert(func_transition_inst);
+              nla_config_inst = _cs->func_transition_inst;
+              assert(_cs->func_transition_inst);
 
               //control dep instruction
               //if(host_ctrl_inst_map.count(bb)) {
@@ -539,18 +546,25 @@ public:
 
           if(program_fi==_li->func()) {       //if in original function
             transitioned = !_li->inLoop(bb);  //transition out if not in loop
-//            cout << "same_func: " << "transition b/c BB" << bb->rpoNum() 
-//                 << " was not in loop " << _li->nice_name() << "\n";
+            //if(transitioned) {
+            //  cout << "same_func: " << "transition b/c BB" << bb->rpoNum()  << " ptr:" << bb
+            //       << " was not in loop " << _li->nice_name() << "\n";
+            //  for(auto i=_li->body_begin(),e=_li->body_end();i!=e;++i) {
+            //    cout << (*i)->rpoNum() << " ptr:" << *i << "\n";
+            //  }
+            //}
           } else {                                                //else, transition
             transitioned = !sg_schedule().inFuncs(program_fi); //if not in funcs
-//                 cout << "diff_func: " << "transition func " << program_fi->nice_name()
-//                 << " was not in loop " << _li->nice_name() << "\n";
+            //if(transitioned) {
+            //   cout << "diff_func: " << "transition func " << program_fi->nice_name()
+            //   << " was not in loop " << _li->nice_name() << "\n";
+            //}
           }
 
 
-          if(_curSubgraphs.size() > 0) {
+          bool needs_graph_construction=false;
 
-            bool needs_graph_construction=false;
+          if(_curSubgraphs.size() > 0) {
             Op* prev_op = _prev_op; //cp_dg_builder manages
 
             if(!_nla_trace_ctrl) { // In normal dataflow control mode
@@ -575,6 +589,8 @@ public:
                 auto it = std::find(bbvec.begin(),bbvec.end(),bb);
                 if(it==bbvec.end()) {
                   transitioned=true;
+                  //cout << "mispredict -- out" << "\n";
+
                 }
               }
             }
@@ -592,6 +608,7 @@ public:
             needs_graph_construction |= transitioned;
 
             if(needs_graph_construction) {
+              //cout << "Schedule " << _curSubgraphs.size() << "\n";
               schedule_cfus(prevNLAInst);  
 
               /*cout << "\n";
@@ -613,10 +630,17 @@ public:
                 cleanLSQEntries(clean_cycle);
                 cleanUp(clean_cycle);
               }
+            } else {
+              //cout << "Don't Schedule " << _curSubgraphs.size() << "\n";
             }
           }
+          
+          //cout << "Transition? " << _curSubgraphs.size() << "\n";
 
           if(transitioned) {
+            assert(nlaOverEv);
+            assert(prevNLAInst);
+
             //cout << "leaving: " << _li->nice_name_full()  << "\n";
             //need to connect bb up
             nla_state=CPU;
@@ -647,9 +671,9 @@ public:
 
         if(nlaEndEv) { //First instruction
           //std::cout << "first cpu after nla:" << op->id() << " i:" << index << " added\n";
-
+          assert(nlaOverEv);
           uint64_t transition_cycles=8/_nla_iops; //change this to transfer live ins.
-          if(_cpu_power_gated) {
+          if(cpu_power_gated()) {
             transition_cycles+=_cpu_wakeup_cycles;
           } 
 
@@ -699,16 +723,12 @@ public:
           }
           nlaEndEv = NULL;
           nlaOverEv = NULL;
+          //std::cout << "nla null\n";
           nla_done_inst = sh_inst;
 
         } else { //after this instruction, lets turn power gating back off, regardless
                  //of what ever else happened
-          _cpu_power_gated=false;
-        }
-
-        FunctionInfo* f = op->func();
-        if(!func_transition_inst || f!=func_transition_inst->_op->func()) {
-          func_transition_inst = sh_inst;
+          _cs->cpu_power_gated=false;
         }
 
         if(sh_inst->_isload || sh_inst->_isstore) {
@@ -773,7 +793,14 @@ public:
           //if(op->plainMove()) {
           createDummy(img,index,op);
           //}
-          break;
+          //SGSched& sched = sg_schedule();
+          //cout << "dummy: " << op->getUOPName() << " " << index << " bb:" << op->bb()->rpoNum() 
+          //     << " sg_size:" << sg_schedule().numSubgraphs() << " li:" 
+          //     << _li->nice_name_full() << " sgsched->opset:" << sched.opSet().size()<< "\n";
+          break; //break out of case
+        } else {
+          //cout << "not dummy: " << op->getUOPName() << " " << index << " bb:" << op->bb()->rpoNum() 
+          //     << " sg_size:" << sg_schedule().numSubgraphs() << "\n";;
         }
 
         if(old_nla_state != nla_state) {
@@ -781,7 +808,7 @@ public:
         }
         if(prev_transition) {
           if(_optim_power_gating || should_power_gate_core()) {
-            _cpu_power_gated=true; //wooooo!
+            _cs->cpu_power_gated=true; //wooooo!
           }
           prev_transition=false;
         }
@@ -1517,8 +1544,12 @@ struct sg_time_sort {
           //cout << "update last: " 
           //  << sg->endCFU->_index << " " << sg->endCFU->_op->id() << " "
           //  << iter << " " << mod_iter << " " << sg->endCFU->cycle() << "\n";
-          nlaOverEv=sg->endCFU;
         }
+      }
+
+      //keep last op
+      if(!nlaOverEv || nlaOverEv->cycle() < sg->endCFU->cycle()) {
+        nlaOverEv=sg->endCFU;
       }
 
 
@@ -1572,9 +1603,7 @@ struct sg_time_sort {
 
     if(n->_isload || n->_isstore) {
       calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
-                      n->_cache_prod, n->_true_cache_prod,
-                      l1_hits, l1_misses, l2_hits, l2_misses,
-                      l1_wr_hits, l1_wr_misses, l2_wr_hits, l2_wr_misses);
+                      n->_cache_prod, n->_true_cache_prod);
     }
 
     int st_lat=stLat(n->_st_lat,n->_cache_prod,n->_true_cache_prod,true);
@@ -1627,6 +1656,10 @@ struct sg_time_sort {
       ctrl_inst=n;
     }
 
+    
+    assert(_sgMap.size() <= _curSubgraphs.size()); //has to be less because _curSubgraphs
+                                                   // holds all of them
+                                                   
     std::shared_ptr<DynSubgraph> dynSubgraph = _sgMap[sg];
 
     if(!dynSubgraph || dynSubgraph->ops_in_subgraph.count(op) == 1) {
@@ -1634,22 +1667,22 @@ struct sg_time_sort {
       _sgMap[sg] = n->dynSubgraph;
       n->dynSubgraph->setCumWeights(curWeights()); //&_regionStats[_li].cum_weights);
 
-/*      if(!dynSubgraph) {
-        cout << "----new ";
-      } else {
-        cout << "----filled ";
-      }
-      cout << "make shared " << n->dynSubgraph->static_sg->id() 
-           << "(op: " << op->id() << ")\n";
-*/
-     //   cout << " " << n->_index 
-     //        << "(" << n->_op->id() << ",n:" << n->dynSubgraph->dyn_ind << ")";
+      //if(!dynSubgraph) {
+      //  cout << "----new ";
+      //} else {
+      //  cout << "----replaced ";
+      //}
+      //cout << "make shared " << n->dynSubgraph->static_sg->id() 
+      //     << "(op: " << op->id() << ")\n";
+
+      // cout << " " << n->_index 
+      //      << "(" << n->_op->id() << ",n:" << n->dynSubgraph->dyn_ind << ")";
 
       _curSubgraphs.insert(n->dynSubgraph);
     } else {
       n->dynSubgraph = dynSubgraph;
 
-      //cout << " " << n->_index 
+      //cout << " filled_in" << n->_index 
       //     << "(" << n->_op->id() << ",o:" << n->dynSubgraph->dyn_ind << ")";
 
 
@@ -1809,7 +1842,7 @@ struct sg_time_sort {
             //this is for inner loops.  Also, if same iteration (==0), handle normally
             if(!should_skip && nearest_dep_len != 0) { 
               if(nearest_dep_len<0) {
-                static int num_allowed_errors=15;
+                static int num_allowed_errors=5;
                 if(num_allowed_errors > 0) {
                   num_allowed_errors--;
                   cerr << "ERROR/HUGE PROBLEM: very odd future dependence detected\n";

@@ -23,7 +23,6 @@ template<typename T, typename E>
 class CP_DG_Builder : 
   public CritEdgeListener<dg_edge_impl_t<dg_event>>,
   public CriticalPath {
-
 public:
   typedef dg_inst_base<T, E> BaseInst_t;
   typedef dg_inst<T, E> Inst_t;
@@ -31,21 +30,97 @@ public:
   typedef std::shared_ptr<BaseInst_t> BaseInstPtr;
   typedef std::shared_ptr<Inst_t> InstPtr;  
 
-  CP_DG_Builder() : CriticalPath() {
-     MSHRUseMap[0];
-     MSHRUseMap[(uint64_t)-10000];
-     MSHRResp[0];
-     MSHRResp[(uint64_t)-10000];
-     LQ.resize(LQ_SIZE);
-     SQ.resize(SQ_SIZE);
-     activityMap.insert(1);
-     rob_head_at_dispatch=0;
-     lq_head_at_dispatch=0;
-     sq_head_at_dispatch=0;
 
-     rob_growth_rate=mylog2(0);
-     rob_growth_rate=0;
-     avg_rob_head=20;
+
+  typedef std::vector<std::shared_ptr<BaseInst_t>> ResQueue;  
+  typedef std::multimap<uint64_t,Inst_t*> ResVec;
+  typedef std::map<uint64_t,std::vector<Inst_t*>> SingleCycleRes;
+  typedef std::map<uint64_t,int> FuUsageMap; //maps cycle to usage until next cycle
+  typedef std::map<uint64_t,FuUsageMap> FuUsage;
+  typedef typename std::map<uint64_t,std::shared_ptr<BaseInst_t>> NodeRespMap;
+  typedef typename std::map<uint64_t,NodeRespMap> NodeResp;
+  typedef std::set<uint64_t> ActivityMap;
+  typedef std::unordered_map<Op*,std::set<Op*>> MemDepSet;
+
+
+  class CoreState {
+    public:
+    //Runtime CPU States
+    bool cpu_power_gated=false;
+  
+    //Variables to hold dynamic state not directly expressible in graph theory
+    ResVec InstQueue;
+  
+    ResQueue SQ, LQ; 
+    unsigned SQind;
+    unsigned LQind;
+   
+    SingleCycleRes wbBusRes;
+    SingleCycleRes issueRes;
+   
+    std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
+    std::map<uint64_t,std::shared_ptr<BaseInst_t>> MSHRResp;
+    std::map<uint64_t,uint64_t> minAvail; //res->min avail time
+    FuUsage fuUsage;
+    NodeResp nodeResp; 
+    ActivityMap activityMap;
+    MemDepSet memDepSet;
+  
+    int rob_head_at_dispatch;
+    int prev_rob_head_at_dispatch;
+    int prev_squash_penalty;
+    float avg_rob_head;
+    float rob_growth_rate;
+  
+    unsigned lq_head_at_dispatch;
+    unsigned sq_head_at_dispatch;
+  
+    uint16_t lq_size_at_dispatch[PSIZE];
+    uint16_t sq_size_at_dispatch[PSIZE];
+  
+    uint64_t lastCleaned=0; // for debug reasons
+    uint64_t latestCleaned=0;
+  
+    std::unordered_set<uint64_t> fu_monitors; 
+  
+    std::shared_ptr<Inst_t> func_transition_inst;
+  
+    //Code to map instructions to ops, and back
+    std::unordered_map<Op *, BaseInstPtr> op2InstPtr;
+    //std::map<Inst_t *, Op*> _inst2Op;
+
+
+    CoreState() {
+       MSHRUseMap[0];
+       MSHRUseMap[(uint64_t)-10000];
+       MSHRResp[0];
+       MSHRResp[(uint64_t)-10000];
+       activityMap.insert(1);
+       rob_head_at_dispatch=0;
+       lq_head_at_dispatch=0;
+       sq_head_at_dispatch=0;
+  
+       rob_growth_rate=mylog2(0);
+       rob_growth_rate=0;
+       avg_rob_head=20;
+    }
+  };
+
+  CoreState* _cs;
+
+  CP_DG_Builder() : CriticalPath() {
+     _cev = new CoreEvents();
+     _mev = new MemEvents();
+     _cs = new CoreState();
+  }
+
+  void set_events(MemEvents* mev, CoreEvents* cev, CoreState* cs) {
+    delete _mev;
+    delete _cev;
+    delete _cs;
+    _mev=mev;
+    _cev=cev;
+    _cs=cs;
   }
 
   std::unordered_map<FunctionInfo*,critFuncEdges> _crit_edge_map;
@@ -89,6 +164,8 @@ public:
   virtual void setWidth(int i,bool scale_freq, bool match_simulator,
                         bool revolver,int mem_ports, int num_L1_MSHRs) {
     _enable_revolver=revolver;
+
+    std::cout << "setting width:" << i << "\n";
 
     FETCH_WIDTH = i;
     D_WIDTH = i;
@@ -249,12 +326,13 @@ public:
 
       }
 
-      LQ.resize(LQ_SIZE);
-      SQ.resize(SQ_SIZE);
-
       IBUF_SIZE=std::max(FETCH_TO_DISPATCH_STAGES*ISSUE_WIDTH,16u);
       PEAK_ISSUE_WIDTH=ISSUE_WIDTH+2;
     }
+
+    //not the right place to do this, but w/e
+    _cs->LQ.resize(LQ_SIZE);
+    _cs->SQ.resize(SQ_SIZE);
 
     if(mem_ports!=-1) {
       RW_PORTS=mem_ports;
@@ -274,12 +352,6 @@ public:
   virtual void supress_errors(bool val) {
     _supress_errors=val;
   }
-
-  virtual void set_func_trans_inst(std::shared_ptr<Inst_t> t_inst){
-    assert(t_inst);
-    func_transition_inst=t_inst;
-  }
-
 
   virtual void track_revolver(uint64_t index, Op* op) {
     FunctionInfo* fi = op->func();
@@ -438,11 +510,11 @@ public:
       uint64_t fetchCycle = sh_inst->cycleOfStage(Inst_t::Fetch);
       int64_t diff = fetchCycle - commitCycle;
       if(diff > 0) {
-        nonPipelineCycles+=diff;
+        _cev->nonPipelineCycles+=diff;
       }
     }
     getCPDG()->pushPipe(sh_inst);
-    rob_head_at_dispatch++;
+    _cs->rob_head_at_dispatch++;
   }
 
   virtual dep_graph_t<Inst_t,T,E> * getCPDG() = 0;
@@ -453,10 +525,10 @@ public:
  
 
   virtual uint64_t finish() {
-    getCPDG()->finish(maxIndex);
+    getCPDG()->finish();
     uint64_t final_cycle = getCPDG()->getMaxCycles();
-    activityMap.insert(final_cycle);
-    activityMap.insert(final_cycle+1);
+    _cs->activityMap.insert(final_cycle);
+    _cs->activityMap.insert(final_cycle+1);
     std::cout << _name << " has finished!\n";
     std::cout << _name << " cleanup until cycle: " << final_cycle+3000 << "\n";
     cleanUp(final_cycle+3000);
@@ -539,9 +611,9 @@ public:
       printEdgeDep(inst,6,E_WB);
     }
 
-    outs() << " rs:" << rob_head_at_dispatch
-           << "-" << (int)(rob_growth_rate*100);
-    outs() << " iq:" << InstQueue.size();
+    outs() << " rs:" << _cs->rob_head_at_dispatch
+           << "-" << (int)(_cs->rob_growth_rate*100);
+    outs() << " iq:" << _cs->InstQueue.size();
 
     outs() << " lq:" << lqSize();
     outs() << " sq:" << sqSize();
@@ -554,19 +626,14 @@ public:
 protected:
 
   int lqSize() {
-     return (lq_head_at_dispatch<=LQind) ? (LQind-lq_head_at_dispatch):
-      (LQind-lq_head_at_dispatch+32);
+     return (_cs->lq_head_at_dispatch<=_cs->LQind) ? (_cs->LQind-_cs->lq_head_at_dispatch):
+      (_cs->LQind-_cs->lq_head_at_dispatch+32);
   }
 
   int sqSize() {
-    return (sq_head_at_dispatch<=SQind) ? (SQind-sq_head_at_dispatch):
-      (SQind-sq_head_at_dispatch+32);
+    return (_cs->sq_head_at_dispatch<=_cs->SQind) ? (_cs->SQind-_cs->sq_head_at_dispatch):
+      (_cs->SQind-_cs->sq_head_at_dispatch+32);
   }
-
-
-  //Code to map instructions to ops, and back
-  std::unordered_map<Op *, BaseInstPtr> _op2InstPtr;
-  //std::map<Inst_t *, Op*> _inst2Op;
 
   virtual InstPtr createInst(const CP_NodeDiskImage &img, 
                              uint64_t index, Op *op, bool track=true) {
@@ -686,7 +753,7 @@ protected:
 
   virtual void keepTrackOfInstOpMap(BaseInstPtr ret, Op *op) {
     assert(ret);
-    _op2InstPtr[op] = ret;
+    _cs->op2InstPtr[op] = ret;
     ret->setCumWeights(curWeights());
 
     //_inst2Op[ret.get()] = op;
@@ -707,8 +774,8 @@ protected:
   }
 
   virtual BaseInstPtr getInstForOp(Op *op) {
-    auto Op2I = _op2InstPtr.find(op);
-    if (Op2I != _op2InstPtr.end())
+    auto Op2I = _cs->op2InstPtr.find(op);
+    if (Op2I != _cs->op2InstPtr.end())
       return Op2I->second;
     return 0;
   }
@@ -732,60 +799,6 @@ protected:
     setCommittedCycle(*inst);
     setWritebackCycle(inst); //uses shared_ptr
   }
-
-  //Variables to hold dynamic state not directly expressible in graph theory
-  typedef std::multimap<uint64_t,Inst_t*> ResVec;
-  ResVec InstQueue;
-
-  typedef std::vector<std::shared_ptr<BaseInst_t>> ResQueue;  
-  ResQueue SQ, LQ; 
-  unsigned SQind;
-  unsigned LQind;
- 
-  typedef std::map<uint64_t,std::vector<Inst_t*>> SingleCycleRes;
-  SingleCycleRes wbBusRes;
-  SingleCycleRes issueRes;
-
-  typedef std::map<uint64_t,int> FuUsageMap; //maps cycle to usage until next cycle
-  typedef std::map<uint64_t,FuUsageMap> FuUsage;
- 
-  std::map<uint64_t,std::set<uint64_t>> MSHRUseMap;
-  std::map<uint64_t,std::shared_ptr<BaseInst_t>> MSHRResp;
-
-  typedef typename std::map<uint64_t,std::shared_ptr<BaseInst_t>> NodeRespMap;
-  typedef typename std::map<uint64_t,NodeRespMap> NodeResp;
-
-  std::map<uint64_t,uint64_t> minAvail; //res->min avail time
-  FuUsage fuUsage;
-  NodeResp nodeResp; 
-
-  typedef std::set<uint64_t> ActivityMap;
-  ActivityMap activityMap;
-  
-  typedef std::unordered_map<Op*,std::set<Op*>> MemDepSet;
-  MemDepSet memDepSet;
-
-  int rob_head_at_dispatch;
-  int prev_rob_head_at_dispatch;
-  int prev_squash_penalty;
-  float avg_rob_head;
-  float rob_growth_rate;
-
-  unsigned lq_head_at_dispatch;
-  unsigned sq_head_at_dispatch;
-
-  int pipe_index;
-  uint16_t lq_size_at_dispatch[PSIZE];
-  uint16_t sq_size_at_dispatch[PSIZE];
-
-  uint64_t maxIndex;
-  uint64_t _curCycle;
-  uint64_t _lastCleaned=0;
-  uint64_t _latestCleaned=0;
-
-  std::unordered_set<uint64_t> fu_monitors;
- 
-  std::shared_ptr<Inst_t> func_transition_inst;
 
   virtual void print_edge_weights(std::ostream& out, AnalysisType analType) override {
     getCPDG()->cumWeights()->print_edge_weights(out,analType);
@@ -811,16 +824,16 @@ protected:
 
   virtual void cleanFU(uint64_t curCycle) {
     //for funcUnitUsage
-    for(auto &pair : fuUsage) {
+    for(auto &pair : _cs->fuUsage) {
       auto& fuUseMap = pair.second;
       if(fuUseMap.begin()->first < curCycle) {
         //debug MSHRUse Deletion
-        //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
+        //std::cout <<"MSHRUse  << _cs->MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
         auto upperUse = --fuUseMap.upper_bound(curCycle);
         auto firstUse = fuUseMap.begin();
 
         if(upperUse->first > firstUse->first) {
-          if(fu_monitors.count(pair.first)) {
+          if(_cs->fu_monitors.count(pair.first)) {
             uint64_t prev_cycle;
             int prev_usage;
             for(auto i=firstUse; i!=upperUse; ++i) {
@@ -837,11 +850,11 @@ protected:
       }
     }
 
-    for(typename NodeResp::iterator i=nodeResp.begin(),e=nodeResp.end();i!=e;++i) {
+    for(typename NodeResp::iterator i=_cs->nodeResp.begin(),e=_cs->nodeResp.end();i!=e;++i) {
       NodeRespMap& respMap = i->second;
       if(respMap.begin()->first < curCycle) {
         //debug MSHRUse Deletion
-        //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
+        //std::cout <<"MSHRUse  << _cs->MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
         auto upperUse = --respMap.upper_bound(curCycle);
         auto firstUse = respMap.begin();
         if(upperUse->first > firstUse->first) {
@@ -854,7 +867,7 @@ protected:
 
   virtual void cleanMSHR(uint64_t curCycle) {
     //DEBUG MSHR Usage
-/*    for(auto i=MSHRUseMap.begin(),e=MSHRUseMap.end();i!=e;) {
+/*    for(auto i=_cs->MSHRUseMap.begin(),e=_cs->MSHRUseMap.end();i!=e;) {
       uint64_t cycle = i->first;
 
       if(cycle > 10000000) {
@@ -863,13 +876,13 @@ protected:
       std::cerr << i->first << " " << i->second.size() << ", ";
       ++i;
     }
-    std::cerr << "(" << MSHRUseMap.size() << ")\n";*/
+    std::cerr << "(" << _cs->MSHRUseMap.size() << ")\n";*/
 
-    if(MSHRUseMap.begin()->first < curCycle) {
+    if(_cs->MSHRUseMap.begin()->first < curCycle) {
       //debug MSHRUse Deletion
-      //std::cout <<"MSHRUse  << MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
-      auto upperMSHRUse = --MSHRUseMap.upper_bound(curCycle);
-      auto firstMSHRUse = MSHRUseMap.begin();
+      //std::cout <<"MSHRUse  << _cs->MSHRUseMap.begin()->first <<" < "<< curCycle << "\n";
+      auto upperMSHRUse = --_cs->MSHRUseMap.upper_bound(curCycle);
+      auto firstMSHRUse = _cs->MSHRUseMap.begin();
       if(upperMSHRUse->first > firstMSHRUse->first) {
 /*        auto i = firstMSHRUse;
         auto e = upperMSHRUse;
@@ -877,36 +890,36 @@ protected:
          uint64_t cycle = i->first;
          std::cerr << cycle << " " << i->second.size() << "\n";
         }*/
-        MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
+        _cs->MSHRUseMap.erase(firstMSHRUse,upperMSHRUse); 
       }
     }
 
-    auto upperMSHRResp = MSHRResp.upper_bound(curCycle-200);
-    auto firstMSHRResp = MSHRResp.begin();
+    auto upperMSHRResp = _cs->MSHRResp.upper_bound(curCycle-200);
+    auto firstMSHRResp = _cs->MSHRResp.begin();
     if(upperMSHRResp->first > firstMSHRResp->first) {
-      MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
+      _cs->MSHRResp.erase(firstMSHRResp,upperMSHRResp); 
     }
   }
 
   virtual void cleanUp(uint64_t curCycle) {
-    _lastCleaned=curCycle;
-    _latestCleaned=std::max(curCycle,_latestCleaned);
+    _cs->lastCleaned=curCycle;
+    _cs->latestCleaned=std::max(curCycle,_cs->latestCleaned);
 
     typename SingleCycleRes::iterator upperbound_sc;
-    upperbound_sc = wbBusRes.upper_bound(curCycle);
-    wbBusRes.erase(wbBusRes.begin(),upperbound_sc); 
-    upperbound_sc = issueRes.upper_bound(curCycle);
-    issueRes.erase(issueRes.begin(),upperbound_sc); 
+    upperbound_sc = _cs->wbBusRes.upper_bound(curCycle);
+    _cs->wbBusRes.erase(_cs->wbBusRes.begin(),upperbound_sc); 
+    upperbound_sc = _cs->issueRes.upper_bound(curCycle);
+    _cs->issueRes.erase(_cs->issueRes.begin(),upperbound_sc); 
 
     //summing up idle cycles
     uint64_t prevCycle=0;
-    for(auto I=activityMap.begin(),EE=activityMap.end();I!=EE;) {
+    for(auto I=_cs->activityMap.begin(),EE=_cs->activityMap.end();I!=EE;) {
       uint64_t cycle=*I;
       if(prevCycle!=0 && cycle-prevCycle>18) {
-        idleCycles+=(cycle-prevCycle-18);
+        _cev->idleCycles+=(cycle-prevCycle-18);
       }
-      if (cycle + 100  < curCycle && activityMap.size() > 2) {
-        I = activityMap.erase(I);
+      if (cycle + 100  < curCycle && _cs->activityMap.size() > 2) {
+        I = _cs->activityMap.erase(I);
         prevCycle=cycle;
       } else {
         break;
@@ -917,18 +930,21 @@ protected:
     cleanFU(curCycle);
   }
 
-  //Update Queues: IQ, LQ, SQ
+  //Update Queues: IQ, _cs->LQ, _cs->SQ
   virtual void insertLSQ(std::shared_ptr<BaseInst_t> inst) {
     if (inst->_isload) {
-      LQ[LQind]=inst;
-      LQind=(LQind+1)%LQ_SIZE;
+      _cs->LQ[_cs->LQind]=inst;
+      _cs->LQind=(_cs->LQind+1)%LQ_SIZE;
     }
     if (inst->_isstore) {
-      SQ[SQind]=inst;
-      SQind=(SQind+1)%SQ_SIZE;
+      _cs->SQ[_cs->SQind]=inst;
+      _cs->SQind=(_cs->SQind+1)%SQ_SIZE;
     }
   }
 
+  virtual bool cpu_power_gated() override {
+    return _cs->cpu_power_gated;
+  }
 
   virtual void inserted(std::shared_ptr<Inst_t>& inst) {
     if(inst->_op) {
@@ -939,24 +955,30 @@ protected:
       _prev_op=inst->_op;
     }
 
-    maxIndex = inst->index();
-    _curCycle = inst->cycleOfStage(Inst_t::Fetch);
+    uint64_t fetch_cycle = inst->cycleOfStage(Inst_t::Fetch);
+
+    if(inst->_op) {
+      FunctionInfo* f = inst->_op->func();
+      if(!_cs->func_transition_inst || f!=_cs->func_transition_inst->_op->func()) {
+        _cs->func_transition_inst = inst;
+      }
+    }
 
     //add to activity
     for(int i = 0; i < Inst_t::NumStages -1 + inst->_isstore; ++i) {
       uint64_t cyc = inst->cycleOfStage(i);
-      activityMap.insert(cyc);
+      _cs->activityMap.insert(cyc);
       
       if(i == Inst_t::Fetch) {
-        activityMap.insert(cyc+3);
+        _cs->activityMap.insert(cyc+3);
       }
       if(i == Inst_t::Complete) {
-        activityMap.insert(cyc+2);
+        _cs->activityMap.insert(cyc+2);
       }
 
 
     }
-    cleanUp(_curCycle);
+    cleanUp(fetch_cycle);
   }
 
   //Adds a resource to the resource utilization map.
@@ -975,9 +997,9 @@ protected:
     std::map<uint64_t,std::set<uint64_t>>::iterator
                        cur_cycle_iter,next_cycle_iter,last_cycle_iter;
   
-    assert(MSHRUseMap.begin()->first < min_cycle);
+    assert(_cs->MSHRUseMap.begin()->first < min_cycle);
  
-    cur_cycle_iter = --MSHRUseMap.upper_bound(min_cycle);
+    cur_cycle_iter = --_cs->MSHRUseMap.upper_bound(min_cycle);
 
     uint64_t filter_addr=(((uint64_t)-1)^(Prof::get().cache_line_size-1));
     uint64_t addr = eff_addr & filter_addr;
@@ -995,8 +1017,8 @@ protected:
           cur_cycle_iter--;
           if(cur_cycle_iter->second.count(addr)==0) {
             cur_cycle_iter++;
-            auto  respIter = MSHRResp.find(cur_cycle_iter->first);
-            if(respIter!=MSHRResp.end()) {
+            auto  respIter = _cs->MSHRResp.find(cur_cycle_iter->first);
+            if(respIter!=_cs->MSHRResp.end()) {
               return respIter->second.get();
             } else {
               return NULL; 
@@ -1013,7 +1035,7 @@ protected:
           cur_cycle=cur_cycle_iter->first;
         } else {
           cur_cycle+=re_check_frequency;
-          cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
+          cur_cycle_iter = --_cs->MSHRUseMap.upper_bound(cur_cycle);
           assert(cur_cycle_iter->first < ((uint64_t)-20000));
           rechecks++;
         }
@@ -1042,7 +1064,7 @@ protected:
             assert(cur_cycle_iter->first < ((uint64_t)-20000));
           } else {
             cur_cycle+=re_check_frequency;
-            cur_cycle_iter = --MSHRUseMap.upper_bound(cur_cycle);
+            cur_cycle_iter = --_cs->MSHRUseMap.upper_bound(cur_cycle);
             rechecks++;
             assert(cur_cycle_iter->first < ((uint64_t)-20000));
           }
@@ -1052,8 +1074,8 @@ protected:
 
       if(foundSpot) {
         if(cur_cycle_iter->first!=cur_cycle) {
-          MSHRUseMap[cur_cycle]=cur_cycle_iter->second; 
-          cur_cycle_iter = MSHRUseMap.find(cur_cycle); 
+          _cs->MSHRUseMap[cur_cycle]=cur_cycle_iter->second; 
+          cur_cycle_iter = _cs->MSHRUseMap.find(cur_cycle); 
         }
         cur_cycle_iter->second.insert(addr);
 
@@ -1073,19 +1095,19 @@ protected:
         } else {
           //need to return to original usage here
           --cur_cycle_iter;
-          MSHRUseMap[cur_cycle+duration] = cur_cycle_iter->second;
-          MSHRUseMap[cur_cycle+duration].erase(addr);
+          _cs->MSHRUseMap[cur_cycle+duration] = cur_cycle_iter->second;
+          _cs->MSHRUseMap[cur_cycle+duration].erase(addr);
         }
        
-        auto respIter = MSHRResp.find(cur_cycle);
-        MSHRResp[cur_cycle+duration]=cpnode;
+        auto respIter = _cs->MSHRResp.find(cur_cycle);
+        _cs->MSHRResp[cur_cycle+duration]=cpnode;
 
         if(rechecks>0) {
-          respIter = --MSHRResp.upper_bound(cur_cycle);
+          respIter = --_cs->MSHRResp.upper_bound(cur_cycle);
           extraLat = cur_cycle-respIter->first;
         }
 
-        if(respIter == MSHRResp.end() || min_cycle == cur_cycle) {
+        if(respIter == _cs->MSHRResp.end() || min_cycle == cur_cycle) {
           return NULL;
         } else {
           return respIter->second.get();
@@ -1099,7 +1121,7 @@ protected:
 
   void checkResourceEmpty(FuUsageMap& fuUse) {
     if(fuUse.size() == 0) {
-      for(auto &fuUse : fuUsage) {
+      for(auto &fuUse : _cs->fuUsage) {
         fuUse.second[0]=0; //begining usage is 0
         fuUse.second[(uint64_t)-10000]=0; //end usage is 0 too (1000 to prevent overflow)
       }
@@ -1110,9 +1132,9 @@ protected:
   BaseInst_t* addResource(uint64_t resource_id, uint64_t min_cycle_in, 
                      uint32_t duration, int maxUnits, 
                      std::shared_ptr<BaseInst_t> cpnode) {
-    FuUsageMap& fuUseMap = fuUsage[resource_id];
-    uint64_t minAvailRes = minAvail[resource_id]; //todo: not implemented yet
-    NodeRespMap& nodeRespMap = nodeResp[resource_id];
+    FuUsageMap& fuUseMap = _cs->fuUsage[resource_id];
+    uint64_t minAvailRes = _cs->minAvail[resource_id]; //todo: not implemented yet
+    NodeRespMap& nodeRespMap = _cs->nodeResp[resource_id];
 
     checkResourceEmpty(fuUseMap);
    
@@ -1171,7 +1193,7 @@ protected:
 
         //now do something cool!
         if(cur_cycle_iter->second == maxUnits) {
-          //first, we can delete nodeResp, cause noone will use this for sure!
+          //first, we can delete _cs->nodeResp, cause noone will use this for sure!
           nodeRespMap.erase(cur_cycle);
 
           if(cur_cycle_iter != fuUseMap.begin()) {
@@ -1235,10 +1257,10 @@ protected:
       //-----FETCH ENERGY-------
       //Need to get ICACHE accesses somehow
       if(inst._icache_lat>0) {
-        icache_read_accesses++;
+        _mev->icache_read_accesses++;
       }
       if(inst._icache_lat>20) {
-        icache_read_misses++;
+        _mev->icache_read_misses++;
       }
     }
 
@@ -1256,35 +1278,35 @@ protected:
     //HANDLE LSQ HEADS
     //Loads leave at complete
     do {
-      auto depInst = LQ[lq_head_at_dispatch];
+      auto depInst = _cs->LQ[_cs->lq_head_at_dispatch];
       if (depInst.get() == 0) {
         break;
       }
       //TODO should this be complete or commit?
       if (depInst->cycleOfStage(depInst->memComplete()) < cycle ) {
-        LQ[lq_head_at_dispatch] = 0;
-        lq_head_at_dispatch += 1;
-        lq_head_at_dispatch %= LQ_SIZE;
+        _cs->LQ[_cs->lq_head_at_dispatch] = 0;
+        _cs->lq_head_at_dispatch += 1;
+        _cs->lq_head_at_dispatch %= LQ_SIZE;
       } else {
         break;
       }
-    } while (lq_head_at_dispatch != LQind);
+    } while (_cs->lq_head_at_dispatch != _cs->LQind);
 
     do {
-      auto depInst = SQ[sq_head_at_dispatch];
+      auto depInst = _cs->SQ[_cs->sq_head_at_dispatch];
       if(depInst.get() == 0) {
         break;
       }
       if (depInst->cycleOfStage(depInst->memComplete()) < cycle ) {
-        SQ[sq_head_at_dispatch] = 0;
-        sq_head_at_dispatch += 1;
-        sq_head_at_dispatch %= SQ_SIZE;
+        _cs->SQ[_cs->sq_head_at_dispatch] = 0;
+        _cs->sq_head_at_dispatch += 1;
+        _cs->sq_head_at_dispatch %= SQ_SIZE;
       } else {
         break;
       }
-    } while (sq_head_at_dispatch != SQind);
-    lq_size_at_dispatch[getCPDG()->getPipeLoc()%PSIZE] = lqSize();
-    sq_size_at_dispatch[getCPDG()->getPipeLoc()%PSIZE] = sqSize();
+    } while (_cs->sq_head_at_dispatch != _cs->SQind);
+    _cs->lq_size_at_dispatch[getCPDG()->getPipeLoc()%PSIZE] = lqSize();
+    _cs->sq_size_at_dispatch[getCPDG()->getPipeLoc()%PSIZE] = sqSize();
   }
 
 
@@ -1309,9 +1331,9 @@ protected:
       checkLSQSize(inst[Inst_t::Dispatch],inst._isload,inst._isstore);
       // ------ ENERGY EVENTS -------
       if(inst._floating) {
-        iw_fwrites++;
+        _cev->iw_fwrites++;
       } else {
-        iw_writes++;
+        _cev->iw_writes++;
       }
     }
 
@@ -1319,40 +1341,40 @@ protected:
       //rename_fwrites+=inst._numFPDestRegs;
       //rename_writes+=inst._numIntDestRegs;
       if(inst._floating) {
-        rename_freads+=inst._numSrcRegs;
-        rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
+        _cev->rename_freads+=inst._numSrcRegs;
+        _cev->rename_fwrites+=inst._numFPDestRegs+inst._numIntDestRegs;
       } else {
-        rename_reads+=inst._numSrcRegs;
-        rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
+        _cev->rename_reads+=inst._numSrcRegs;
+        _cev->rename_writes+=inst._numFPDestRegs+inst._numIntDestRegs;
       }
     }
 
     //HANDLE ROB STUFF
     uint64_t dispatch_cycle = inst.cycleOfStage(Inst_t::Dispatch);
     do {
-      Inst_t* depInst = getCPDG()->peekPipe(-rob_head_at_dispatch);
+      Inst_t* depInst = getCPDG()->peekPipe(-_cs->rob_head_at_dispatch);
       if(!depInst) {
         break;
       }
       if(depInst->cycleOfStage(Inst_t::Commit) < dispatch_cycle ) {
-        rob_head_at_dispatch--;
+        _cs->rob_head_at_dispatch--;
       } else {
         break;
       }
-    } while(rob_head_at_dispatch>=1);
+    } while(_cs->rob_head_at_dispatch>=1);
 
-    avg_rob_head = 0.01 * rob_head_at_dispatch + 
-                   0.99 * avg_rob_head;
+    _cs->avg_rob_head = 0.01 * _cs->rob_head_at_dispatch + 
+                   0.99 * _cs->avg_rob_head;
 
     Inst_t* depInst = getCPDG()->peekPipe(-1);
     if(depInst==0 || !depInst->_ctrl_miss) { 
-      rob_growth_rate = 0.92f * rob_growth_rate
-                      + 0.08f * (rob_head_at_dispatch - prev_rob_head_at_dispatch); 
+      _cs->rob_growth_rate = 0.92f * _cs->rob_growth_rate
+                      + 0.08f * (_cs->rob_head_at_dispatch - _cs->prev_rob_head_at_dispatch); 
     } else {
-      rob_growth_rate=0;
+      _cs->rob_growth_rate=0;
     }
 
-    prev_rob_head_at_dispatch=rob_head_at_dispatch;
+    _cs->prev_rob_head_at_dispatch=_cs->rob_head_at_dispatch;
 
     cleanLSQEntries(dispatch_cycle);
   }
@@ -1375,11 +1397,11 @@ protected:
       regfile_reads+=inst._numSrcRegs;
     }*/
 
-    regfile_fwrites+=inst._numFPDestRegs;
-    regfile_writes+=inst._numIntDestRegs;
+    _cev->regfile_fwrites+=inst._numFPDestRegs;
+    _cev->regfile_writes+=inst._numIntDestRegs;
 
-    regfile_freads+=inst._numFPSrcRegs;
-    regfile_reads+=inst._numIntSrcRegs;
+    _cev->regfile_freads+=inst._numFPSrcRegs;
+    _cev->regfile_reads+=inst._numIntSrcRegs;
 
   }
 
@@ -1405,15 +1427,15 @@ protected:
       //Non memory instructions can leave the IQ now!
       //Push onto the IQ by cycle that we leave IQ (execute cycle)
       if(!inst->isMem()) {
-        InstQueue.insert(
+        _cs->InstQueue.insert(
           std::make_pair(inst->cycleOfStage(Inst_t::Execute),inst.get()));
       }
     }
 
     if(inst->_floating) {
-      iw_freads+=2;
+      _cev->iw_freads+=2;
     } else {
-      iw_reads+=2;
+      _cev->iw_reads+=2;
     }
   }
 
@@ -1428,7 +1450,7 @@ protected:
       //Memory instructions can leave the IQ now!
       //Push onto the IQ by cycle that we leave IQ (complete cycle)
       if(inst.isMem()) {
-        InstQueue.insert(
+        _cs->InstQueue.insert(
                std::make_pair(inst.cycleOfStage(Inst_t::Complete),&inst));
       }
     } 
@@ -1448,21 +1470,21 @@ protected:
 
     if(!_isInOrder) {
       //Energy
-      rob_writes+=2;
-      rob_reads++;
+      _cev->rob_writes+=2;
+      _cev->rob_reads++;
     }
     setEnergyStatsPerInst(inst);
   }
 
   virtual void setEnergyStatsPerInst(Inst_t& inst)
   {
-    ++committed_insts;
-    committed_int_insts += !inst._floating;
-    committed_fp_insts += inst._floating;
-    committed_branch_insts += inst._isctrl;
-    committed_load_insts += inst._isload;
-    committed_store_insts += inst._isstore;
-    func_calls += inst._iscall;
+    _cev->committed_insts+=1;
+    _cev->committed_int_insts += !inst._floating;
+    _cev->committed_fp_insts += inst._floating;
+    _cev->committed_branch_insts += inst._isctrl;
+    _cev->committed_load_insts += inst._isload;
+    _cev->committed_store_insts += inst._isstore;
+    _cev->func_calls += inst._iscall;
   }
 
   virtual void setWritebackCycle(std::shared_ptr<Inst_t>& inst) {
@@ -1578,25 +1600,25 @@ protected:
         int adjusted_squash_cycles=2;
         int insts_to_squash=SQUASH_WIDTH;
         if(!_isInOrder){
-          adjusted_squash_cycles=prev_squash_penalty-2*predict_taken;
-          insts_to_squash=(prev_squash_penalty-2)*SQUASH_WIDTH;
+          adjusted_squash_cycles=_cs->prev_squash_penalty-2*predict_taken;
+          insts_to_squash=(_cs->prev_squash_penalty-2)*SQUASH_WIDTH;
         }
-        squashed_insts+=insts_to_squash;
+        _cev->squashed_insts+=insts_to_squash;
 
 
         getCPDG()->insert_edge(*depInst, Inst_t::Complete,
                                n, Inst_t::Fetch,
-                               //n._icache_lat + prev_squash_penalty 
+                               //n._icache_lat + _cs->prev_squash_penalty 
                                std::max((int)n._icache_lat, adjusted_squash_cycles)
                                + 1,E_CM); 
 
         //we need to make sure that the processor stays active during squash
         uint64_t i=depInst->cycleOfStage(Inst_t::Complete);
         for(;i<n.cycleOfStage(Inst_t::Fetch);++i) {
-          activityMap.insert(i);
+          _cs->activityMap.insert(i);
         }
 
-        mispeculatedInstructions++;
+        _cev->mispeculatedInstructions++;
     }
     return n;
   }
@@ -1606,16 +1628,16 @@ protected:
 
     //First, erase all irrelevant nodes
     typename ResVec::iterator upperbound;
-    upperbound = InstQueue.upper_bound(n.cycleOfStage(Inst_t::Dispatch));
-    InstQueue.erase(InstQueue.begin(),upperbound);
+    upperbound = _cs->InstQueue.upper_bound(n.cycleOfStage(Inst_t::Dispatch));
+    _cs->InstQueue.erase(_cs->InstQueue.begin(),upperbound);
 
     //Next, check if the IQ is full
-    if (InstQueue.size() < (unsigned)IQ_WIDTH) {
+    if (_cs->InstQueue.size() < (unsigned)IQ_WIDTH) {
       return n;
     }
 
     Inst_t* min_node=0;
-    for (auto I=InstQueue.begin(), EE=InstQueue.end(); I!=EE; ++I) {
+    for (auto I=_cs->InstQueue.begin(), EE=_cs->InstQueue.end(); I!=EE; ++I) {
       Inst_t* i =I->second;  //I->second.get();
       if(i->iqOpen==false) {
         i->iqOpen=true;
@@ -1626,7 +1648,7 @@ protected:
       }
     }
     
-    //min_node=InstQueue.upper_bound(0)->second.get();
+    //min_node=_cs->InstQueue.upper_bound(0)->second.get();
     assert(min_node);
     getCPDG()->insert_edge(*min_node, Inst_t::Execute,
                            n, Inst_t::Dispatch, n._icache_lat + 1, E_IQ);
@@ -1665,7 +1687,7 @@ protected:
     numInstsNotInRob=i;
     int blocking_dispatch=i;
 
-    if(numInstsNotInRob + lq_size_at_dispatch[((pipeLoc-blocking_dispatch))%PSIZE]
+    if(numInstsNotInRob + _cs->lq_size_at_dispatch[((pipeLoc-blocking_dispatch))%PSIZE]
          > (int)LQ_SIZE) {
       Inst_t* depInst = getCPDG()->peekPipe(-blocking_dispatch); 
       getCPDG()->insert_edge(*depInst, Inst_t::Dispatch,
@@ -1721,18 +1743,18 @@ protected:
     return n;
   }
 
-  //Finite LQ & SQ
+  //Finite _cs->LQ & _cs->SQ
   //This function delays the event until there is an open spot in the LSQ
   virtual void checkLSQSize(T& event,bool isload, bool isstore) {
     if (isload) {
-      if(LQ[LQind]) {
-        getCPDG()->insert_edge(*LQ[LQind], LQ[LQind]->memComplete(),
+      if(_cs->LQ[_cs->LQind]) {
+        getCPDG()->insert_edge(*_cs->LQ[_cs->LQind], _cs->LQ[_cs->LQind]->memComplete(),
                                event, 1+2,E_LSQ); //TODO: complete or commit
       }
     }
     if (isstore) {
-      if(SQ[SQind]) {
-        getCPDG()->insert_edge(*SQ[SQind], SQ[SQind]->memComplete(),
+      if(_cs->SQ[_cs->SQind]) {
+        getCPDG()->insert_edge(*_cs->SQ[_cs->SQind], _cs->SQ[_cs->SQind]->memComplete(),
                                event, 1,E_LSQ);
       }
     }
@@ -1751,9 +1773,9 @@ protected:
    //NonSpeculative Insts
   virtual Inst_t &checkNonSpeculative(Inst_t &n) {
     if (n._nonSpec) {
-      int ind=(SQind-1+SQ_SIZE)%SQ_SIZE;
-      if(SQ[ind]) {
-        getCPDG()->insert_edge(*SQ[ind], SQ[ind]->memComplete(),
+      int ind=(_cs->SQind-1+SQ_SIZE)%SQ_SIZE;
+      if(_cs->SQ[ind]) {
+        getCPDG()->insert_edge(*_cs->SQ[ind], _cs->SQ[ind]->memComplete(),
                                n, Inst_t::Ready, 1,E_NSpc);
       }
       Inst_t* depInst = getCPDG()->peekPipe(-1); 
@@ -1843,9 +1865,9 @@ protected:
         //add this to the memory predictor list
 //      std::cout << "ooo-will-pred" << dep_n._op->id() << "-m->" << n._op->id() << "\n";
 
-        memDepSet[n._op].insert(dep_n._op);
+        _cs->memDepSet[n._op].insert(dep_n._op);
       } else {
-        //We better insert the mem-dep now, because it didn't get added to memDepSet
+        //We better insert the mem-dep now, because it didn't get added to _cs->memDepSet
         //This is sort of an error, should probably fix any cases like this.
         insert_mem_dep_edge(dep_n,n);
       }
@@ -1855,7 +1877,7 @@ protected:
   int numMemChecks=0;
   virtual void checkClearMemDep() {
     if(++numMemChecks==250000) {
-      memDepSet.clear();
+      _cs->memDepSet.clear();
     }
   }
 
@@ -1863,7 +1885,7 @@ protected:
   virtual void insert_mem_predicted_edges(BaseInst_t& n) {
     checkClearMemDep();
     //insert edges 
-    for(auto i=memDepSet[n._op].begin(), e=memDepSet[n._op].end(); i!=e;++i) {
+    for(auto i=_cs->memDepSet[n._op].begin(), e=_cs->memDepSet[n._op].end(); i!=e;++i) {
       Op* dep_op = *i;
       BaseInstPtr sh_inst = getInstForOp(dep_op);
 
@@ -1876,7 +1898,14 @@ protected:
 
   virtual void insert_mem_dep_edge(BaseInst_t &prev_node, BaseInst_t &n, int edge_type=E_MDep)
   {
-    assert(&prev_node != &n);
+    //assert(&prev_node != &n);
+    static int warned_weird_mem_dep=0;
+    if(warned_weird_mem_dep < 10) {
+      warned_weird_mem_dep++;
+      std::cerr << "WARNING:ERROR: weird circular memorry dependence:" 
+        << prev_node._op->dotty_name_and_tooltip() << "\n";
+    }
+
     if (prev_node._isstore && n._isload) {
       // RAW true dependence
       getCPDG()->insert_edge(prev_node, prev_node.eventComplete(),
@@ -1891,8 +1920,6 @@ protected:
                              n, n.eventReady(), 0, edge_type);
     }
   }
-
-
 
   enum FU_Type{
     FU_Other=0,
@@ -2057,13 +2084,13 @@ protected:
       return;
 
     case 1: //IntALU
-      int_ops++;
+      _cev->int_ops++;
       return;
     case 2: //IntMult
-      mult_ops++;
+      _cev->mult_ops++;
       return;
     case 3: //IntDiv
-      mult_ops++;
+      _cev->mult_ops++;
       return;
 
     case 4: //FloatAdd
@@ -2072,7 +2099,7 @@ protected:
     case 7: //FloatMult
     case 8: //FloatDiv
     case 9: //FloatSqrt
-      fp_ops++;
+      _cev->fp_ops++;
       return;
 
     default:
@@ -2188,12 +2215,12 @@ protected:
 
         //std::cout << insts_to_squash << "," << rechecks << "\n";
         //squashed_insts+=rechecks*(insts_to_squash*0.8);
-        squashed_insts+=insts_to_squash+(rechecks-1)*insts_to_squash/1.5;
+        _cev->squashed_insts+=insts_to_squash+(rechecks-1)*insts_to_squash/1.5;
 
         //we need to make sure that the processor stays active during squash
         uint64_t i=sh_dummy_inst->cycleOfStage(Inst_t::Execute);
         for(;i<n->cycleOfStage(Inst_t::Execute);++i) {
-          activityMap.insert(i);
+          _cs->activityMap.insert(i);
         }
 
       }
@@ -2235,9 +2262,7 @@ protected:
     //First do energy accounting
     if(n->_isload || n->_isstore) {
       calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
-                      n->_cache_prod, n->_true_cache_prod,
-                      l1_hits, l1_misses, l2_hits, l2_misses,
-                      l1_wr_hits, l1_wr_misses, l2_wr_hits, l2_wr_misses);
+                      n->_cache_prod, n->_true_cache_prod);
     }
 
     int ep_lat=epLat(n->_ex_lat,n.get(),n->_isload,n->_isstore,
@@ -2321,17 +2346,17 @@ protected:
 
 
   //Insert Dynamic Edge for constraining issue width, 
-  //each inst reserves slots in the issueRes map
+  //each inst reserves slots in the _cs->issueRes map
   virtual Inst_t &checkIssueWidth(Inst_t &n) {    
     //find an issue slot
     int index = n.cycleOfStage(Inst_t::Execute); //ready to execute cycle
     int orig_index = index;
-    while(issueRes[index].size()==ISSUE_WIDTH) {
+    while(_cs->issueRes[index].size()==ISSUE_WIDTH) {
       index++;
     }
 
     //slot found in index
-    issueRes[index].push_back(&n);
+    _cs->issueRes[index].push_back(&n);
 
     //don't add edge if not necessary
     if(index == orig_index) {
@@ -2339,7 +2364,7 @@ protected:
     }
 
     //otherwise, add a dynamic edge to execute from last inst of previous cycle
-    Inst_t* dep_n = issueRes[index-1].back();
+    Inst_t* dep_n = _cs->issueRes[index-1].back();
     getCPDG()->insert_edge(*dep_n, Inst_t::Execute,
                            n, Inst_t::Execute, 1,E_IBW);
     return n;
@@ -2369,37 +2394,33 @@ protected:
    * We can probably use cache producer information here to help.
    */
   void calcCacheAccess(BaseInst_t* inst, int hit_level, int miss_level,
-                       bool cache_prod, bool true_cache_prod,
-                       uint64_t& l1_hits,    uint64_t& l1_misses,    
-                       uint64_t& l2_hits,    uint64_t& l2_misses,
-                       uint64_t& l1_wr_hits, uint64_t& l1_wr_misses, 
-                       uint64_t& l2_wr_hits, uint64_t& l2_wr_misses) {
+                       bool cache_prod, bool true_cache_prod) {
      
      if(inst->_isload) {
        if(miss_level>=1) {
-         l1_misses+=1;
+         _mev->l1_misses+=1;
        }
        if(miss_level>=2) {
-         l2_misses+=1;
+         _mev->l2_misses+=1;
        }
        if(hit_level==1) {
-         l1_hits+=1;
+         _mev->l1_hits+=1;
        }
        if(hit_level==2) {
-         l2_hits+=1;
+         _mev->l2_hits+=1;
        }
      } else if (inst->_isstore) {
        if(miss_level>=1) {
-         l1_wr_misses+=1;
+         _mev->l1_wr_misses+=1;
        }
        if(miss_level>=2) {
-         l2_wr_misses+=1;
+         _mev->l2_wr_misses+=1;
        }
        if(hit_level==1) {
-         l1_wr_hits+=1;
+         _mev->l1_wr_hits+=1;
        }
        if(hit_level==2) {
-         l2_wr_hits+=1;
+         _mev->l2_wr_hits+=1;
        }
      } else {
        assert(0);
@@ -2470,16 +2491,16 @@ protected:
     return n;
   }
 
-  //issueRes map
+  //_cs->issueRes map
   virtual Inst_t &checkWriteBackWidth(Inst_t &n) {    
     //find an issue slot
     uint64_t index = n.cycleOfStage(Inst_t::Complete); //ready to execute cycle
-    while(wbBusRes[index].size()==WRITEBACK_WIDTH) {
+    while(_cs->wbBusRes[index].size()==WRITEBACK_WIDTH) {
       index++;
     }
 
     //slot found in index
-    wbBusRes[index].push_back(&n);
+    _cs->wbBusRes[index].push_back(&n);
 
     //don't add edge if not necessary
     if(index == n.cycleOfStage(Inst_t::Complete)) {
@@ -2487,7 +2508,7 @@ protected:
     }
 
     //otherwise, add a dynamic edge to execute from last inst of previous cycle
-    Inst_t* dep_n = wbBusRes[index-1].back();
+    Inst_t* dep_n = _cs->wbBusRes[index-1].back();
     getCPDG()->insert_edge(*dep_n, Inst_t::Complete,
                            n, Inst_t::Complete, 1, E_WBBW);
     return n;
@@ -2578,12 +2599,12 @@ protected:
   int instsToSquash() {
     int insts_to_squash;
     
-    insts_to_squash=rob_head_at_dispatch;
-    if(rob_growth_rate-0.05>0) {
-      insts_to_squash+=12*(rob_growth_rate-0.05);
+    insts_to_squash=_cs->rob_head_at_dispatch;
+    if(_cs->rob_growth_rate-0.05>0) {
+      insts_to_squash+=12*(_cs->rob_growth_rate-0.05);
     }
 
-    return insts_to_squash*0.6f + avg_rob_head*0.4f;
+    return insts_to_squash*0.6f + _cs->avg_rob_head*0.4f;
   }
   
   int squashCycles(int insts_to_squash) {
@@ -2607,7 +2628,7 @@ protected:
         int squash_cycles = squashCycles(insts_to_squash); 
         
 
-        //int squash_cycles = (rob_head_at_dispatch + 1- 12*rob_growth_rate)/SQUASH_WIDTH;
+        //int squash_cycles = (_cs->rob_head_at_dispatch + 1- 12*_cs->rob_growth_rate)/SQUASH_WIDTH;
 
         if(squash_cycles<5) {
           squash_cycles=5;
@@ -2629,7 +2650,7 @@ protected:
         getCPDG()->insert_edge(n, Inst_t::Complete,
                                n, Inst_t::Commit,squash_cycles+1,E_SQUA);
         
-        prev_squash_penalty=squash_cycles;
+        _cs->prev_squash_penalty=squash_cycles;
     }
     return n;
   }
@@ -2657,140 +2678,140 @@ protected:
   }
 
   virtual void printAccEnergyEvents() {
-    std::cout << "committed_insts_acc        " <<  committed_insts_acc        << "\n";
-    std::cout << "committed_int_insts_acc    " <<  committed_int_insts_acc    << "\n";
-    std::cout << "committed_fp_insts_acc     " <<  committed_fp_insts_acc     << "\n";
-    std::cout << "committed_fp_insts_acc     " <<  committed_fp_insts_acc     << "\n";
-    std::cout << "committed_branch_insts_acc " <<  committed_branch_insts_acc << "\n";
-    std::cout << "committed_branch_insts_acc " <<  committed_branch_insts_acc << "\n";
-    std::cout << "committed_load_insts_acc   " <<  committed_load_insts_acc   << "\n";
-    std::cout << "committed_store_insts_acc  " <<  committed_store_insts_acc  << "\n";
-    std::cout << "squashed_insts_acc         " <<  squashed_insts_acc         << "\n";
-    std::cout << "idlecycles_acc             " <<  idleCycles_acc             << "\n";
-    std::cout << "rob_reads_acc              " <<  rob_reads_acc              << "\n";
-    std::cout << "rob_writes_acc             " <<  rob_writes_acc             << "\n";
-    std::cout << "rename_reads_acc           " <<  rename_reads_acc           << "\n";
-    std::cout << "rename_writes_acc          " <<  rename_writes_acc          << "\n";
-    std::cout << "rename_freads_acc          " <<  rename_freads_acc          << "\n";
-    std::cout << "rename_fwrites_acc         " <<  rename_fwrites_acc         << "\n";
-    std::cout << "func_calls_acc             " <<  func_calls_acc             << "\n";
-    std::cout << "int_ops_acc                " <<  int_ops_acc                << "\n";
-    std::cout << "fp_ops_acc                 " <<  fp_ops_acc                 << "\n";
-    std::cout << "mult_ops_acc               " <<  mult_ops_acc               << "\n";
-    std::cout << "iw_reads_acc               " <<  iw_reads_acc               << "\n";
-    std::cout << "iw_writes_acc              " <<  iw_writes_acc              << "\n";
-    std::cout << "iw_freads_acc              " <<  iw_freads_acc              << "\n";
-    std::cout << "iw_fwrites_acc             " <<  iw_fwrites_acc             << "\n";
-    std::cout << "regfile_reads_acc          " <<  regfile_reads_acc          << "\n";
-    std::cout << "regfile_writes_acc         " <<  regfile_writes_acc         << "\n";
-    std::cout << "regfile_freads_acc         " <<  regfile_freads_acc         << "\n";
-    std::cout << "regfile_fwrites_acc        " <<  regfile_fwrites_acc        << "\n";
-    std::cout << "icache_read_accesses_acc   " <<  icache_read_accesses_acc   << "\n";
-    std::cout << "icache_read_misses_acc     " <<  icache_read_misses_acc     << "\n";
-    std::cout << "l1_hits_acc                " <<  l1_hits_acc                << "\n";
-    std::cout << "l1_misses_acc              " <<  l1_misses_acc              << "\n";
-    std::cout << "l1_wr_hits_acc             " <<  l1_wr_hits_acc             << "\n";
-    std::cout << "l1_wr_misses_acc           " <<  l1_wr_misses_acc           << "\n";
-    std::cout << "l2_hits_acc                " <<  l2_hits_acc                << "\n";
-    std::cout << "l2_misses_acc              " <<  l2_misses_acc              << "\n";
-    std::cout << "l2_wr_hits_acc             " <<  l2_wr_hits_acc             << "\n";
-    std::cout << "l2_wr_misses_acc           " <<  l2_wr_misses_acc           << "\n";
+    std::cout <<"committed_insts_acc       " << _cev->committed_insts_acc        << "\n";
+    std::cout <<"committed_int_insts_acc   " << _cev->committed_int_insts_acc    << "\n";
+    std::cout <<"committed_fp_insts_acc    " << _cev->committed_fp_insts_acc     << "\n";
+    std::cout <<"committed_fp_insts_acc    " << _cev->committed_fp_insts_acc     << "\n";
+    std::cout <<"committed_branch_insts_acc" << _cev->committed_branch_insts_acc << "\n";
+    std::cout <<"committed_branch_insts_acc" << _cev->committed_branch_insts_acc << "\n";
+    std::cout <<"committed_load_insts_acc  " << _cev->committed_load_insts_acc   << "\n";
+    std::cout <<"committed_store_insts_acc " << _cev->committed_store_insts_acc  << "\n";
+    std::cout <<"squashed_insts_acc        " << _cev->squashed_insts_acc         << "\n";
+    std::cout <<"idlecycles_acc            " << _cev->idleCycles_acc             << "\n";
+    std::cout <<"rob_reads_acc             " << _cev->rob_reads_acc              << "\n";
+    std::cout <<"rob_writes_acc            " << _cev->rob_writes_acc             << "\n";
+    std::cout <<"rename_reads_acc          " << _cev->rename_reads_acc           << "\n";
+    std::cout <<"rename_writes_acc         " << _cev->rename_writes_acc          << "\n";
+    std::cout <<"rename_freads_acc         " << _cev->rename_freads_acc          << "\n";
+    std::cout <<"rename_fwrites_acc        " << _cev->rename_fwrites_acc         << "\n";
+    std::cout <<"func_calls_acc            " << _cev->func_calls_acc             << "\n";
+    std::cout <<"int_ops_acc               " << _cev->int_ops_acc                << "\n";
+    std::cout <<"fp_ops_acc                " << _cev->fp_ops_acc                 << "\n";
+    std::cout <<"mult_ops_acc              " << _cev->mult_ops_acc               << "\n";
+    std::cout <<"iw_reads_acc              " << _cev->iw_reads_acc               << "\n";
+    std::cout <<"iw_writes_acc             " << _cev->iw_writes_acc              << "\n";
+    std::cout <<"iw_freads_acc             " << _cev->iw_freads_acc              << "\n";
+    std::cout <<"iw_fwrites_acc            " << _cev->iw_fwrites_acc             << "\n";
+    std::cout <<"regfile_reads_acc         " << _cev->regfile_reads_acc          << "\n";
+    std::cout <<"regfile_writes_acc        " << _cev->regfile_writes_acc         << "\n";
+    std::cout <<"regfile_freads_acc        " << _cev->regfile_freads_acc         << "\n";
+    std::cout <<"regfile_fwrites_acc       " << _cev->regfile_fwrites_acc        << "\n";
+    std::cout <<"icache_read_accesses_acc  " << _mev->icache_read_accesses_acc   << "\n";
+    std::cout <<"icache_read_misses_acc    " << _mev->icache_read_misses_acc     << "\n";
+    std::cout <<"l1_hits_acc               " << _mev->l1_hits_acc                << "\n";
+    std::cout <<"l1_misses_acc             " << _mev->l1_misses_acc              << "\n";
+    std::cout <<"l1_wr_hits_acc            " << _mev->l1_wr_hits_acc             << "\n";
+    std::cout <<"l1_wr_misses_acc          " << _mev->l1_wr_misses_acc           << "\n";
+    std::cout <<"l2_hits_acc               " << _mev->l2_hits_acc                << "\n";
+    std::cout <<"l2_misses_acc             " << _mev->l2_misses_acc              << "\n";
+    std::cout <<"l2_wr_hits_acc            " << _mev->l2_wr_hits_acc             << "\n";
+    std::cout <<"l2_wr_misses_acc          " << _mev->l2_wr_misses_acc           << "\n";
   }
 
   virtual void accCoreEnergyEvents() {
-    committed_insts_acc        += committed_insts;              
-    committed_int_insts_acc    += committed_int_insts;
-    committed_fp_insts_acc     += committed_fp_insts;
-    committed_fp_insts_acc     += committed_fp_insts;
-    committed_branch_insts_acc += committed_branch_insts;
-    committed_branch_insts_acc += committed_branch_insts;
-    committed_load_insts_acc   += committed_load_insts;
-    committed_store_insts_acc  += committed_store_insts;
-    squashed_insts_acc         += squashed_insts;
-    idleCycles_acc             += idleCycles;
-    rob_reads_acc              += rob_reads;
-    rob_writes_acc             += rob_writes;
-    rename_reads_acc           += rename_reads;
-    rename_writes_acc          += rename_writes;
-    rename_freads_acc          += rename_freads;
-    rename_fwrites_acc         += rename_fwrites;
-    func_calls_acc             += func_calls;
-    int_ops_acc                += int_ops;
-    fp_ops_acc                 += fp_ops;
-    mult_ops_acc               += mult_ops;
-    iw_reads_acc               += iw_reads;
-    iw_writes_acc              += iw_writes;
-    iw_freads_acc              += iw_freads;
-    iw_fwrites_acc             += iw_fwrites;
-    regfile_reads_acc          += regfile_reads;
-    regfile_writes_acc         += regfile_writes;
-    regfile_freads_acc         += regfile_freads;
-    regfile_fwrites_acc        += regfile_fwrites;
-    icache_read_accesses_acc   += icache_read_accesses;
-    icache_read_misses_acc     += icache_read_misses;
-    l1_hits_acc                += l1_hits;
-    l1_misses_acc              += l1_misses;
-    l1_wr_hits_acc             += l1_wr_hits;
-    l1_wr_misses_acc           += l1_wr_misses;
-    l2_hits_acc                += l2_hits;
-    l2_misses_acc              += l2_misses;
-    l2_wr_hits_acc             += l2_wr_hits;
-    l2_wr_misses_acc           += l2_wr_misses;
+    _cev->committed_insts_acc        += _cev->committed_insts;              
+    _cev->committed_int_insts_acc    += _cev->committed_int_insts;
+    _cev->committed_fp_insts_acc     += _cev->committed_fp_insts;
+    _cev->committed_fp_insts_acc     += _cev->committed_fp_insts;
+    _cev->committed_branch_insts_acc += _cev->committed_branch_insts;
+    _cev->committed_branch_insts_acc += _cev->committed_branch_insts;
+    _cev->committed_load_insts_acc   += _cev->committed_load_insts;
+    _cev->committed_store_insts_acc  += _cev->committed_store_insts;
+    _cev->squashed_insts_acc         += _cev->squashed_insts;
+    _cev->idleCycles_acc             += _cev->idleCycles;
+    _cev->rob_reads_acc              += _cev->rob_reads;
+    _cev->rob_writes_acc             += _cev->rob_writes;
+    _cev->rename_reads_acc           += _cev->rename_reads;
+    _cev->rename_writes_acc          += _cev->rename_writes;
+    _cev->rename_freads_acc          += _cev->rename_freads;
+    _cev->rename_fwrites_acc         += _cev->rename_fwrites;
+    _cev->func_calls_acc             += _cev->func_calls;
+    _cev->int_ops_acc                += _cev->int_ops;
+    _cev->fp_ops_acc                 += _cev->fp_ops;
+    _cev->mult_ops_acc               += _cev->mult_ops;
+    _cev->iw_reads_acc               += _cev->iw_reads;
+    _cev->iw_writes_acc              += _cev->iw_writes;
+    _cev->iw_freads_acc              += _cev->iw_freads;
+    _cev->iw_fwrites_acc             += _cev->iw_fwrites;
+    _cev->regfile_reads_acc          += _cev->regfile_reads;
+    _cev->regfile_writes_acc         += _cev->regfile_writes;
+    _cev->regfile_freads_acc         += _cev->regfile_freads;
+    _cev->regfile_fwrites_acc        += _cev->regfile_fwrites;
+    _mev->icache_read_accesses_acc   += _mev->icache_read_accesses;
+    _mev->icache_read_misses_acc     += _mev->icache_read_misses;
+    _mev->l1_hits_acc                += _mev->l1_hits;
+    _mev->l1_misses_acc              += _mev->l1_misses;
+    _mev->l1_wr_hits_acc             += _mev->l1_wr_hits;
+    _mev->l1_wr_misses_acc           += _mev->l1_wr_misses;
+    _mev->l2_hits_acc                += _mev->l2_hits;
+    _mev->l2_misses_acc              += _mev->l2_misses;
+    _mev->l2_wr_hits_acc             += _mev->l2_wr_hits;
+    _mev->l2_wr_misses_acc           += _mev->l2_wr_misses;
 
-    committed_insts = 0;
-    committed_int_insts = 0;
-    committed_fp_insts = 0;
-    committed_fp_insts =0;
-    committed_branch_insts = 0;
-    committed_branch_insts = 0;
-    committed_load_insts = 0;
-    committed_store_insts = 0;
-    squashed_insts=0;
-    idleCycles = 0;
-    rob_reads = 0;
-    rob_writes = 0;
-    rename_reads = 0;
-    rename_writes = 0;
-    rename_freads = 0;
-    rename_fwrites = 0;
-    func_calls = 0;
-    int_ops = 0;
-    fp_ops = 0;
-    mult_ops = 0;
-    iw_reads = 0;
-    iw_writes = 0;
-    iw_freads = 0;
-    iw_fwrites = 0;
-    regfile_reads = 0;
-    regfile_writes = 0;
-    regfile_freads = 0;
-    regfile_fwrites = 0;
-    icache_read_accesses = 0;
-    icache_read_misses = 0;
-    l1_hits = 0;
-    l1_misses = 0;
-    l1_wr_hits = 0;
-    l1_wr_misses = 0;
-    l2_hits = 0;
-    l2_misses = 0;
-    l2_wr_hits = 0;
-    l2_wr_misses = 0;
+    _cev->committed_insts = 0;
+    _cev->committed_int_insts = 0;
+    _cev->committed_fp_insts = 0;
+    _cev->committed_fp_insts =0;
+    _cev->committed_branch_insts = 0;
+    _cev->committed_branch_insts = 0;
+    _cev->committed_load_insts = 0;
+    _cev->committed_store_insts = 0;
+    _cev->squashed_insts=0;
+    _cev->idleCycles = 0;
+    _cev->rob_reads = 0;
+    _cev->rob_writes = 0;
+    _cev->rename_reads = 0;
+    _cev->rename_writes = 0;
+    _cev->rename_freads = 0;
+    _cev->rename_fwrites = 0;
+    _cev->func_calls = 0;
+    _cev->int_ops = 0;
+    _cev->fp_ops = 0;
+    _cev->mult_ops = 0;
+    _cev->iw_reads = 0;
+    _cev->iw_writes = 0;
+    _cev->iw_freads = 0;
+    _cev->iw_fwrites = 0;
+    _cev->regfile_reads = 0;
+    _cev->regfile_writes = 0;
+    _cev->regfile_freads = 0;
+    _cev->regfile_fwrites = 0;
+    _mev->icache_read_accesses = 0;
+    _mev->icache_read_misses = 0;
+    _mev->l1_hits = 0;
+    _mev->l1_misses = 0;
+    _mev->l1_wr_hits = 0;
+    _mev->l1_wr_misses = 0;
+    _mev->l2_hits = 0;
+    _mev->l2_misses = 0;
+    _mev->l2_wr_hits = 0;
+    _mev->l2_wr_misses = 0;
   }
 
   virtual void pumpCoreEnergyEvents(PrismProcessor* proc, uint64_t totalCycles) {
     system_core* core = &proc->XML->sys.core[0];
 
     uint64_t busyCycles;
-    if(idleCycles < totalCycles) {
-      busyCycles=totalCycles-idleCycles;
+    if(_cev->idleCycles < totalCycles) {
+      busyCycles=totalCycles-_cev->idleCycles;
     } else {
       busyCycles=0;
     }
 
     //Modify relevent events to account for squashing
     double squashRatio=0;
-    if(committed_insts!=0) {
-      squashRatio =(double)squashed_insts/(double)committed_insts;
+    if(_cev->committed_insts!=0) {
+      squashRatio =(double)_cev->squashed_insts/(double)_cev->committed_insts;
     }
     double highSpecFactor = 1.00+1.5*squashRatio;
     double specFactor = 1.00+squashRatio;
@@ -2799,89 +2820,88 @@ protected:
     //double eigthSpecFactor = 1.00+0.125*squashRatio;
     double sixteenthSpecFactor = 1.00+0.0625*squashRatio;
 
-    uint64_t calc_rob_reads=(rob_reads+busyCycles)*halfSpecFactor;
+    uint64_t calc_rob_reads=(_cev->rob_reads+busyCycles)*halfSpecFactor;
 
     core->ROB_reads = calc_rob_reads; //(calc_rob_reads+busyCycles)*halfSpecFactor;
 
     proc->XML->sys.total_cycles=totalCycles;
 
     core->total_cycles=totalCycles; 
-    core->idle_cycles=idleCycles; 
+    core->idle_cycles=_cev->idleCycles; 
     core->busy_cycles=busyCycles; 
 
-    core->total_instructions    = (uint64_t)(committed_insts*specFactor); 
-    core->int_instructions      = (uint64_t)(committed_int_insts*specFactor); 
-    core->fp_instructions       = (uint64_t)(committed_fp_insts*specFactor); 
-    core->branch_instructions   = (uint64_t)(committed_branch_insts*highSpecFactor); 
-    core->branch_mispredictions = (uint64_t)(committed_branch_insts*sixteenthSpecFactor);
+    core->total_instructions   = (uint64_t)(_cev->committed_insts*specFactor); 
+    core->int_instructions     = (uint64_t)(_cev->committed_int_insts*specFactor); 
+    core->fp_instructions      = (uint64_t)(_cev->committed_fp_insts*specFactor); 
+    core->branch_instructions  = (uint64_t)(_cev->committed_branch_insts*highSpecFactor); 
+    core->branch_mispredictions= (uint64_t)(_cev->committed_branch_insts*sixteenthSpecFactor);
 
-    core->load_instructions     = (uint64_t)(committed_load_insts*fourthSpecFactor);
-    core->store_instructions    = (uint64_t)(committed_store_insts*fourthSpecFactor);
+    core->load_instructions    = (uint64_t)(_cev->committed_load_insts*fourthSpecFactor);
+    core->store_instructions   = (uint64_t)(_cev->committed_store_insts*fourthSpecFactor);
+    core->committed_instructions     = _cev->committed_insts;
+    core->committed_int_instructions = _cev->committed_int_insts;
+    core->committed_fp_instructions  = _cev->committed_fp_insts;
 
-    core->committed_instructions     = committed_insts;
-    core->committed_int_instructions = committed_int_insts;
-    core->committed_fp_instructions  = committed_fp_insts;
+    core->ROB_writes     =(uint64_t)(_cev->rob_writes*specFactor+_cev->squashed_insts);
+    core->rename_reads   =(uint64_t)(_cev->rename_reads*specFactor);
+    core->rename_writes  =(uint64_t)(_cev->rename_writes*specFactor+_cev->squashed_insts);
+    core->fp_rename_reads =(uint64_t)(_cev->rename_freads*specFactor);
+    core->fp_rename_writes=(uint64_t)(_cev->rename_fwrites*specFactor);
 
-    core->ROB_writes       = (uint64_t)(rob_writes*specFactor+squashed_insts);
-    core->rename_reads     = (uint64_t)(rename_reads*specFactor);
-    core->rename_writes    = (uint64_t)(rename_writes*specFactor+squashed_insts);
-    core->fp_rename_reads  = (uint64_t)(rename_freads*specFactor);
-    core->fp_rename_writes = (uint64_t)(rename_fwrites*specFactor);
+    core->inst_window_reads  =(uint64_t)(_cev->iw_reads*specFactor+busyCycles);
+    core->inst_window_writes =(uint64_t)(_cev->iw_writes*specFactor+_cev->squashed_insts);
+    core->inst_window_wakeup_accesses = (uint64_t)(_cev->iw_writes*specFactor);
 
-    core->inst_window_reads  = (uint64_t)(iw_reads*specFactor+busyCycles);
-    core->inst_window_writes = (uint64_t)(iw_writes*specFactor+squashed_insts);
-    core->inst_window_wakeup_accesses = (uint64_t)(iw_writes*specFactor);
+    core->fp_inst_window_reads           = (uint64_t)(_cev->iw_freads*specFactor);
+    core->fp_inst_window_writes          = (uint64_t)(_cev->iw_fwrites*specFactor);
+    core->fp_inst_window_wakeup_accesses = (uint64_t)(_cev->iw_fwrites*specFactor);
 
-    core->fp_inst_window_reads  = (uint64_t)(iw_freads*specFactor);
-    core->fp_inst_window_writes = (uint64_t)(iw_fwrites*specFactor);
-    core->fp_inst_window_wakeup_accesses = (uint64_t)(iw_fwrites*specFactor);
+    core->int_regfile_reads    = (uint64_t)(_cev->regfile_reads*halfSpecFactor);
+    core->int_regfile_writes   = (uint64_t)(_cev->regfile_writes*specFactor);
+    core->float_regfile_reads  = (uint64_t)(_cev->regfile_freads*halfSpecFactor);
+    core->float_regfile_writes = (uint64_t)(_cev->regfile_fwrites*specFactor);
 
-    core->int_regfile_reads    = (uint64_t)(regfile_reads*halfSpecFactor);
-    core->int_regfile_writes   = (uint64_t)(regfile_writes*specFactor);
-    core->float_regfile_reads  = (uint64_t)(regfile_freads*halfSpecFactor);
-    core->float_regfile_writes = (uint64_t)(regfile_fwrites*specFactor);
+    core->function_calls   = (uint64_t)(_cev->func_calls*specFactor);
 
-    core->function_calls   = (uint64_t)(func_calls*specFactor);
+    core->ialu_accesses    = (uint64_t)(_cev->int_ops*specFactor);
+    core->fpu_accesses     = (uint64_t)(_cev->fp_ops*specFactor);
+    core->mul_accesses     = (uint64_t)(_cev->mult_ops*specFactor);
 
-    core->ialu_accesses    = (uint64_t)(int_ops*specFactor);
-    core->fpu_accesses     = (uint64_t)(fp_ops*specFactor);
-    core->mul_accesses     = (uint64_t)(mult_ops*specFactor);
-
-    core->cdb_alu_accesses = (uint64_t)(int_ops*specFactor);
-    core->cdb_fpu_accesses = (uint64_t)(fp_ops*specFactor);
-    core->cdb_mul_accesses = (uint64_t)(mult_ops*specFactor);
+    core->cdb_alu_accesses = (uint64_t)(_cev->int_ops*specFactor);
+    core->cdb_fpu_accesses = (uint64_t)(_cev->fp_ops*specFactor);
+    core->cdb_mul_accesses = (uint64_t)(_cev->mult_ops*specFactor);
 
     //icache
-    core->icache.read_accesses = icache_read_accesses;
-    core->icache.read_misses    = icache_read_misses;
+    core->icache.read_accesses  = _mev->icache_read_accesses;
+    core->icache.read_misses    = _mev->icache_read_misses;
 
     //dcache
-    core->dcache.read_accesses   = l1_hits + l1_misses;
-    core->dcache.read_misses     = l1_misses;
-    core->dcache.write_accesses  = l1_wr_hits + l1_wr_misses;
-    core->dcache.write_misses    = l1_wr_misses;
+    core->dcache.read_accesses   = _mev->l1_hits + _mev->l1_misses;
+    core->dcache.read_misses     = _mev->l1_misses;
+    core->dcache.write_accesses  = _mev->l1_wr_hits + _mev->l1_wr_misses;
+    core->dcache.write_misses    = _mev->l1_wr_misses;
 
     //TODO: TLB Energy Modeling
-    core->itlb.total_accesses=icache_read_accesses;
+    core->itlb.total_accesses=_mev->icache_read_accesses;
     core->itlb.total_misses=0;
     core->itlb.total_hits=0;
-    core->dtlb.total_accesses=l1_hits+l1_misses+l1_wr_hits+l1_wr_misses;
+    core->dtlb.total_accesses=_mev->l1_hits+_mev->l1_misses+_mev->l1_wr_hits+_mev->l1_wr_misses;
     core->dtlb.total_misses=0;
     core->dtlb.total_hits=0;
     
     double pipe_duty=0.01;
     if(totalCycles>0) {
-      pipe_duty=std::max(std::min(((committed_insts*specFactor)/totalCycles)*3.0/2.0/ISSUE_WIDTH,2.0),0.01);
+      pipe_duty=std::max(std::min(((_cev->committed_insts*specFactor)/totalCycles)*3.0/2.0/ISSUE_WIDTH,2.0),0.01);
     }
 
     proc->cores[0]->coredynp.pipeline_duty_cycle=pipe_duty;
 
     //l2
     system_L2* l2 = &proc->XML->sys.L2[0];
-    l2->read_accesses   = l2_hits + l2_misses;
-    l2->read_misses     = l2_misses;
-    l2->write_accesses  = l2_wr_hits + l2_wr_misses;
-    l2->write_misses    = l2_wr_misses;
+    l2->read_accesses   = _mev->l2_hits + _mev->l2_misses;
+    l2->read_misses     = _mev->l2_misses;
+    l2->write_accesses  = _mev->l2_wr_hits + _mev->l2_wr_misses;
+    l2->write_misses    = _mev->l2_wr_misses;
 
     /* 
     //Debug
@@ -2904,23 +2924,23 @@ protected:
     CriticalPath::setEnergyEvents(doc,nm);
 
     uint64_t totalCycles=numCycles();
-    uint64_t busyCycles=totalCycles-idleCycles_acc;
+    uint64_t busyCycles=totalCycles-_cev->idleCycles_acc;
 
     pugi::xml_node system_node = doc.child("component").find_child_by_attribute("name","system");
     pugi::xml_node core_node =
               system_node.find_child_by_attribute("name","core0");
 
     sa(system_node,"total_cycles",totalCycles);
-    sa(system_node,"idle_cycles", idleCycles_acc);
-    sa(system_node,"busy_cycles",busyCycles);
+    sa(system_node,"idle_cycles", _cev->idleCycles_acc);
+    sa(system_node,"busy_cycles", busyCycles);
 
     //std::cout << "squash: " << squashed_insts
     //          << "commit: " << committed_insts << "\n";
 
     //Modify relevent events to be what we predicted
     double squashRatio=0;
-    if(committed_insts_acc!=0) {
-      squashRatio =(double)squashed_insts_acc/(double)committed_insts_acc;
+    if(_cev->committed_insts_acc!=0) {
+      squashRatio =(double)_cev->squashed_insts_acc/(double)_cev->committed_insts_acc;
     }
 
     if(!_isInOrder) {
@@ -2936,58 +2956,58 @@ protected:
     //uint64_t intOps=committed_int_insts-committed_load_insts-committed_store_insts;
     //uint64_t intOps=committed_int_insts;
 
-    sa(core_node,"total_instructions",(uint64_t)(committed_insts_acc*specFactor));
-    sa(core_node,"int_instructions",(uint64_t)(committed_int_insts_acc*specFactor));
-    sa(core_node,"fp_instructions",(uint64_t)(committed_fp_insts_acc*specFactor));
-    sa(core_node,"branch_instructions",(uint64_t)(committed_branch_insts_acc*highSpecFactor));
-    sa(core_node,"branch_mispredictions",(uint64_t)(mispeculatedInstructions_acc*sixteenthSpecFactor));
-    sa(core_node,"load_instructions",(uint64_t)(committed_load_insts_acc*fourthSpecFactor));
-    sa(core_node,"store_instructions",(uint64_t)(committed_store_insts_acc*fourthSpecFactor));
+    sa(core_node,"total_instructions", (uint64_t)(_cev->committed_insts_acc*specFactor));
+    sa(core_node,"int_instructions",   (uint64_t)(_cev->committed_int_insts_acc*specFactor));
+    sa(core_node,"fp_instructions",    (uint64_t)(_cev->committed_fp_insts_acc*specFactor));
+    sa(core_node,"branch_instructions",(uint64_t)(_cev->committed_branch_insts_acc*highSpecFactor));
+    sa(core_node,"branch_mispredictions",(uint64_t)(_cev->mispeculatedInstructions_acc*sixteenthSpecFactor));
+    sa(core_node,"load_instructions", (uint64_t)(_cev->committed_load_insts_acc*fourthSpecFactor));
+    sa(core_node,"store_instructions",(uint64_t)(_cev->committed_store_insts_acc*fourthSpecFactor));
 
-    sa(core_node,"committed_instructions", committed_insts_acc);
-    sa(core_node,"committed_int_instructions", committed_int_insts_acc);
-    sa(core_node,"committed_fp_instructions", committed_fp_insts_acc);
+    sa(core_node,"committed_instructions",     _cev->committed_insts_acc);
+    sa(core_node,"committed_int_instructions", _cev->committed_int_insts_acc);
+    sa(core_node,"committed_fp_instructions",  _cev->committed_fp_insts_acc);
 
     sa(core_node,"total_cycles",totalCycles);
-    sa(core_node,"idle_cycles", idleCycles_acc); 
-    sa(core_node,"busy_cycles",busyCycles);
+    sa(core_node,"idle_cycles", _cev->idleCycles_acc); 
+    sa(core_node,"busy_cycles", busyCycles);
 
-    sa(core_node,"ROB_reads",(uint64_t)((rob_reads_acc+busyCycles)*halfSpecFactor));
-    sa(core_node,"ROB_writes",(uint64_t)(rob_writes_acc*specFactor)+squashed_insts);
+    sa(core_node,"ROB_reads",(uint64_t)((_cev->rob_reads_acc+busyCycles)*halfSpecFactor));
+    sa(core_node,"ROB_writes",(uint64_t)(_cev->rob_writes_acc*specFactor)+_cev->squashed_insts);
 
-    sa(core_node,"rename_reads",(uint64_t)(rename_reads_acc*specFactor));
-    sa(core_node,"rename_writes",(uint64_t)(rename_writes_acc*specFactor)+squashed_insts);
-    sa(core_node,"fp_rename_reads",(uint64_t)(rename_freads_acc*specFactor));
-    sa(core_node,"fp_rename_writes",(uint64_t)(rename_fwrites_acc*specFactor));
+    sa(core_node,"rename_reads",     (uint64_t)(_cev->rename_reads_acc*specFactor));
+    sa(core_node,"rename_writes",    (uint64_t)(_cev->rename_writes_acc*specFactor)+_cev->squashed_insts);
+    sa(core_node,"fp_rename_reads",  (uint64_t)(_cev->rename_freads_acc*specFactor));
+    sa(core_node,"fp_rename_writes", (uint64_t)(_cev->rename_fwrites_acc*specFactor));
                                                                     
-    sa(core_node,"inst_window_reads",(uint64_t)(iw_reads_acc*specFactor)+busyCycles);
-    sa(core_node,"inst_window_writes",(uint64_t)(iw_writes_acc*specFactor)+squashed_insts);
-    sa(core_node,"inst_window_wakeup_accesses",(uint64_t)(iw_writes_acc*specFactor));
+    sa(core_node,"inst_window_reads", (uint64_t)(_cev->iw_reads_acc*specFactor)+busyCycles);
+    sa(core_node,"inst_window_writes",(uint64_t)(_cev->iw_writes_acc*specFactor)+_cev->squashed_insts);
+    sa(core_node,"inst_window_wakeup_accesses",(uint64_t)(_cev->iw_writes_acc*specFactor));
 
-    sa(core_node,"fp_inst_window_reads",(uint64_t)(iw_freads_acc*specFactor));
-    sa(core_node,"fp_inst_window_writes",(uint64_t)(iw_fwrites_acc*specFactor));
-    sa(core_node,"fp_inst_window_wakeup_accesses",(uint64_t)(iw_fwrites_acc*specFactor));
+    sa(core_node,"fp_inst_window_reads",          (uint64_t)(_cev->iw_freads_acc*specFactor));
+    sa(core_node,"fp_inst_window_writes",         (uint64_t)(_cev->iw_fwrites_acc*specFactor));
+    sa(core_node,"fp_inst_window_wakeup_accesses",(uint64_t)(_cev->iw_fwrites_acc*specFactor));
 
-    sa(core_node,"int_regfile_reads",(uint64_t)(regfile_reads_acc*halfSpecFactor));
-    sa(core_node,"int_regfile_writes",(uint64_t)(regfile_writes_acc*specFactor));
-    sa(core_node,"float_regfile_reads",(uint64_t)(regfile_freads_acc*halfSpecFactor));
-    sa(core_node,"float_regfile_writes",(uint64_t)(regfile_fwrites_acc*specFactor));
+    sa(core_node,"int_regfile_reads",   (uint64_t)(_cev->regfile_reads_acc*halfSpecFactor));
+    sa(core_node,"int_regfile_writes",  (uint64_t)(_cev->regfile_writes_acc*specFactor));
+    sa(core_node,"float_regfile_reads", (uint64_t)(_cev->regfile_freads_acc*halfSpecFactor));
+    sa(core_node,"float_regfile_writes",(uint64_t)(_cev->regfile_fwrites_acc*specFactor));
 
-    sa(core_node,"function_calls",(uint64_t)(func_calls_acc*specFactor));
+    sa(core_node,"function_calls",  (uint64_t)(_cev->func_calls_acc*specFactor));
 
-    sa(core_node,"ialu_accesses",(uint64_t)(int_ops_acc*specFactor));
-    sa(core_node,"fpu_accesses",(uint64_t)(fp_ops_acc*specFactor));
-    sa(core_node,"mul_accesses",(uint64_t)(mult_ops_acc*specFactor));
+    sa(core_node,"ialu_accesses",   (uint64_t)(_cev->int_ops_acc*specFactor));
+    sa(core_node,"fpu_accesses",    (uint64_t)(_cev->fp_ops_acc*specFactor));
+    sa(core_node,"mul_accesses",    (uint64_t)(_cev->mult_ops_acc*specFactor));
 
-    sa(core_node,"cdb_alu_accesses",(uint64_t)(int_ops_acc*specFactor));
-    sa(core_node,"cdb_fpu_accesses",(uint64_t)(fp_ops_acc*specFactor));
-    sa(core_node,"cdb_mul_accesses",(uint64_t)(mult_ops_acc*specFactor));
+    sa(core_node,"cdb_alu_accesses",(uint64_t)(_cev->int_ops_acc*specFactor));
+    sa(core_node,"cdb_fpu_accesses",(uint64_t)(_cev->fp_ops_acc*specFactor));
+    sa(core_node,"cdb_mul_accesses",(uint64_t)(_cev->mult_ops_acc*specFactor));
 
     // ---------- icache --------------
     pugi::xml_node icache_node =
               core_node.find_child_by_attribute("name","icache");
-    sa(icache_node,"read_accesses",icache_read_accesses_acc);
-    sa(icache_node,"read_misses",icache_read_misses_acc);
+    sa(icache_node,"read_accesses",_mev->icache_read_accesses_acc);
+    sa(icache_node,"read_misses",  _mev->icache_read_misses_acc);
     //sa(icache_node,"conflicts",Prof::get().icacheReplacements);
   }
 

@@ -16,9 +16,6 @@
  *
  */
 namespace DySER {
-
-
-
   class cp_dyser : public ArgumentHandler,
                    public VectorizationLegality,
                    public CP_OPDG_Builder<dg_event,
@@ -122,9 +119,19 @@ namespace DySER {
     uint64_t _dyser_fp_ops;
     uint64_t _dyser_mult_ops;
 
+    uint64_t _dyser_int_ops_acc=0;
+    uint64_t _dyser_fp_ops_acc=0;
+    uint64_t _dyser_mult_ops_acc=0;
+
+    bool was_acc_on=false;
+
     // do we need this????
     uint64_t _dyser_regfile_freads;
     uint64_t _dyser_regfile_reads;
+
+    uint64_t _dyser_regfile_freads_acc=0;
+    uint64_t _dyser_regfile_reads_acc=0;
+
 
     InstPtr createDyComputeInst(Op *op, uint64_t index, SliceInfo *SI) {
       InstPtr dy_compute = InstPtr(new dyser_compute_inst(op, op->img,
@@ -139,7 +146,7 @@ namespace DySER {
 
           case 3:
           case 1: ++_dyser_int_ops; break;
-          case 2: ++_dyser_int_ops; ++_dyser_mult_ops; break;
+          case 2: ++_dyser_mult_ops; break;
 
           case 4:  case 5:
           case 6:  case 7:
@@ -319,6 +326,7 @@ namespace DySER {
                            StackLoop);
 
     if(li && (StackLoop || canDySERize(li))) {
+      was_acc_on=true;
       return li->id();
     } else {
       return 0;
@@ -643,18 +651,35 @@ namespace DySER {
         this->completeDySERLoopWithLI(DyLoop, curLoopIter, loopDone);
       }
 
+      //Tony added -- only clean until cur loop iter
+      this->cleanupLoopInstTracking(DyLoop, CurLoopIter);     
+
+      //TODO: fix following so that it uses correct dyser instructions
+      //put remaining instructions into trace as CPU insts
+
+      for (auto I = _loop_InstTrace.begin(), E = _loop_InstTrace.end();I!=E;++I) {
+        Op *op = I->first;
+        InstPtr inst = I->second;
+
+        inst->_type=77;
+        this->cpdgAddInst(inst, inst->_index);
+        addDeps(inst, op);
+        pushPipe(inst);
+        inserted(inst);
+      }
+
       this->cleanupLoopInstTracking();
 
       justSwitchedConfig = false;
 
-      if (_lastInst->_ctrl_miss) {
+      if (lastInst()->_ctrl_miss) {
         if (insertCtrlMissConfigPenalty) {
           // We model this with inserting two dyconfig num_cycles..
           incrConfigSwitch(1, 0);
           // We will switch to the config and switch back ....
           ConfigInst = insertDyConfig(_num_cycles_switch_config*2
                                       + _num_cycles_ctrl_miss_penalty);
-          assert(_lastInst->_op);
+          assert(lastInst()->_op);
         }
       }
 
@@ -717,10 +742,7 @@ namespace DySER {
         } else {
           std::cout << " loop not done";
         }
-        std::cout << "hi";
-        std::cout<< "\n";
       }
-
 
       SI = SliceInfo::get(LI, _dyser_size);
       assert(SI);
@@ -729,6 +751,7 @@ namespace DySER {
         SI->dump();
         std::cout << "=======================================\n";
       }
+
       unsigned extraConfigRequired = (SI->cs_size()/_dyser_size);
       _num_config += extraConfigRequired;
       _num_config_config_switching += extraConfigRequired;
@@ -804,18 +827,24 @@ namespace DySER {
                 insert_sliced_inst(SI, op, inst, loopDone);
               }
             } else {
-              // load slice -- coalesce if possible
-              if (coalesceMemOps && (op->isLoad() || op->isStore())) {
-                Op *firstOp = SI->getFirstMemNode(op);
-                if (memOp2Inst.count(firstOp) == 0) {
-                  insert_sliced_inst(SI, op, inst, loopDone);
-                  memOp2Inst[firstOp] = inst;
+              //ignore things like limm that have no uses/deps
+              if(op->numUses()==0 && op->numDeps()==0 && op->shouldIgnoreInAccel()) {
+                //do nothing
+              } else { 
+
+                // load slice -- coalesce if possible
+                if (coalesceMemOps && (op->isLoad() || op->isStore())) {
+                  Op *firstOp = SI->getFirstMemNode(op);
+                  if (memOp2Inst.count(firstOp) == 0) {
+                    insert_sliced_inst(SI, op, inst, loopDone);
+                    memOp2Inst[firstOp] = inst;
+                  } else {
+                    // we already created the inst
+                    this->keepTrackOfInstOpMap(memOp2Inst[firstOp], op);
+                  }
                 } else {
-                  // we already created the inst
-                  this->keepTrackOfInstOpMap(memOp2Inst[firstOp], op);
+                  insert_sliced_inst(SI, op, inst, loopDone);
                 }
-              } else {
-                insert_sliced_inst(SI, op, inst, loopDone);
               }
             }
           }
@@ -929,6 +958,7 @@ namespace DySER {
       if (!op->isLoad() // Skip DySER Load because we morph load to dyload
           &&  SI->isAInputToDySER(op)
           && dyser_inst::Send_Recv_Latency > 0) {
+
         // Insert a dyser send instruction to pipeline
         return insertDySend(op);
       }
@@ -939,6 +969,9 @@ namespace DySER {
       std::cout << "insert comp sliced inst: " << op->id() << "\n";
     }
 
+    if(op->is_clear_xor()) {
+      return inst; //get out if its just a clear xor
+    }
 
     //add_inst_checked(inst); //add it even if compute
 
@@ -1003,25 +1036,25 @@ namespace DySER {
 
 
     // overrides
-    std::map<Op*, uint16_t> _iCacheLat;
+    //std::map<Op*, uint16_t> _iCacheLat;
 
-    void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
-                        const CP_NodeDiskImage &img) {
-      // Optimistic -- ????
-      CP_OPDG_Builder<T, E>::trackLoopInsts(li, op, inst, img);
-      _iCacheLat[op] = std::min(_iCacheLat[op], inst->_icache_lat);
-    }
+    //void trackLoopInsts(LoopInfo *li, Op *op, InstPtr inst,
+    //                    const CP_NodeDiskImage &img) {
+    //  // Optimistic -- ????
+    //  CP_OPDG_Builder<T, E>::trackLoopInsts(li, op, inst, img);
+    //  _iCacheLat[op] = std::min(_iCacheLat[op], inst->_icache_lat);
+    //}
 
-    void updateInstWithTraceInfo(Op *op, InstPtr inst,
-                                bool useInst) {
-      CP_OPDG_Builder<T, E>::updateInstWithTraceInfo(op, inst, useInst);
-      inst->_icache_lat = _iCacheLat[op];
-    }
+    //void updateInstWithTraceInfo(Op *op, InstPtr inst,
+    //                            bool useInst) {
+    //  CP_OPDG_Builder<T, E>::updateInstWithTraceInfo(op, inst, useInst);
+    //  inst->_icache_lat = _iCacheLat[op];
+    //}
 
-    void cleanupLoopInstTracking() {
-      CP_OPDG_Builder<T, E>::cleanupLoopInstTracking();
-      _iCacheLat.clear();
-    }
+    //virtual void cleanupLoopInstTracking() {
+    //  CP_OPDG_Builder<T, E>::cleanupLoopInstTracking();
+    //  _iCacheLat.clear();
+    //}
 
     void pushPipe(InstPtr &inst) {
       CP_OPDG_Builder<T, E>::pushPipe(inst);
@@ -1078,6 +1111,132 @@ namespace DySER {
     }
 
 
+
+    //TODO: WHAT SHOULD I DO?
+    virtual double accel_leakage() override {
+
+      if(was_acc_on) {
+        was_acc_on=false;
+        bool lc = mc_accel->XML->sys.longer_channel_device;
+
+        float ialu = RegionStats::get_leakage(mc_accel->cores[0]->exu->exeu,lc)* _dyser_size/4.0;
+        float mul  = RegionStats::get_leakage(mc_accel->cores[0]->exu->mul,lc) * _dyser_size/4.0;
+
+        float net  = RegionStats::get_leakage(mc_accel->nlas[0]->bypass,lc) * _dyser_size;
+
+        //cout << "alu: " << nALUs_on << " " << ialu << "\n";
+        //cout << "mul: " << nMULs_on << " " << mul << "\n";
+        //cout << "imu: " << imus_on  << " " << imu << "\n";
+        //cout << "net: " << 1        << " " << net << "\n";
+
+        return ialu + mul + net;
+        //  float fpalu = mc_accel->cores[0]->exu->fp_u->rt_power.readOp.dynamic; 
+        //  float calu  = mc_accel->cores[0]->exu->mul->rt_power.readOp.dynamic; 
+        //  float network = mc_accel->nlas[0]->bypass->rt_power.readOp.dynamic; 
+      } else {
+        return 0;
+      }
+    }
+
+
+    
+
+    NLAProcessor* mc_accel = NULL;
+    virtual void setupMcPAT(const char* filename, int nm) 
+    {
+      CriticalPath::setupMcPAT(filename,nm); //do base class
+
+      printAccelMcPATxml(filename,nm);
+      ParseXML* mcpat_xml= new ParseXML(); 
+      mcpat_xml->parse((char*)filename);
+      mc_accel = new NLAProcessor(mcpat_xml); 
+
+      /*system_core* core = &mc_accel->XML->sys.core[0];
+
+      core->ALU_per_core=Prof::get().int_alu_count;
+      core->MUL_per_core=Prof::get().mul_div_count;
+      core->FPU_per_core=Prof::get().fp_alu_count;
+
+      core->archi_Regs_IRF_size=8;
+      core->archi_Regs_FRF_size=8;
+      core->phy_Regs_IRF_size=64;
+      core->phy_Regs_FRF_size=64;
+
+      core->num_nla_units=8;
+      core->imu_width=4;
+      core->imu_entries=32;
+
+      core->instruction_window_size=32;*/
+
+      pumpCoreEnergyEvents(mc_accel,0); //reset all energy stats to 0
+    } 
+
+    virtual void pumpAccelMcPAT(uint64_t totalcycles) {
+      pumpAccelEnergyEvents(totalcycles);
+      mc_accel->computeEnergy();
+    }
+
+    virtual void pumpAccelEnergyEvents(uint64_t totalCycles) {
+      mc_accel->XML->sys.total_cycles=totalCycles;
+
+      //Func Units
+      system_core* core = &mc_accel->XML->sys.core[0];
+      core->ialu_accesses    = (uint64_t)(_dyser_int_ops );
+      core->fpu_accesses     = (uint64_t)(_dyser_fp_ops  );
+      core->mul_accesses     = (uint64_t)(_dyser_mult_ops);
+
+      core->cdb_alu_accesses = (uint64_t)(_dyser_int_ops );
+      core->cdb_fpu_accesses = (uint64_t)(_dyser_fp_ops  );
+      core->cdb_mul_accesses = (uint64_t)(_dyser_mult_ops);
+
+      //Reg File
+      core->int_regfile_reads    = (uint64_t)(_dyser_regfile_reads  ); 
+      core->int_regfile_writes   = (uint64_t)(_dyser_int_ops
+                                              + _dyser_mult_ops); 
+      core->float_regfile_reads  = (uint64_t)(_dyser_regfile_freads ); 
+      core->float_regfile_writes = (uint64_t)(_dyser_fp_ops); 
+
+      //  core->nla_network_accesses=_nla_network_writes;
+
+      accAccelEnergyEvents();
+    }
+
+    virtual double accel_region_en() override {
+   
+      float ialu  = mc_accel->cores[0]->exu->exeu->rt_power.readOp.dynamic; 
+      float fpalu = mc_accel->cores[0]->exu->fp_u->rt_power.readOp.dynamic; 
+      float calu  = mc_accel->cores[0]->exu->mul->rt_power.readOp.dynamic; 
+      float reg  = mc_accel->cores[0]->exu->rfu->rt_power.readOp.dynamic; 
+  
+//      float network = mc_accel->nlas[0]->bypass->rt_power.readOp.dynamic; 
+  
+  
+      return ialu + fpalu + calu + reg;
+    }
+
+    virtual void accAccelEnergyEvents() {
+      _dyser_int_ops_acc         +=  _dyser_int_ops        ;
+      _dyser_fp_ops_acc          +=  _dyser_fp_ops         ;
+      _dyser_mult_ops_acc        +=  _dyser_mult_ops       ;
+      _dyser_regfile_reads_acc   +=  _dyser_regfile_reads  ;
+      _dyser_regfile_freads_acc  +=  _dyser_regfile_freads ;
+  
+//      _dyser_network_reads_acc   +=  _dyser_network_reads  ;
+//      _dyser_network_writes_acc  +=  _dyser_network_writes ;
+  
+      _dyser_int_ops         = 0;
+      _dyser_fp_ops          = 0;
+      _dyser_mult_ops        = 0;
+      _dyser_regfile_reads   = 0; 
+      _dyser_regfile_freads  = 0; 
+  
+//      _dyser_network_reads   = 0; 
+//      _dyser_network_writes  = 0; 
+  
+    }
+
+
+
     // Handle enrgy events for McPAT XML DOC
     virtual void printAccelMcPATxml(std::string fname_base, int nm) {
 
@@ -1113,19 +1272,19 @@ namespace DySER {
       sa(core_node, "MUL_per_core", Prof::get().mul_div_count);
       sa(core_node, "FPU_per_core", Prof::get().fp_alu_count);
 
-      sa(core_node, "ialu_accesses", _dyser_int_ops);
-      sa(core_node, "fpu_accesses", _dyser_fp_ops);
-      sa(core_node, "mul_accesses", _dyser_mult_ops);
+      sa(core_node, "ialu_accesses", _dyser_int_ops_acc);
+      sa(core_node, "fpu_accesses", _dyser_fp_ops_acc);
+      sa(core_node, "mul_accesses", _dyser_mult_ops_acc);
 
       sa(core_node, "archi_Regs_IRF_size", 8);
       sa(core_node, "archi_Regs_FRF_size", 8);
       sa(core_node, "phy_Regs_IRF_size", 64);
       sa(core_node, "phy_Regs_FRF_size", 64);
 
-      sa(core_node, "int_regfile_reads", _dyser_regfile_reads);
-      sa(core_node, "int_regfile_writes", _dyser_int_ops + _dyser_mult_ops);
-      sa(core_node, "float_regfile_reads", _dyser_regfile_freads);
-      sa(core_node, "float_regfile_writes", _dyser_fp_ops);
+      sa(core_node, "int_regfile_reads", _dyser_regfile_reads_acc);
+      sa(core_node, "int_regfile_writes", _dyser_int_ops_acc + _dyser_mult_ops_acc);
+      sa(core_node, "float_regfile_reads", _dyser_regfile_freads_acc);
+      sa(core_node, "float_regfile_writes", _dyser_fp_ops_acc);
 
       std::string fname=fname_base + std::string(".accel");
       accel_doc.save_file(fname.c_str());

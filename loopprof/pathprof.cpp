@@ -721,7 +721,7 @@ void PathProf::runAnalysis2(bool no_gams, bool gams_details, bool size_based_cfu
        && hpi != -2 //no hot path
        && loopInfo->pathHeatRatio(hpi) >= 0.55
        && loopInfo->getTotalIters() >= 10
-       && !loopInfo->containsCallReturn()
+       && !loopInfo->containsCallReturn(hpi)
        ) {
       stringstream part_gams_str;
       part_gams_str << "partition." << loopInfo->id();

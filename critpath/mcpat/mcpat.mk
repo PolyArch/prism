@@ -9,23 +9,25 @@ endif
 
 
 LIBS = 
-INCS = -lm -static -I/s/boost-1.54.0/include -L/s/boost-1.54.0/lib -lboost_serialization -Wl,-rpath,/s/boost-1.54.0/lib 
+INCS = -static -lm -I/usr/include/boost -L/usr/lib64 -lboost_serialization -Wl,-rpath,/usr/lib64
 
 ifeq ($(TAG),dbg)
   DBG = -Wall 
   OPT = -ggdb -g -fPIC -gdwarf-3  -O0 -DNTHREADS=1 -Icacti
 else
   DBG = 
-  OPT =  -ggdb -g -fPIC -gdwarf-3 -static -fPIC -O3 -msse2 -mfpmath=sse -DNTHREADS=$(NTHREADS) -Icacti
+  OPT =  -ggdb -g -fPIC -gdwarf-3 -fPIC -O3 -msse2 -mfpmath=sse -DNTHREADS=$(NTHREADS) -Icacti
   #OPT = -O0 -DNTHREADS=$(NTHREADS)
 endif
 
 #CXXFLAGS = -Wall -Wno-unknown-pragmas -Winline $(DBG) $(OPT) 
-CXXFLAGS = -Wno-unknown-pragmas $(DBG) -std=c++11 $(OPT) 
-CXX = /s/gcc-4.8.2/bin/g++
-CC  = /s/gcc-4.8.2/bin/gcc
+CXXFLAGS = -static -Wno-unknown-pragmas $(DBG) -std=c++11 $(OPT) 
+#CXX = /s/gcc-4.8.2/bin/g++
+#CC  = /s/gcc-4.8.2/bin/gcc
 #CXX = /s/gcc-4.8.2/bin/g++ -m32
 #CC  = /s/gcc-4.8.2/bin/gcc -m32
+CC = gcc
+CXX = g++
 
 VPATH = cacti
 

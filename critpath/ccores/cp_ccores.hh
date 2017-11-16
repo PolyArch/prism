@@ -435,9 +435,9 @@ public:
       }
       addCCoreDeps(sh_inst,img);
       //make sure this instruction comes after cleaning
-      assert(sh_inst->cycleOfStage(0) >= _latestCleaned);
-      assert(sh_inst->cycleOfStage(1) >= _latestCleaned);
-      assert(sh_inst->cycleOfStage(2) >= _latestCleaned);
+      assert(sh_inst->cycleOfStage(0) >= _cs->latestCleaned);
+      assert(sh_inst->cycleOfStage(1) >= _cs->latestCleaned);
+      assert(sh_inst->cycleOfStage(2) >= _cs->latestCleaned);
 
 
       //have to insert it into the lsq as well

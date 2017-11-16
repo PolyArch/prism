@@ -7,7 +7,7 @@ OBJ := $(patsubst %.cpp, %.o, $(SRC))
 
 EXT_OBJ := mcpat/mcpat.a
 
-LIBS := -lz  -lloopprof -lboost_serialization -ldl -ltcmalloc -lprofiler
+LIBS := -lpthread -lz  -lloopprof -lboost_serialization -ldl -ltcmalloc -lprofiler
 
 # ifndef USE_GLIBC_MALLOC
 # LDFLAGS := $(EXFLAGS) -ltcmalloc 

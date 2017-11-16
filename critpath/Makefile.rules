@@ -2,17 +2,18 @@
 
 # Things you can configure
 
-CC :=  /s/gcc-4.8.2/bin/gcc
-CXX := /s/gcc-4.8.2/bin/g++
+#CC :=  /s/gcc-4.8.2/bin/gcc
+#CXX := /s/gcc-4.8.2/bin/g++
 #CC :=  /s/gcc-5.1/bin/gcc
 #CXX := /s/gcc-5.1/bin/g++
-
+CC = gcc
+CXX = g++
 
 #CC  :=  /s/intelcompilers-2015/bin/icc
 #CXX :=  /s/intelcompilers-2015/bin/icpc
 
 
-GEM5_DIR = /p/vertical/afs-huge0/MaFIA/src/gem5
+GEM5_DIR = `pwd`/../../../gem5
 OPTI = -O3
 
 #oost_dir=/unsup/boost-1.58.0

@@ -299,7 +299,8 @@ namespace DySER {
             auto &opSet = pc2Ops[op->cpc().first];
             for (auto OI = opSet.begin(), OE = opSet.end(); OI != OE; ++OI) {
               // Internal control can be mapped to dyser itself
-              if (!mapInternalControlToDySER || li->isLatch(op->bb())) {
+              if (!mapInternalControlToDySER || li->isLatch(op->bb()) || 
+                    li->hasNonLoopSuccessor(op->bb())) {
                 workList.push_back(*OI);
                 IsInLoadSlice[*OI] = true;
               } else {
@@ -354,6 +355,10 @@ namespace DySER {
           // already in LS
           if (IsInLoadSlice[DepOp])
             continue;
+
+          if (DepOp->is_clear_xor()) { //tony: just ignore it for now
+            continue; 
+          }
 
           IsInLoadSlice[DepOp] = true;
           workList.push_back(DepOp);

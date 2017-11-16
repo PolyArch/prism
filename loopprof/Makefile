@@ -1,15 +1,18 @@
-CC := /s/gcc-4.8.2/bin/gcc
-CXX := /s/gcc-4.8.2/bin/g++
+#CC := /s/gcc-4.8.2/bin/gcc
+#CXX := /s/gcc-4.8.2/bin/g++
 #CC  := /s/gcc-5.1/bin/gcc
 #CXX := /s/gcc-5.1/bin/g++
+CC := gcc
+CXX := g++
 
 OPTI = -O3
 
-GEM5_DIR=/p/vertical/afs-huge0/MaFIA/src/gem5
+GEM5_DIR=../../gem5
 -include ../make.config
 
-boost_dir=/s/boost-1.54.0
+#boost_dir=/s/boost-1.54.0
 #boost_dir=/unsup/boost-1.58.0
+boost_dir=/usr/
 
 SRC := pathprof.cpp gzstream.cpp op.cpp bb.cpp loopinfo.cpp functioninfo.cpp lpanalysis.cpp
 CFLAGS :=  -std=c++11 ${OPTI} -ggdb -gdwarf-3 -g -I. -Wall -Werror -Wno-unused-local-typedefs -Wno-deprecated-declarations  -pedantic -fPIC -rdynamic -I$(GEM5_DIR)/src  -I$(GEM5_DIR)/src -DSTANDALONE_CRITPATH -I${boost_dir}/include -L${boost_dir}/lib -I../include 

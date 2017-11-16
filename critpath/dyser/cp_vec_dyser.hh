@@ -34,6 +34,30 @@ namespace DySER {
         forceVectorize = true;
     }
 
+
+    int num_sends_recvs(LoopInfo* LI) {
+
+      SI = SliceInfo::get(LI, _dyser_size);
+
+      int num_sends=0, num_recvs=0;
+
+      for(auto I=LI->body_begin(),E=LI->body_end();I!=E;++I) {
+        BB* bb = *I;
+        for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+          Op* op = *II;
+          if(!op->isLoad() &&  SI->isAInputToDySER(op)) {
+            num_sends++;
+          }
+          if(SI->isADySEROutput(op) && !allUsesAreStore(op)) {
+            num_recvs++;
+          }
+        }
+      }
+      int num_configs = SI->cs_size() / _dyser_size;
+      return num_sends+num_recvs+num_configs*_num_cycles_switch_config;
+    }
+
+
     virtual float estimated_benefit(LoopInfo* li) {
       if(!li->isInnerLoop()) {
         return 0.0f;
@@ -61,7 +85,7 @@ namespace DySER {
 
       float avg_insts_per_iter = totalDynamicInst / (float) totalIterCount;
       float speedup = avg_insts_per_iter / 1.05f /
-                       ( totalStaticInstCount / (float) _dyser_vec_len ); 
+                       ( (totalStaticInstCount + num_sends_recvs(li)) / (float) _dyser_vec_len ); 
 
       return speedup;
     }
@@ -356,7 +380,11 @@ namespace DySER {
                 this->keepTrackOfInstOpMap(inst, op);
               }
             } else {
-              insert_sliced_inst(SI, op, inst, loopdone);
+              if(op->numUses()==0 && op->numDeps()==0 && op->shouldIgnoreInAccel()) {
+                //do nothing
+              } else { 
+                insert_sliced_inst(SI, op, inst, loopdone);
+              }
             }
           }
         }

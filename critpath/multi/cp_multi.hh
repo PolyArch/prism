@@ -19,7 +19,6 @@ class cp_multi : public ArgumentHandler,
   typedef dg_edge_impl_t<T> E;  
   typedef dg_inst<T, E> Inst_t;
 
-
   //anode: Amdahl Tree Node -------------------------------------------------------------
   struct anode;
   struct anode {
@@ -127,6 +126,7 @@ private:
     CP_DG_Builder<T,E>* model;
     uint64_t cycles;
     uint64_t insts;
+    uint8_t id;
   };
 
 public:
@@ -135,11 +135,14 @@ public:
     return &cpdg;
   };
 
+  std::vector<std::string> _in_mods;
   void handle_argument(const char *name, const char *arg) {
-
+    ArgumentHandler::parse("multi-models",        name,arg,_in_mods);
   }
 
   dep_graph_impl_t<Inst_t,T,E> cpdg;
+  std::map<int,LoopInfo*> _id2li;
+
   std::map<LoopInfo*,CP_DG_Builder<T,E>*> which_model;
 
   //Define Models:
@@ -151,26 +154,50 @@ public:
   CP_DG_Builder<T,E>* cur_model=NULL;
   std::map<CP_DG_Builder<T,E>*, model_info> m2info;
 
-  void add_model(const char* name, CP_DG_Builder<T,E>* model) {
+  void add_model(const char* name, CP_DG_Builder<T,E>* model,int id) {
     models.push_back(model);
     m2info[model].name=name;
+    m2info[model].id=id;
   }
 
   cp_multi() {
-    add_model("seed",&seed);
-    //add_model("beret",&beret);
-    add_model("simd",&simd);
-    add_model("dyser",&dyser);
+    add_model("seed",&seed,1);
+    seed.handle_argument("nla-wb-networks","3");
+    seed.handle_argument("nla-cfus-delay-reads","1");
+    seed.handle_argument("nla-agg-mem-dep","1");
+    seed.handle_argument("nla-allow-store-fwd","1");
 
+    add_model("beret",&beret,2);
     beret.handle_argument("nla-trace-ctrl","1");
+    beret.handle_argument("nla-wb-networks","4");
+    beret.handle_argument("nla-cfus-delay-reads","1");
+    beret.handle_argument("nla-agg-mem-dep","1");
+    beret.handle_argument("nla-allow-store-fwd","1");
+
+    add_model("simd",&simd,3);
+    simd.handle_argument("simd-len","8");
+
+    add_model("dyser",&dyser,4);
+    dyser.handle_argument("dyser-vec-len","8");
+    dyser.handle_argument("dyser-fu-fu-latency","2");
+    dyser.handle_argument("dyser-size","32");
   }
-  
+
+  virtual void setInOrder(bool inOrder) {
+     for(const auto& model : models) {
+       model->setInOrder(inOrder);
+     }
+     CP_DG_Builder::setInOrder(inOrder);
+  }
+
 
   virtual void initialize() override {
      for(const auto& model : models) {
        model->initialize();
        model->setGraph(&cpdg);
+       model->set_events(this->_mev,this->_cev,this->_cs);
      }
+     CP_DG_Builder::initialize();
   }
 
   virtual void setWidth(int i,bool scale_freq, bool match_simulator, 
@@ -187,6 +214,36 @@ public:
   std::set<anode*> leaf_anodes;
 
   virtual void setupComplete() override {
+    /* ------------------------------ Remove unwanted models -------------------------*/
+
+    vector<CP_DG_Builder<T,E>*> temp_models = models;
+    models.clear();
+
+    for(auto i : temp_models) {
+
+      for(auto j : _in_mods) { 
+        cout << m2info[i].name <<  " " << j << "\n";
+        if(m2info[i].name == j) {
+          models.push_back(i);
+        } 
+      }
+    }
+
+    if(models.size() != _in_mods.size()) {
+      std::cerr << "ERROR: Models and _in_mods do not match\n";
+    }
+    std::cout << "input models: ";
+    for(auto i : _in_mods) {
+      std::cout << i << " ";
+    }
+    std::cout << "\n";
+
+    std::cout << "cur models: ";
+    for(auto i : models) {
+      std::cout << m2info[i].name << " ";
+    }
+    std::cout << "\n";
+
     /* ------------------------------- Decide Loops --------------------------------  */
 
     //1. Create an ahmdal node for each loop
@@ -341,9 +398,13 @@ public:
     } */
 
     //Open File
-    std::string trace_out = "stats/" + _name + "-region.out";
+    std::string trace_out = std::string("stats/");
+      if(!_run_name.empty()) {
+        trace_out+=_run_name+".";
+      }
+      trace_out+= _name + ".reg-trace";
 
-    fout.open(trace_out.c_str(), std::ofstream::out | std::ofstream::trunc);
+    fout.open(trace_out.c_str(), std::ofstream::out | std::ofstream::trunc | ios::binary);
     if (!fout.good()) {
       std::cerr << "Cannot open file: " << trace_out << "\n";
     }
@@ -355,11 +416,26 @@ public:
      } 
   }
 
+  virtual void printAccelHeader(std::ostream& out, bool hole) {
+    out << std::setw(10) << (hole?"":"acc_name") << " ";
+  }
+
+  virtual void printAccelRegionStats(int id, std::ostream& out) {
+    LoopInfo* print_li = _id2li[id];
+    if(!print_li) {
+      printAccelHeader(out,true);//print blank
+      return;
+    }
+
+    out << std::setw(10) << m2info[which_model[print_li]].name;
+  }
+
+
   virtual void setupMcPAT(const char* filename, int nm) override {
+     CP_DG_Builder::setupMcPAT(filename,nm);
      for(const auto& model : models) {
        model->setupMcPAT(filename,nm);
      } 
-     CP_DG_Builder::setupMcPAT(filename,nm);
   }
    
   virtual void pumpAccelMcPAT(uint64_t totalCycles) override {
@@ -399,16 +475,22 @@ public:
   uint64_t trans_index=0;
   uint64_t latest_index=0;
 
+  //obviously inneficient, but i'm lazy for now.
+  std::unordered_set<uint64_t> reg_lines;
+  std::unordered_set<uint64_t> reg_words;
+  uint32_t lines_pulled = 0;
+  uint32_t words_pulled = 0;
+
   void trace_reg(uint64_t& start_c, uint64_t& start_i, 
                  uint64_t cur_c, uint64_t cur_i, 
                  CP_DG_Builder<T,E>* model,
-                 CP_DG_Builder<T,E>* next_model) {
+                 CP_DG_Builder<T,E>* next_model, int loopid) {
    
-    if(next_model) {
-      cout << "model:" << m2info[next_model].name << "\n";
-    } else {
-      cout << "model:" << "base" << "\n";
-    }
+    //if(next_model) {
+    //  cout << "model:" << m2info[next_model].name << "\n";
+    //} else {
+    //  cout << "model:" << "base" << "\n";
+    //}
 
     uint64_t total_c = cur_c-start_c;
     uint64_t total_i = cur_i-start_i;
@@ -418,14 +500,46 @@ public:
     if(cur_model) {
       name= m2info[model].name; 
     } 
-    fout << name << " " << total_c << " " << total_i << "\n";
+
+    uint8_t id = m2info[model].id;
+
+    fout.write(reinterpret_cast<const char *>(&id), sizeof(id));
+    fout.write(reinterpret_cast<const char *>(&total_c), sizeof(total_c));
+    fout.write(reinterpret_cast<const char *>(&total_i), sizeof(total_i));
+    fout.write(reinterpret_cast<const char *>(&loopid), sizeof(loopid));
+    fout.write(reinterpret_cast<const char *>(&lines_pulled), sizeof(lines_pulled));
+    fout.write(reinterpret_cast<const char *>(&words_pulled), sizeof(words_pulled));
+
+    reg_lines.clear();
+    reg_words.clear();
+    lines_pulled = 0;
+    words_pulled = 0;
+
+    //fout << name << " " << total_c << " " << total_i << "\n";
   }  
 
+  int cur_loop_id=0;
   virtual void insert_inst(const CP_NodeDiskImage &img,
                    uint64_t index, Op* op) {
     //std::cout << img._ep_lat << "\n";
 
     latest_index=index;
+    
+    //Update the mem pull tracking
+    uint64_t line_addr = img._eff_addr>>6;
+    uint64_t word_addr = img._eff_addr>>2;
+    if((img._isload || img._isstore) && img._miss_level<2) {
+      if(!reg_lines.count(line_addr)) {
+        lines_pulled++;
+      }
+      if(!reg_words.count(word_addr)) {
+        words_pulled++;
+      }
+    }
+    reg_lines.insert(line_addr);
+    reg_words.insert(word_addr);
+
+    //insert into model
     if(cur_model==NULL) {
       LoopInfo* li=NULL;
       bool inserted_into_accel=false;
@@ -433,10 +547,12 @@ public:
         li = op->func()->getLoop(op->bb());
         CP_DG_Builder<T,E>* next=which_model[li];
         if(next) { //found one!
-          trace_reg(trans_cycle,trans_index,this->numCycles(),index,cur_model,next);
+          _id2li[li->id()]=li; //just do this for now, maybe there is a better way
+          trace_reg(trans_cycle,trans_index,this->numCycles(),index,cur_model,next,0);
           cur_model=next;
           cur_model->insert_inst(img,index,op);
           inserted_into_accel=true;
+          cur_loop_id=li->id();
         }
       }
       if(!inserted_into_accel) { 
@@ -446,23 +562,15 @@ public:
         addDeps(sh_inst,op);
         pushPipe(sh_inst);
         inserted(sh_inst);   
-
-        //Do some tasks
-        FunctionInfo* f = op->func();
-        if(!func_transition_inst || f!=func_transition_inst->_op->func()) {
-          func_transition_inst = sh_inst;
-          for(const auto& model : models) {
-            model->set_func_trans_inst(sh_inst);
-          }
-        }
       }
 
     } else if (cur_model->is_accel_on()) {
       cur_model->insert_inst(img,index,op);
     } else {
-      trace_reg(trans_cycle,trans_index,this->numCycles(),index,cur_model,NULL);
+      trace_reg(trans_cycle,trans_index,this->numCycles(),index,cur_model,NULL,cur_loop_id);
       cur_model=NULL;
       CP_DG_Builder::insert_inst(img,index,op);
+      cur_loop_id=0;
     }
 
     if(cur_model) {
@@ -473,7 +581,8 @@ public:
 
 
   virtual uint64_t finish() {
-    trace_reg(trans_cycle,trans_index,this->numCycles(),latest_index,cur_model,NULL);
+    trace_reg(trans_cycle,trans_index,this->numCycles(),latest_index,cur_model,NULL,cur_loop_id);
+    cur_loop_id=0;
     if(cur_model) {
       cur_model->finish();
     }

@@ -33,6 +33,8 @@ int main(int argc, char *argv[])
   bool match_sim=false;
   int oooWidth=4;
   bool traceOutputs = false;
+  int  traceCycles = 1000;
+
   int gen_loop_prof = 0;
   int nm = 0;
   int scale_freq = false;
@@ -71,6 +73,7 @@ int main(int argc, char *argv[])
 
       {"ooo-width", required_argument, 0, 3},
       {"trace-out", no_argument, 0, 4},
+      {"trace-cycles", required_argument, 0, 18},
       {"all-models", no_argument, &allModels, 1},
       {"gen-loop-prof", no_argument, &gen_loop_prof, 1},
       {"run-name", required_argument, 0, 5},
@@ -134,6 +137,9 @@ int main(int argc, char *argv[])
       break;
     case 4:
       traceOutputs = true;
+      break;
+    case 18:
+      traceCycles = atoi(optarg);
       break;
     case 5:
       run_name=string(optarg);
@@ -281,7 +287,7 @@ int main(int argc, char *argv[])
   CPRegistry::get()->setWidth(oooWidth, false,scale_freq,
                                 match_sim,revolver, mem_ports, num_L1_MSHRs);
 
-  CPRegistry::get()->setTraceOutputs(traceOutputs);
+  CPRegistry::get()->setTraceOutputs(traceOutputs,traceCycles);
   CPRegistry::get()->setGlobalParams(nm,max_ex_lat,max_mem_lat,elide_mem);
 
   CPRegistry::get()->setupComplete();

@@ -138,6 +138,8 @@ template<class Archive>
   bool inFuncs(FunctionInfo* func) {return _funcs.count(func);}
 
   void reset() {
+    _opset.clear();
+    _opSubgraphMap.clear();
     _subgraphSet.clear();
     _subgraphVec.clear();
     _funcs.clear();
@@ -317,6 +319,7 @@ template<class Archive>
     ar & _maxPaths;
     ar & _iterCount;
     ar & _totalIterCount;
+    ar & _loopEntries;
     ar & _edgeWeight;
     ar & _loopCount;
     ar & _numInsts; 
@@ -419,6 +422,19 @@ public:
 
   CallToSet::iterator calls_begin() {return _calledTo.begin();}
   CallToSet::iterator calls_end() {return _calledTo.end();}
+
+  bool containsCallReturn(int path_index) {
+    BBvec& bbv = getPath(path_index);
+    for(BB* bb : bbv) {  
+      for(auto i=bb->op_begin(),e=bb->op_end();i!=e;++i) {
+        Op* op = *i;
+        if(op->isCall()) {
+           return true;
+        }
+      }
+    }
+    return false;
+  }
 
   bool containsCallReturn() {
     for(auto bbi=_loopBody.begin(),bbe=_loopBody.end();bbi!=bbe;++bbi) {  

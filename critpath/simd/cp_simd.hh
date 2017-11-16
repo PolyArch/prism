@@ -65,6 +65,34 @@ namespace simd {
 
     virtual ~cp_simd() {}
 
+    int num_extra_insts(LoopInfo* LI) {
+
+      int num_packs=0, num_unpacks=0, num_shuffles=0;
+
+      for(auto I=LI->body_begin(),E=LI->body_end();I!=E;++I) {
+        BB* bb = *I;
+        for(auto II=bb->op_begin(),EE=bb->op_end();II!=EE;++II) {
+          Op* op = *II;
+
+          int stride=0;
+          op->getStride(&stride);
+          if (op->isLoad()) {
+            if (!isStrideAccess(op) || stride>8) {
+              num_unpacks+=_simd_vec_len*2*2;
+              num_packs+=_simd_vec_len*2;
+            }
+            if (isStrideAccess(op, 0)) { //stride 0 access?
+              num_shuffles++;
+            }
+          }
+
+
+        }
+      }
+      return num_packs+num_unpacks+num_shuffles;
+    }
+
+
     virtual float estimated_benefit(LoopInfo* li) {
       if(!li->isInnerLoop() || !shouldVectorize(li)) {
         return 0.0f;
@@ -81,7 +109,7 @@ namespace simd {
 
       float avg_insts_per_iter = totalDynamicInst / (float) totalIterCount;
       float speedup = avg_insts_per_iter / 1.1f /
-                     ( totalStaticInstCount / (float) _simd_vec_len ); 
+                     ( (totalStaticInstCount+num_extra_insts(li)) / (float) _simd_vec_len ); 
 
       return speedup;
     }
@@ -448,7 +476,7 @@ namespace simd {
       }
       static std::set<LoopInfo*> dumped;
 
-      insert_inst_trace_to_default_pipe();
+      //insert_inst_trace_to_default_pipe();
 
       markStartPipe();
       if (_useInstTrace || useIT) {
@@ -542,7 +570,7 @@ namespace simd {
         unpackInsts.clear();
         unpackInsts.resize(vec_len);
         if (!forceIT && op->isLoad()) {
-          if (!isStrideAccess(op) || stride>8) {
+          if (!isStrideAccess(op) || stride>64) {
             // we need to create unpack instruction for the loads
             uint64_t maxDepCycle = 0;
             InstPtr maxDepInst  = 0;
@@ -619,7 +647,7 @@ namespace simd {
             inserted(sh_inst); // bookkeeping
           }
           // Non strided -- create more loads
-          if (!forceIT && (!isStrideAccess(op)||stride>8) ) {
+          if (!forceIT && (!isStrideAccess(op)||stride>64) ) {
             std::vector<unsigned> loadInsts(vec_len);
             loadInsts[0] =  0;
             for (unsigned i = 1; i < vec_len; ++i) {
@@ -771,7 +799,7 @@ namespace simd {
           op->getStride(&stride);
 
           if (op->isLoad()) {
-            if (!isStrideAccess(op) || stride>8) {
+            if (!isStrideAccess(op) || stride>64) {
               // we need to create unpack instruction for the loads
               uint64_t maxDepCycle = 0;
               InstPtr maxDepInst  = 0;
@@ -882,7 +910,7 @@ namespace simd {
             }
 
             // Non strided -- create more loads
-            if (!isStrideAccess(op) || stride>8) {
+            if (!isStrideAccess(op) || stride>64) {
               std::vector<unsigned> loadInsts(vec_len);
               loadInsts[0] =  0;
               for (unsigned i = 1; i < vec_len; ++i) {
@@ -1070,7 +1098,7 @@ namespace simd {
       }
 
       if (!StackLoop && !shouldVectorize(li)) {
-        insert_inst_to_default_pipe(img, index, op);
+        //insert_inst_to_default_pipe(img, index, op);
 
         // Create the instruction
         InstPtr inst = createInst(img, index, op,false);

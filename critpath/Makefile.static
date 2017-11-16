@@ -23,14 +23,16 @@ SRC := critpath.cpp \
 	dyser/sliceinfo.cpp \
 	simd/cp_simd.cpp \
 	super/cp_super.cpp \
+        multi/cp_multi.cpp \
 	verbose/cp_verbose.cpp \
         npu/cp_npu.cpp
+
 
 OBJ := $(patsubst %.cpp, %.o, $(SRC))
 
 EXT_OBJ := mcpat/mcpat.a
 
-LIBS := -lz  -lboost_serialization -ldl -ltcmalloc_minimal
+LIBS := -lz  -lboost_serialization -ldl -ltcmalloc_minimal -lpthread
 
 
 LDFLAGS := -static -pthread $(EXFLAGS) \

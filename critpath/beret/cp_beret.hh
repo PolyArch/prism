@@ -792,9 +792,7 @@ private:
     //First do energy accounting
     if(n->_isload || n->_isstore) {
       calcCacheAccess(n.get(), n->_hit_level, n->_miss_level,
-                      n->_cache_prod, n->_true_cache_prod,
-                      l1_hits, l1_misses, l2_hits, l2_misses,
-                      l1_wr_hits, l1_wr_misses, l2_wr_hits, l2_wr_misses);
+                      n->_cache_prod, n->_true_cache_prod);
     }
 
     int ep_lat=n->ex_lat();
