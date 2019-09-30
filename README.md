@@ -1,5 +1,5 @@
 
-# This is a mess, and you're pretty much on your own for now : )
+# This repository is provided primariliy for posterity.  Future versions of TDG-based modeling frameworks are in the works.
 loopprof -- builds the trace:
 critpath -- analyzes traces
 
